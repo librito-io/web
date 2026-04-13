@@ -64,7 +64,6 @@
       bind:value={pairingCode}
       placeholder="000000"
       maxlength="6"
-      pattern="\d{6}"
       inputmode="numeric"
       required
     />

@@ -12,7 +12,7 @@ declare global {
     interface PageData {
       session: Session | null;
       user: User | null;
-      supabase?: SupabaseClient;
+      supabase: SupabaseClient;
     }
   }
 }

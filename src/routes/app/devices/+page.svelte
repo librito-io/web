@@ -13,23 +13,27 @@
     claimLoading = true;
     claimError = '';
 
-    const res = await fetch('/api/pair/claim', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: pairingCode.trim() })
-    });
+    try {
+      const res = await fetch('/api/pair/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: pairingCode.trim() })
+      });
 
-    const body = await res.json();
+      const body = await res.json();
 
-    if (!res.ok) {
-      claimError = body.message || 'Failed to claim code';
+      if (!res.ok) {
+        claimError = body.message || 'Failed to claim code';
+        return;
+      }
+
+      pairingCode = '';
+      await invalidateAll();
+    } catch {
+      claimError = 'Network error. Please try again.';
+    } finally {
       claimLoading = false;
-      return;
     }
-
-    pairingCode = '';
-    claimLoading = false;
-    invalidateAll();
   }
 
   function formatDate(dateStr: string | null): string {

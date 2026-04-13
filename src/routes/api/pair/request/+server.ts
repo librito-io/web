@@ -12,7 +12,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
   const ip = getClientAddress();
   const { success, reset } = await pairRequestLimiter.limit(ip);
   if (!success) {
-    const retryAfter = Math.ceil((reset - Date.now()) / 1000);
+    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
     return jsonError(429, "rate_limited", "Too many requests", retryAfter);
   }
 

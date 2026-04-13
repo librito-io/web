@@ -20,10 +20,16 @@ export function createMockSupabase() {
       return Promise.resolve(result);
     };
 
-    // Every method returns the chain, except terminal methods
+    // Every method returns the chain, except terminal methods.
+    // The chain is thenable so `await supabase.from(...).update(...).eq(...)` resolves
+    // to the mock result even without a trailing `.single()` call.
     const handler: ProxyHandler<Record<string, unknown>> = {
       get(_, prop: string) {
-        if (prop === "then") return undefined; // not a thenable
+        if (prop === "then") {
+          const result = results.get(key) ?? { data: null, error: null };
+          return (onFulfilled: (value: unknown) => unknown) =>
+            Promise.resolve(onFulfilled(result));
+        }
         if (prop === "single" || prop === "maybeSingle") return terminal;
         return (..._args: unknown[]) => new Proxy(chain, handler);
       },

@@ -9,7 +9,7 @@ export const GET: RequestHandler = async ({ params, getClientAddress }) => {
   const ip = getClientAddress();
   const { success, reset } = await pairStatusLimiter.limit(ip);
   if (!success) {
-    const retryAfter = Math.ceil((reset - Date.now()) / 1000);
+    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
     return jsonError(429, "rate_limited", "Too many requests", retryAfter);
   }
 
@@ -19,8 +19,7 @@ export const GET: RequestHandler = async ({ params, getClientAddress }) => {
   if ("error" in result) {
     if (result.error === "not_found")
       return jsonError(404, "not_found", "Pairing session not found");
-    if (result.error === "code_expired")
-      return jsonError(410, "code_expired", "Pairing code has expired");
+    return jsonError(410, "code_expired", "Pairing code has expired");
   }
 
   return jsonSuccess(result);

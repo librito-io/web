@@ -145,6 +145,48 @@ describe("claimPairingCode", () => {
     );
   });
 
+  it("re-pairs existing device by updating token hash and clearing revoked_at", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+
+    // Code lookup
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        id: "pairing-uuid-2",
+        hardware_id: "hw-device-1",
+        claimed: false,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      },
+      error: null,
+    });
+    // Code update (mark claimed)
+    supabase._results.set("pairing_codes.update", { data: null, error: null });
+    // Existing device found (re-pair case)
+    supabase._results.set("devices.select", {
+      data: { id: "existing-device-uuid", name: "My Reader" },
+      error: null,
+    });
+    // Device update (token rotation)
+    supabase._results.set("devices.update", { data: null, error: null });
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({
+      deviceId: "existing-device-uuid",
+      deviceName: "My Reader",
+    });
+    expect(redis.set).toHaveBeenCalledWith(
+      "pair:token:pairing-uuid-2",
+      "sk_device_test_token_abc123",
+      { ex: 600 },
+    );
+  });
+
   it("returns code_expired for expired codes", async () => {
     const supabase = createMockSupabase();
     const redis = createMockRedis();

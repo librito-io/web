@@ -23,10 +23,13 @@ export const actions: Actions = {
     if (!user) return fail(401, { error: "Not authenticated" });
 
     const formData = await request.formData();
-    const deviceId = formData.get("deviceId") as string;
-    const name = (formData.get("name") as string)?.trim();
+    const deviceId = formData.get("deviceId");
+    const name =
+      typeof formData.get("name") === "string"
+        ? (formData.get("name") as string).trim()
+        : "";
 
-    if (!deviceId || !name)
+    if (!deviceId || typeof deviceId !== "string" || !name)
       return fail(400, { error: "Device ID and name are required" });
     if (name.length > 50)
       return fail(400, { error: "Name must be 50 characters or less" });
@@ -57,9 +60,10 @@ export const actions: Actions = {
     if (!user) return fail(401, { error: "Not authenticated" });
 
     const formData = await request.formData();
-    const deviceId = formData.get("deviceId") as string;
+    const deviceId = formData.get("deviceId");
 
-    if (!deviceId) return fail(400, { error: "Device ID is required" });
+    if (!deviceId || typeof deviceId !== "string")
+      return fail(400, { error: "Device ID is required" });
 
     const supabase = createAdminClient();
 

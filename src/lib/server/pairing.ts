@@ -81,12 +81,11 @@ export async function claimPairingCode(
   userId: string,
   code: string,
 ): Promise<ClaimResult> {
-  // Look up unclaimed code
+  // Look up code (include claimed codes so we can return specific error messages)
   const { data: pairingCode, error: lookupError } = await supabase
     .from("pairing_codes")
     .select("id, hardware_id, claimed, expires_at")
     .eq("code", code)
-    .eq("claimed", false)
     .single();
 
   if (lookupError || !pairingCode) return { error: "invalid_code" };
@@ -137,10 +136,12 @@ export async function claimPairingCode(
   }
 
   // Mark code as claimed
-  await supabase
+  const { error: markError } = await supabase
     .from("pairing_codes")
     .update({ claimed: true, user_id: userId })
     .eq("id", pairingCode.id);
+
+  if (markError) return { error: "server_error" };
 
   // Store plaintext token in Redis for device to pick up on next poll (10 min TTL)
   await redis.set(`pair:token:${pairingCode.id}`, token, { ex: 600 });

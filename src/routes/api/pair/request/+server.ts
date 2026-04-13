@@ -1,9 +1,21 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
+import { pairRequestLimiter } from "$lib/server/ratelimit";
 import { requestPairingCode } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
-export const POST: RequestHandler = async ({ request }) => {
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const POST: RequestHandler = async ({ request, getClientAddress }) => {
+  // Rate limit by IP
+  const ip = getClientAddress();
+  const { success, reset } = await pairRequestLimiter.limit(ip);
+  if (!success) {
+    const retryAfter = Math.ceil((reset - Date.now()) / 1000);
+    return jsonError(429, "rate_limited", "Too many requests", retryAfter);
+  }
+
   let body: { hardwareId?: string };
   try {
     body = await request.json();
@@ -13,6 +25,14 @@ export const POST: RequestHandler = async ({ request }) => {
 
   if (!body.hardwareId || typeof body.hardwareId !== "string") {
     return jsonError(400, "invalid_request", "hardwareId is required");
+  }
+
+  if (!UUID_RE.test(body.hardwareId)) {
+    return jsonError(
+      400,
+      "invalid_request",
+      "hardwareId must be a valid UUID v4",
+    );
   }
 
   try {

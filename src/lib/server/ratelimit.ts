@@ -10,6 +10,13 @@ export const redis = new Redis({
   token: UPSTASH_REDIS_REST_TOKEN,
 });
 
+// /api/pair/request — 3 requests per minute per IP
+export const pairRequestLimiter = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(3, "1m"),
+  prefix: "rl:pair:request",
+});
+
 // /api/pair/status/[pairingId] — 1 request per 3 seconds per IP
 export const pairStatusLimiter = new Ratelimit({
   redis,

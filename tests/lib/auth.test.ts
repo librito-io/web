@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { authenticateDevice } from "$lib/server/auth";
-import { hashToken } from "$lib/server/tokens";
 import { createMockSupabase } from "../helpers";
 
 const TEST_TOKEN = "sk_device_test_token_abc123def456";
-const TEST_HASH = hashToken(TEST_TOKEN);
 
 function makeRequest(token?: string): Request {
   const headers: Record<string, string> = {};

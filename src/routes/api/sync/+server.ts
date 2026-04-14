@@ -11,12 +11,13 @@ export const POST: RequestHandler = async ({ request }) => {
   // 1. Authenticate device
   const authResult = await authenticateDevice(request, supabase);
   if ("error" in authResult) {
-    const messages: Record<string, string> = {
+    const messages = {
       missing_token: "Authorization header with Bearer token required",
       invalid_token: "Invalid device token",
       token_revoked: "Device token has been revoked. Re-pair the device.",
-    };
-    return jsonError(401, authResult.error, messages[authResult.error]);
+    } as const satisfies Record<typeof authResult.error, string>;
+    const status = authResult.error === "token_revoked" ? 403 : 401;
+    return jsonError(status, authResult.error, messages[authResult.error]);
   }
 
   const { device } = authResult;
@@ -24,14 +25,30 @@ export const POST: RequestHandler = async ({ request }) => {
   // 2. Rate limit by device ID
   const { success, reset } = await syncLimiter.limit(device.id);
   if (!success) {
-    const retryAfter = Math.ceil((reset - Date.now()) / 1000);
+    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
     return jsonError(429, "rate_limited", "Too many sync requests", retryAfter);
   }
 
-  // 3. Parse and validate payload
+  // 3. Read body and enforce size limit
+  let rawBody: string;
+  try {
+    rawBody = await request.text();
+  } catch {
+    return jsonError(400, "invalid_request", "Failed to read request body");
+  }
+
+  if (rawBody.length > 1_048_576) {
+    return jsonError(
+      413,
+      "payload_too_large",
+      "Request body must not exceed 1 MB",
+    );
+  }
+
+  // 4. Parse and validate payload
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(rawBody);
   } catch {
     return jsonError(400, "invalid_request", "Request body must be JSON");
   }
@@ -41,7 +58,7 @@ export const POST: RequestHandler = async ({ request }) => {
     return jsonError(400, "invalid_request", validation.error);
   }
 
-  // 4. Process sync
+  // 5. Process sync
   try {
     const response = await processSync(
       supabase,
@@ -49,10 +66,9 @@ export const POST: RequestHandler = async ({ request }) => {
       device.userId,
       validation.payload,
     );
-    return jsonSuccess(response as unknown as Record<string, unknown>);
+    return jsonSuccess(response);
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Sync processing failed";
-    return jsonError(500, "server_error", message);
+    console.error("Sync processing failed:", err);
+    return jsonError(500, "server_error", "Sync processing failed");
   }
 };

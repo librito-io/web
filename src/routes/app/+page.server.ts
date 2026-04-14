@@ -1,34 +1,44 @@
 import type { PageServerLoad } from "./$types";
+import { error } from "@sveltejs/kit";
 
-type LibraryRow = {
+export type LibraryHighlight = {
+  id: string;
+  chapter_index: number;
+  chapter_title: string | null;
+  start_word: number;
+  end_word: number;
+  text: string;
+  styles: string | null;
+  paragraph_breaks: number[] | null;
+  updated_at: string;
+  note_text: string | null;
+  note_updated_at: string | null;
+};
+
+export type LibraryBook = {
   id: string;
   book_hash: string;
   title: string | null;
   author: string | null;
   language: string | null;
   isbn: string | null;
-  updated_at: string;
-  highlight_count: number;
   last_activity: string | null;
+  highlights: LibraryHighlight[];
 };
 
 export const load: PageServerLoad = async ({
   locals: { supabase, safeGetSession },
 }) => {
   const { user } = await safeGetSession();
-  if (!user) return { books: [] as LibraryRow[] };
+  if (!user) return { books: [] as LibraryBook[] };
 
-  const { data, error } = await supabase.rpc("get_library");
-  if (error) {
-    console.error("get_library failed", error);
-    return { books: [] as LibraryRow[] };
+  const { data, error: rpcError } = await supabase.rpc(
+    "get_library_with_highlights",
+  );
+  if (rpcError) {
+    console.error("get_library_with_highlights failed", rpcError);
+    error(500, "Failed to load library");
   }
 
-  const rows = (data ?? []) as LibraryRow[];
-  return {
-    books: rows.map((b) => ({
-      ...b,
-      highlight_count: Number(b.highlight_count),
-    })),
-  };
+  return { books: (data ?? []) as LibraryBook[] };
 };

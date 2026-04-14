@@ -22,10 +22,14 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
+    "@fontsource/bitter": "^5.2.10",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/noto-sans": "^5.2.10",
     "@supabase/ssr": "^0.6.0",
     "@supabase/supabase-js": "^2.49.0",
     "@upstash/ratelimit": "^2.0.0",
-    "@upstash/redis": "^1.34.0"
+    "@upstash/redis": "^1.34.0",
+    "svelte-i18n": "^4.0.1"
   },
   "type": "module"
 }

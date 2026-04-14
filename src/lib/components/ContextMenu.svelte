@@ -46,66 +46,44 @@
 
 <svelte:window onclick={onOutside} onkeydown={onKey} />
 
-{#if visible}
-  <div
-    bind:this={menuEl}
-    class="menu"
-    style="left: {x}px; top: {y}px"
-    role="menu"
-    tabindex="-1"
-    aria-label={$_("ctx.menuLabel")}
+<div
+  bind:this={menuEl}
+  class="ctx-menu"
+  class:visible
+  style="left: {x}px; top: {y}px"
+  role="menu"
+  tabindex="-1"
+  aria-label={$_("ctxMenuLabel")}
+>
+  <button
+    bind:this={firstItemEl}
+    role="menuitem"
+    onclick={() => {
+      onCopy();
+      close();
+    }}
   >
+    {$_("ctxCopy")}
+  </button>
+  <button
+    role="menuitem"
+    onclick={() => {
+      onShare();
+      close();
+    }}
+  >
+    {$_("ctxShare")}
+  </button>
+  {#if hasNote}
     <button
-      bind:this={firstItemEl}
       role="menuitem"
+      class="destructive"
       onclick={() => {
-        onCopy();
+        onDelete();
         close();
-      }}>{$_("ctx.copy")}</button
+      }}
     >
-    <button
-      role="menuitem"
-      onclick={() => {
-        onShare();
-        close();
-      }}>{$_("ctx.share")}</button
-    >
-    {#if hasNote}
-      <button
-        role="menuitem"
-        class="danger"
-        onclick={() => {
-          onDelete();
-          close();
-        }}>{$_("ctx.deleteNote")}</button
-      >
-    {/if}
-  </div>
-{/if}
-
-<style>
-  .menu {
-    position: fixed;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 4px;
-    z-index: 1100;
-    min-width: 160px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  }
-  button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 8px 12px;
-    border-radius: var(--radius-sm);
-    font-size: 0.9rem;
-  }
-  button:hover {
-    background: var(--border);
-  }
-  .danger {
-    color: var(--danger);
-  }
-</style>
+      {$_("ctxDeleteNote")}
+    </button>
+  {/if}
+</div>

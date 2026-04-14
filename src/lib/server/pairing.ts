@@ -95,7 +95,7 @@ export async function claimPairingCode(
 
   // Generate device token
   const token = generateDeviceToken();
-  const tokenHash = await hashToken(token);
+  const tokenHash = hashToken(token);
 
   // Check for existing device (re-pairing case)
   const { data: existing } = await supabase

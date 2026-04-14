@@ -1,20 +1,20 @@
 <script lang="ts">
   let { data } = $props();
-  let email = $state('');
-  let password = $state('');
-  let error = $state('');
+  let email = $state("");
+  let password = $state("");
+  let error = $state("");
   let success = $state(false);
   let loading = $state(false);
 
   async function handleSignup(e: SubmitEvent) {
     e.preventDefault();
     loading = true;
-    error = '';
+    error = "";
 
     const { error: err } = await data.supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` }
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
     });
 
     if (err) {
@@ -45,7 +45,7 @@
       <input type="password" bind:value={password} minlength="6" required />
     </label>
     <button type="submit" disabled={loading}>
-      {loading ? 'Signing up...' : 'Sign up'}
+      {loading ? "Signing up..." : "Sign up"}
     </button>
   </form>
 

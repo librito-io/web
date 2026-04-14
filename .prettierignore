@@ -1,0 +1,10 @@
+# Package manager
+node_modules/
+package-lock.json
+
+# Build output
+build/
+.svelte-kit/
+
+# Supabase (SQL has its own formatting conventions)
+supabase/

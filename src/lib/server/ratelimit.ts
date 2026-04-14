@@ -30,3 +30,10 @@ export const pairClaimLimiter = new Ratelimit({
   limiter: Ratelimit.slidingWindow(5, "5m"),
   prefix: "rl:pair:claim",
 });
+
+// /api/sync — 1 request per 30 seconds per device
+export const syncLimiter = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(1, "30s"),
+  prefix: "rl:sync",
+});

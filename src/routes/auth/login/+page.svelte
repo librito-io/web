@@ -1,23 +1,26 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
+  import { goto } from "$app/navigation";
 
   let { data } = $props();
-  let email = $state('');
-  let password = $state('');
-  let error = $state('');
+  let email = $state("");
+  let password = $state("");
+  let error = $state("");
   let loading = $state(false);
 
   async function handleLogin(e: SubmitEvent) {
     e.preventDefault();
     loading = true;
-    error = '';
+    error = "";
 
-    const { error: err } = await data.supabase.auth.signInWithPassword({ email, password });
+    const { error: err } = await data.supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
     if (err) {
       error = err.message;
       loading = false;
     } else {
-      goto('/app');
+      goto("/app");
     }
   }
 </script>
@@ -38,7 +41,7 @@
     <input type="password" bind:value={password} required />
   </label>
   <button type="submit" disabled={loading}>
-    {loading ? 'Logging in...' : 'Log in'}
+    {loading ? "Logging in..." : "Log in"}
   </button>
 </form>
 

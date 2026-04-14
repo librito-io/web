@@ -1,16 +1,19 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { _ } from "$lib/i18n";
   import { relativeTime } from "$lib/time/relativeTime";
 
   type SaveStatus = "idle" | "saving" | "saved" | "error";
 
-  let { highlightId, initialText, initialUpdatedAt, save, remove } = $props<{
-    highlightId: string;
-    initialText: string | null;
-    initialUpdatedAt: string | null;
-    save: (text: string) => Promise<void>;
-    remove: () => Promise<void>;
-  }>();
+  let { highlightId, initialText, initialUpdatedAt, save, remove, onReady } =
+    $props<{
+      highlightId: string;
+      initialText: string | null;
+      initialUpdatedAt: string | null;
+      save: (text: string) => Promise<void>;
+      remove: () => Promise<void>;
+      onReady?: (api: { handleDelete: () => Promise<void> }) => void;
+    }>();
 
   let text = $state(initialText ?? "");
   let persistedText = $state(initialText ?? "");
@@ -131,6 +134,8 @@
     if (mode !== "display" || !displayEl) return;
     needsShowMore = displayEl.scrollHeight > displayEl.clientHeight + 2;
   });
+
+  onMount(() => onReady?.({ handleDelete }));
 </script>
 
 <div class="note-area">

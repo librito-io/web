@@ -1,11 +1,4 @@
-import {
-  init,
-  register,
-  locale,
-  waitLocale,
-  _,
-  getLocaleFromNavigator,
-} from "svelte-i18n";
+import { init, register, locale, waitLocale, _ } from "svelte-i18n";
 import { browser } from "$app/environment";
 
 export const SUPPORTED_LOCALES = [
@@ -84,4 +77,4 @@ function applyDir(loc: SupportedLocale): void {
   document.documentElement.lang = loc;
 }
 
-export { locale, waitLocale, _, getLocaleFromNavigator };
+export { locale, waitLocale, _ };

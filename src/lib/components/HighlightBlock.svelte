@@ -16,19 +16,14 @@
     renderStyledText(highlight.text, highlight.styles),
   );
 
-  function openMenuAt(e: MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    onMenu({ x: e.clientX, y: e.clientY, id: highlight.id });
-  }
-
-  function openMenuFromButton(e: MouseEvent) {
+  function openMenu(e: MouseEvent, preventDefault: boolean): void {
+    if (preventDefault) e.preventDefault();
     e.stopPropagation();
     onMenu({ x: e.clientX, y: e.clientY, id: highlight.id });
   }
 </script>
 
-<blockquote dir="auto" oncontextmenu={openMenuAt}>
+<blockquote dir="auto" oncontextmenu={(e) => openMenu(e, true)}>
   {#each runs as run, i (i)}
     {#if run.isBreak}
       <br /><br />
@@ -40,8 +35,10 @@
       <span>{run.text}</span>
     {/if}
   {/each}
-  <button class="more" onclick={openMenuFromButton} aria-label="More actions"
-    >⋯</button
+  <button
+    class="more"
+    onclick={(e) => openMenu(e, false)}
+    aria-label="More actions">⋯</button
   >
 </blockquote>
 

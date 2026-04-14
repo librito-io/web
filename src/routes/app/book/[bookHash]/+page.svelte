@@ -124,7 +124,7 @@
 {#if highlights.length === 0}
   <p class="empty">{$_("book.empty")}</p>
 {:else}
-  {#each grouped as group (group.chapter ?? "__none__")}
+  {#each grouped as group, i (i)}
     {#if group.chapter}
       <h2 class="chapter">{group.chapter}</h2>
     {/if}

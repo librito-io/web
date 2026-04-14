@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { _ } from "$lib/i18n";
 
   let {
@@ -21,22 +20,25 @@
   }>();
 
   let menuEl: HTMLDivElement | undefined = $state();
+  let firstItemEl: HTMLButtonElement | undefined = $state();
 
-  function close() {
+  function close(): void {
     visible = false;
   }
 
-  function onOutside(e: MouseEvent) {
+  function onOutside(e: MouseEvent): void {
     if (!menuEl) return;
     if (!menuEl.contains(e.target as Node)) close();
   }
 
-  function onKey(e: KeyboardEvent) {
+  function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape") close();
   }
 
-  onMount(() => {
-    const onScroll = () => close();
+  $effect(() => {
+    if (!visible) return;
+    firstItemEl?.focus();
+    const onScroll = (): void => close();
     window.addEventListener("scroll", onScroll, true);
     return () => window.removeEventListener("scroll", onScroll, true);
   });
@@ -50,8 +52,11 @@
     class="menu"
     style="left: {x}px; top: {y}px"
     role="menu"
+    tabindex="-1"
+    aria-label={$_("ctx.menuLabel")}
   >
     <button
+      bind:this={firstItemEl}
       role="menuitem"
       onclick={() => {
         onCopy();

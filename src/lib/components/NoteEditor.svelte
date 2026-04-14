@@ -13,6 +13,7 @@
   }>();
 
   let text = $state(initialText ?? "");
+  let persistedText = $state(initialText ?? "");
   let updatedAt = $state(initialUpdatedAt);
   let mode = $state<"empty" | "display" | "editor">(
     initialText && initialText.length > 0 ? "display" : "empty",
@@ -36,7 +37,7 @@
     timer = setTimeout(flush, 1500);
   }
 
-  async function flush() {
+  async function flush(): Promise<void> {
     if (timer) {
       clearTimeout(timer);
       timer = null;
@@ -47,6 +48,7 @@
     try {
       await attemptSave(snapshot, seq);
       if (seq !== saveSeq) return;
+      persistedText = snapshot;
       status = "saved";
       updatedAt = new Date().toISOString();
     } catch {
@@ -55,7 +57,8 @@
     }
   }
 
-  async function attemptSave(value: string, seq: number) {
+  async function attemptSave(value: string, seq: number): Promise<void> {
+    if (seq !== saveSeq) return;
     try {
       await save(value);
     } catch {
@@ -71,10 +74,10 @@
     queueMicrotask(() => textareaEl?.focus());
   }
 
-  function exitEditorAndSave() {
+  function exitEditorAndSave(): void {
     if (timer) clearTimeout(timer);
-    if (text.trim().length === 0 && (initialText ?? "").length === 0) {
-      mode = "empty";
+    if (text === persistedText) {
+      mode = text.trim().length > 0 ? "display" : "empty";
       return;
     }
     flush().finally(() => {
@@ -100,7 +103,7 @@
     }
   }
 
-  async function handleDelete() {
+  async function handleDelete(): Promise<void> {
     if (timer) {
       clearTimeout(timer);
       timer = null;
@@ -109,6 +112,7 @@
     try {
       await remove();
       text = "";
+      persistedText = "";
       updatedAt = null;
       mode = "empty";
       status = "idle";
@@ -127,7 +131,18 @@
     {$_("note.placeholder")}
   </button>
 {:else if mode === "display"}
-  <div class="display" role="button" tabindex="0" onclick={enterEditor}>
+  <div
+    class="display"
+    role="button"
+    tabindex="0"
+    onclick={enterEditor}
+    onkeydown={(e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        enterEditor();
+      }
+    }}
+  >
     <div class="head">
       <span class="label">{$_("note.label")}</span>
       {#if updatedAt}

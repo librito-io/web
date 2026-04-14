@@ -6,7 +6,7 @@ register("en", () => import("./en.json"));
 
 let started = false;
 
-export function initI18n(initialLocale: string = DEFAULT_LOCALE) {
+export function initI18n(initialLocale: string = DEFAULT_LOCALE): void {
   if (started) return;
   started = true;
   init({

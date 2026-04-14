@@ -41,7 +41,8 @@
     "share": "Share",
     "deleteNote": "Delete note",
     "copied": "Copied to clipboard",
-    "noteDeleted": "Note deleted"
+    "noteDeleted": "Note deleted",
+    "menuLabel": "Highlight actions"
   },
   "time": {
     "justNow": "just now",

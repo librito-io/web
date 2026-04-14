@@ -65,16 +65,11 @@
     toast = $_("ctx.noteDeleted");
   }
 
-  function updateNote(id: string, text: string | null) {
-    highlights = highlights.map((h) =>
-      h.id === id
-        ? {
-            ...h,
-            note_text: text,
-            note_updated_at: text ? new Date().toISOString() : null,
-          }
-        : h,
-    );
+  function updateNote(id: string, text: string | null): void {
+    const h = highlights.find((x) => x.id === id);
+    if (!h) return;
+    h.note_text = text;
+    h.note_updated_at = text ? new Date().toISOString() : null;
   }
 
   function openMenu({ x, y, id }: { x: number; y: number; id: string }) {

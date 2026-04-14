@@ -20,6 +20,7 @@
   let status = $state<SaveStatus>("idle");
   let expanded = $state(false);
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let saveSeq = 0;
   let textareaEl: HTMLTextAreaElement;
 
   const relativeStrings = {
@@ -40,23 +41,27 @@
       clearTimeout(timer);
       timer = null;
     }
+    const seq = ++saveSeq;
     const snapshot = text;
     status = "saving";
     try {
-      await attemptSave(snapshot);
+      await attemptSave(snapshot, seq);
+      if (seq !== saveSeq) return;
       status = "saved";
       updatedAt = new Date().toISOString();
     } catch {
+      if (seq !== saveSeq) return;
       status = "error";
     }
   }
 
-  async function attemptSave(value: string) {
+  async function attemptSave(value: string, seq: number) {
     try {
       await save(value);
     } catch {
       await new Promise((r) => setTimeout(r, 500));
-      await save(value); // one retry; rethrow on failure
+      if (seq !== saveSeq) return; // newer save superseded us during backoff
+      await save(value);
     }
   }
 
@@ -96,6 +101,11 @@
   }
 
   async function handleDelete() {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    saveSeq++; // invalidate any in-flight save so its late status write is ignored
     try {
       await remove();
       text = "";

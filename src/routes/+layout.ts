@@ -8,9 +8,13 @@ import {
   PUBLIC_SUPABASE_ANON_KEY,
 } from "$env/static/public";
 import type { LayoutLoad } from "./$types";
+import { initI18n, waitLocale } from "$lib/i18n";
 
 export const load: LayoutLoad = async ({ data, depends, fetch }) => {
   depends("supabase:auth");
+
+  initI18n();
+  await waitLocale();
 
   const supabase = isBrowser()
     ? createBrowserClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {

@@ -2,6 +2,9 @@
   import "../app.css";
   import { invalidate } from "$app/navigation";
   import { onMount } from "svelte";
+  import { initI18n } from "$lib/i18n";
+
+  initI18n();
 
   let { data, children } = $props();
 

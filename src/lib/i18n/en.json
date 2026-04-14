@@ -1,0 +1,52 @@
+{
+  "common": {
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "close": "Close"
+  },
+  "menu": {
+    "open": "Open menu",
+    "library": "Library",
+    "devices": "Devices",
+    "logout": "Log out",
+    "language": "Language"
+  },
+  "dashboard": {
+    "title": "Library",
+    "empty": "No books yet. Sync your device to get started.",
+    "highlightCount_one": "{count} highlight",
+    "highlightCount_other": "{count} highlights",
+    "lastActivity": "Last activity {when}",
+    "never": "Never"
+  },
+  "book": {
+    "back": "Back to library",
+    "empty": "No highlights in this book yet.",
+    "notFound": "Book not found"
+  },
+  "note": {
+    "placeholder": "Add a note…",
+    "label": "Note",
+    "showMore": "Show more",
+    "showLess": "Show less",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "saveFailed": "Save failed",
+    "reauth": "Please sign in again"
+  },
+  "ctx": {
+    "copy": "Copy",
+    "share": "Share",
+    "deleteNote": "Delete note",
+    "copied": "Copied to clipboard",
+    "noteDeleted": "Note deleted"
+  },
+  "time": {
+    "justNow": "just now",
+    "minutes": "{n}m ago",
+    "hours": "{n}h ago",
+    "yesterday": "Yesterday"
+  }
+}

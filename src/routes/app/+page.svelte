@@ -1,20 +1,37 @@
 <script lang="ts">
   import { _ } from "$lib/i18n";
   import BookCard from "$lib/components/BookCard.svelte";
+  import ContextMenu from "$lib/components/ContextMenu.svelte";
+  import Toast from "$lib/components/Toast.svelte";
 
   let { data } = $props();
 
-  const supabase = $derived(data.supabase);
-  const userId = $derived(data.user?.id ?? "");
+  const books = $derived(data.books);
+  const totalHighlights = $derived(
+    books.reduce(
+      (sum: number, b: (typeof books)[number]) =>
+        sum + (b.highlights?.length ?? 0),
+      0,
+    ),
+  );
 
-  // Registry of NoteEditor handleDelete fns, keyed by highlight id.
-  const noteEditors = new Map<string, () => Promise<void>>();
+  let ctxVisible = $state(false);
+  let ctxX = $state(0);
+  let ctxY = $state(0);
+  let ctxTargetId = $state<string | null>(null);
+  let ctxTargetText = $state("");
+  let ctxHasNote = $state(false);
+
+  let toastVisible = $state(false);
+  let toastMessage = $state("");
+
+  const noteDeleters = new Map<string, () => Promise<void>>();
 
   function registerNoteEditor(
     highlightId: string,
     handleDelete: () => Promise<void>,
   ): void {
-    noteEditors.set(highlightId, handleDelete);
+    noteDeleters.set(highlightId, handleDelete);
   }
 
   function onHighlightMenu(payload: {
@@ -24,50 +41,97 @@
     text: string;
     hasNote: boolean;
   }): void {
-    // Context menu wiring — to be connected to ContextMenu/MenuOverlay in a
-    // later task. No-op for now so BookCard has a valid callback.
-    void payload;
+    ctxX = payload.x;
+    ctxY = payload.y;
+    ctxTargetId = payload.highlightId;
+    ctxTargetText = payload.text;
+    ctxHasNote = payload.hasNote;
+    ctxVisible = true;
+  }
+
+  function showToast(msg: string): void {
+    toastMessage = msg;
+    toastVisible = true;
+  }
+
+  async function copyText(text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+  }
+
+  function onCopy(): void {
+    copyText(ctxTargetText);
+    showToast($_("toastCopied"));
+  }
+
+  async function onShare(): Promise<void> {
+    if (navigator.share) {
+      try {
+        await navigator.share({ text: ctxTargetText });
+      } catch {
+        // user cancelled — silent
+      }
+    } else {
+      await copyText(ctxTargetText);
+      showToast($_("toastCopied"));
+    }
+  }
+
+  async function onDelete(): Promise<void> {
+    if (!ctxTargetId) return;
+    const deleter = noteDeleters.get(ctxTargetId);
+    if (deleter) {
+      await deleter();
+      showToast($_("toastNoteDeleted"));
+    }
   }
 </script>
 
-<section class="dashboard">
-  <h1>{$_("dashboard.title")}</h1>
+<div class="content">
+  <div class="page-header">
+    <h2>{$_("highlights")}</h2>
+    <div class="page-subtitle">
+      {$_("subtitle", {
+        values: { count: books.length, highlights: totalHighlights },
+      })}
+    </div>
+  </div>
 
-  {#if data.books.length === 0}
-    <p class="empty">{$_("dashboard.empty")}</p>
-  {:else}
-    <div class="grid">
-      {#each data.books as book (book.id)}
+  <div class="book-list">
+    {#if books.length === 0}
+      <div class="empty">{$_("noHighlights")}</div>
+    {:else}
+      {#each books as book (book.id)}
         <BookCard
           {book}
-          {supabase}
-          {userId}
+          supabase={data.supabase}
+          userId={data.user?.id ?? ""}
           {onHighlightMenu}
           {registerNoteEditor}
         />
       {/each}
-    </div>
-  {/if}
-</section>
+    {/if}
+  </div>
+</div>
 
-<style>
-  .dashboard {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-  }
-  h1 {
-    font-size: 1.4rem;
-    font-weight: 600;
-  }
-  .empty {
-    color: var(--text-secondary);
-    padding: 40px 0;
-    text-align: center;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
-  }
-</style>
+<ContextMenu
+  bind:visible={ctxVisible}
+  x={ctxX}
+  y={ctxY}
+  hasNote={ctxHasNote}
+  {onCopy}
+  {onShare}
+  {onDelete}
+/>
+
+<Toast bind:visible={toastVisible} message={toastMessage} />

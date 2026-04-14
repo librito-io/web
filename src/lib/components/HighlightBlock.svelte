@@ -35,46 +35,16 @@
       <span>{run.text}</span>
     {/if}
   {/each}
-  <button
-    class="more"
-    onclick={(e) => openMenu(e, false)}
-    aria-label="More actions">⋯</button
+  <button class="bq-more" onclick={(e) => openMenu(e, false)} aria-label="More"
+    >⋯</button
   >
 </blockquote>
 
 <style>
-  blockquote {
-    position: relative;
-    background: var(--highlight-bg);
-    color: var(--highlight-text);
-    padding: 18px 44px 18px 20px;
-    border-radius: var(--radius-md);
-    font-family: var(--font-serif);
-    font-size: 1.05rem;
-    line-height: 1.6;
-    white-space: pre-wrap;
-  }
   .bold {
     font-weight: 700;
   }
   .italic {
     font-style: italic;
-  }
-  .more {
-    position: absolute;
-    top: 6px;
-    right: 8px;
-    padding: 4px 10px;
-    font-size: 1.2rem;
-    color: var(--highlight-text);
-    opacity: 0;
-    transition: opacity 120ms;
-  }
-  blockquote:hover .more,
-  .more:focus-visible {
-    opacity: 0.7;
-  }
-  .more:hover {
-    opacity: 1;
   }
 </style>

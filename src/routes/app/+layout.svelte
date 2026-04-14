@@ -1,21 +1,21 @@
 <script lang="ts">
-  import { goto, invalidate } from "$app/navigation";
+  import { onMount } from "svelte";
 
-  let { data, children } = $props();
+  let { children } = $props();
 
-  async function handleLogout() {
-    await data.supabase.auth.signOut();
-    await invalidate("supabase:auth");
-    goto("/auth/login");
-  }
+  onMount(() => {
+    const siteHeader = document.querySelector("header");
+    if (!siteHeader) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        const pageHeader = document.querySelector(".page-header");
+        pageHeader?.classList.toggle("has-line", !entry.isIntersecting);
+      },
+      { threshold: 0 },
+    );
+    io.observe(siteHeader);
+    return () => io.disconnect();
+  });
 </script>
 
-<nav>
-  <a href="/app">Dashboard</a>
-  <a href="/app/devices">Devices</a>
-  <button onclick={handleLogout}>Log out</button>
-</nav>
-
-<main>
-  {@render children()}
-</main>
+{@render children()}

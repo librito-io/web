@@ -1,49 +1,49 @@
 <script lang="ts">
-  import { enhance } from '$app/forms';
-  import { invalidateAll } from '$app/navigation';
+  import { enhance } from "$app/forms";
+  import { invalidateAll } from "$app/navigation";
 
   let { data } = $props();
-  let pairingCode = $state('');
-  let claimError = $state('');
+  let pairingCode = $state("");
+  let claimError = $state("");
   let claimLoading = $state(false);
   let renamingId = $state<string | null>(null);
 
   async function handleClaim(e: SubmitEvent) {
     e.preventDefault();
     claimLoading = true;
-    claimError = '';
+    claimError = "";
 
     try {
-      const res = await fetch('/api/pair/claim', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: pairingCode.trim() })
+      const res = await fetch("/api/pair/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: pairingCode.trim() }),
       });
 
       const body = await res.json();
 
       if (!res.ok) {
-        claimError = body.message || 'Failed to claim code';
+        claimError = body.message || "Failed to claim code";
         return;
       }
 
-      pairingCode = '';
+      pairingCode = "";
       await invalidateAll();
     } catch {
-      claimError = 'Network error. Please try again.';
+      claimError = "Network error. Please try again.";
     } finally {
       claimLoading = false;
     }
   }
 
   function formatDate(dateStr: string | null): string {
-    if (!dateStr) return 'Never';
+    if (!dateStr) return "Never";
     return new Date(dateStr).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   }
 </script>
@@ -68,7 +68,7 @@
       required
     />
     <button type="submit" disabled={claimLoading}>
-      {claimLoading ? 'Pairing...' : 'Pair Device'}
+      {claimLoading ? "Pairing..." : "Pair Device"}
     </button>
   </form>
 </section>
@@ -83,27 +83,52 @@
       {#each data.devices as device (device.id)}
         <li>
           {#if renamingId === device.id}
-            <form method="POST" action="?/rename" use:enhance={() => {
-              return async ({ update }) => {
-                renamingId = null;
-                update();
-              };
-            }}>
+            <form
+              method="POST"
+              action="?/rename"
+              use:enhance={() => {
+                return async ({ update }) => {
+                  renamingId = null;
+                  update();
+                };
+              }}
+            >
               <input type="hidden" name="deviceId" value={device.id} />
-              <input type="text" name="name" value={device.name} required maxlength="50" />
+              <input
+                type="text"
+                name="name"
+                value={device.name}
+                required
+                maxlength="50"
+              />
               <button type="submit">Save</button>
-              <button type="button" onclick={() => (renamingId = null)}>Cancel</button>
+              <button type="button" onclick={() => (renamingId = null)}
+                >Cancel</button
+              >
             </form>
           {:else}
             <strong>{device.name}</strong>
             <span>Last synced: {formatDate(device.last_synced_at)}</span>
             <span>Paired: {formatDate(device.created_at)}</span>
             <button onclick={() => (renamingId = device.id)}>Rename</button>
-            <form method="POST" action="?/revoke" use:enhance style="display: inline;">
+            <form
+              method="POST"
+              action="?/revoke"
+              use:enhance
+              style="display: inline;"
+            >
               <input type="hidden" name="deviceId" value={device.id} />
-              <button type="submit" onclick={(e) => {
-                if (!confirm('Unpair this device? It will need to be re-paired.')) e.preventDefault();
-              }}>Unpair</button>
+              <button
+                type="submit"
+                onclick={(e) => {
+                  if (
+                    !confirm(
+                      "Unpair this device? It will need to be re-paired.",
+                    )
+                  )
+                    e.preventDefault();
+                }}>Unpair</button
+              >
             </form>
           {/if}
         </li>

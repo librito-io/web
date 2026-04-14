@@ -5,6 +5,7 @@
 @import "@fontsource/noto-sans/500.css";
 @import "@fontsource/noto-sans/600.css";
 @import "@fontsource/jetbrains-mono/500.css";
+@import "material-symbols/outlined.css";
 
 html {
   overflow-y: scroll;
@@ -163,6 +164,12 @@ header h1 {
 }
 .menu-primary-item {
   display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
   font-size: 1.2rem;
   font-weight: 600;
   color: #fff;
@@ -184,20 +191,30 @@ header h1 {
   grid-template-columns: minmax(50%, auto) 1fr;
   gap: 10px 0;
 }
-.menu-secondary a {
+.menu-secondary a,
+.menu-secondary button {
+  display: inline-block;
+  text-align: left;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
   font-size: 0.95rem;
   font-weight: 500;
   color: #fff;
   text-decoration: none;
 }
 @media (hover: hover) {
-  .menu-secondary a:hover {
+  .menu-secondary a:hover,
+  .menu-secondary button:hover {
     color: #2883de;
   }
 }
 .menu-overlay .menu-primary-item,
 .menu-overlay .menu-divider,
-.menu-overlay .menu-secondary a {
+.menu-overlay .menu-secondary a,
+.menu-overlay .menu-secondary button {
   opacity: 0;
   transform: translateY(-8px);
   transition:
@@ -206,7 +223,8 @@ header h1 {
 }
 .menu-overlay.visible .menu-primary-item,
 .menu-overlay.visible .menu-divider,
-.menu-overlay.visible .menu-secondary a {
+.menu-overlay.visible .menu-secondary a,
+.menu-overlay.visible .menu-secondary button {
   opacity: 1;
   transform: translateY(0);
 }
@@ -263,22 +281,27 @@ header h1 {
   transform: translateY(0);
   pointer-events: auto;
 }
-.lang-dropdown a {
+.lang-dropdown button {
   display: block;
+  width: calc(100% - 12px);
+  text-align: left;
   padding: 6px 14px;
   margin: 0 6px;
+  border: none;
+  background: transparent;
   border-radius: 8px;
   color: #e8e8e8;
   text-decoration: none;
   font-size: 0.9rem;
   font-weight: 500;
+  font-family: inherit;
   transition: background 0.1s;
   cursor: pointer;
 }
-.lang-dropdown a:hover {
+.lang-dropdown button:hover {
   background: #2a2a2a;
 }
-.lang-dropdown a.active {
+.lang-dropdown button.active {
   background: #2a2a2a;
 }
 .download-bar {
@@ -800,6 +823,12 @@ blockquote {
 }
 [dir="rtl"] blockquote[dir="auto"] {
   text-align: start;
+}
+[dir="rtl"] .ctx-menu {
+  transform: translateX(-100%) translateY(4px);
+}
+[dir="rtl"] .ctx-menu.visible {
+  transform: translateX(-100%) translateY(0);
 }
 [dir="rtl"] .lang-dropdown {
   right: auto;

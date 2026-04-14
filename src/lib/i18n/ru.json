@@ -16,6 +16,8 @@
   "menuLabel": "Меню",
   "menuBookTransfer": "Перенос книг",
   "menuHighlightManager": "Управление выделениями",
+  "menuDevices": "Устройства",
+  "menuLogout": "Выйти",
   "menuGithub": "Github",
   "menuHelp": "Помощь",
   "menuDiscord": "Discord",

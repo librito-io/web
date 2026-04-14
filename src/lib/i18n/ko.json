@@ -16,6 +16,8 @@
   "menuLabel": "메뉴",
   "menuBookTransfer": "도서 전송",
   "menuHighlightManager": "하이라이트 관리",
+  "menuDevices": "기기",
+  "menuLogout": "로그아웃",
   "menuGithub": "Github",
   "menuHelp": "도움말",
   "menuDiscord": "Discord",

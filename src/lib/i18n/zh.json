@@ -16,6 +16,8 @@
   "menuLabel": "菜单",
   "menuBookTransfer": "图书传输",
   "menuHighlightManager": "高亮管理",
+  "menuDevices": "设备",
+  "menuLogout": "退出登录",
   "menuGithub": "Github",
   "menuHelp": "帮助",
   "menuDiscord": "Discord",

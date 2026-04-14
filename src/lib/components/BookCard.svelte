@@ -8,13 +8,7 @@
   import NoteEditor from "./NoteEditor.svelte";
   import type { SupabaseClient } from "@supabase/supabase-js";
 
-  let {
-    book,
-    supabase,
-    userId,
-    onHighlightMenu,
-    registerNoteEditor,
-  } = $props<{
+  let { book, supabase, userId, onHighlightMenu, registerNoteEditor } = $props<{
     book: LibraryBook;
     supabase: SupabaseClient;
     userId: string;
@@ -32,6 +26,7 @@
   }>();
 
   let expanded = $state(false);
+  let closing = $state(false);
   let container: HTMLDivElement | undefined = $state();
 
   function hasTextSelection(): boolean {
@@ -65,11 +60,17 @@
 
   function collapse(): void {
     if (!container) return;
+    closing = true;
+    container.style.transition = "max-height 0.35s ease";
     container.style.maxHeight = `${container.scrollHeight}px`;
-    // force reflow so the browser registers the starting value
     void container.offsetHeight;
     container.style.maxHeight = "0";
     expanded = false;
+    const onEnd = (): void => {
+      container?.removeEventListener("transitionend", onEnd);
+      closing = false;
+    };
+    container.addEventListener("transitionend", onEnd);
   }
 
   async function saveNote(highlightId: string, text: string): Promise<void> {
@@ -84,6 +85,11 @@
         { onConflict: "highlight_id" },
       );
     if (error) throw error;
+    const hl = book.highlights?.find((h) => h.id === highlightId);
+    if (hl) {
+      hl.note_text = text;
+      hl.note_updated_at = new Date().toISOString();
+    }
   }
 
   async function removeNote(highlightId: string): Promise<void> {
@@ -92,6 +98,11 @@
       .delete()
       .eq("highlight_id", highlightId);
     if (error) throw error;
+    const hl = book.highlights?.find((h) => h.id === highlightId);
+    if (hl) {
+      hl.note_text = null;
+      hl.note_updated_at = null;
+    }
   }
 
   type ChapterGroup = {
@@ -147,7 +158,7 @@
   </div>
 
   <div bind:this={container} class="highlights-container">
-    {#if expanded}
+    {#if expanded || closing}
       {#if groups.length === 0}
         <div class="loading">{$_("noHighlightsInBook")}</div>
       {:else}

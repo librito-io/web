@@ -12,7 +12,7 @@
   function applyStagger(visible: boolean): void {
     if (!overlayEl) return;
     const items = overlayEl.querySelectorAll<HTMLElement>(
-      ".menu-primary-item, .menu-divider, .menu-secondary a",
+      ".menu-primary-item, .menu-divider, .menu-secondary a, .menu-secondary button",
     );
     items.forEach((el, i) => {
       el.style.transitionDelay = visible ? `${200 + i * 20}ms` : "0ms";
@@ -39,6 +39,7 @@
     const headerH = header?.offsetHeight ?? 0;
     overlayEl.style.top = `${headerH}px`;
 
+    applyStagger(open);
     if (open) {
       overlayEl.style.height = `${window.innerHeight - headerH}px`;
       lockScroll();
@@ -46,7 +47,6 @@
       overlayEl.style.height = "0";
       unlockScroll();
     }
-    applyStagger(open);
   });
 
   function onKey(e: KeyboardEvent): void {
@@ -72,9 +72,13 @@
       <a href="/app" class="menu-primary-item" onclick={() => (open = false)}>
         {$_("menuHighlightManager")}
       </a>
-      <a href="#" class="menu-primary-item" onclick={() => (open = false)}>
+      <button
+        type="button"
+        class="menu-primary-item"
+        onclick={() => (open = false)}
+      >
         {$_("menuBookTransfer")}
-      </a>
+      </button>
       <a
         href="/app/devices"
         class="menu-primary-item"
@@ -85,23 +89,31 @@
     </div>
     <div class="menu-divider"></div>
     <div class="menu-secondary">
-      <a href="#" onclick={() => (open = false)}>{$_("menuHelp")}</a>
-      <a href="#" onclick={() => (open = false)}>{$_("menuDiscord")}</a>
-      <a href="#" onclick={() => (open = false)}>{$_("menuAbout")}</a>
-      <a href="#" onclick={() => (open = false)}>{$_("menuGithub")}</a>
-      <a href="#" onclick={() => (open = false)}>{$_("menuChangelog")}</a>
-      <a href="#" onclick={() => (open = false)}>{$_("menuRoadmap")}</a>
-      <a href="#" onclick={() => (open = false)}>{$_("menuContact")}</a>
-      <a href="#" onclick={() => (open = false)}>{$_("menuDonate")}</a>
-      <a
-        href="#"
-        onclick={(e) => {
-          e.preventDefault();
-          handleLogout();
-        }}
+      <button type="button" onclick={() => (open = false)}
+        >{$_("menuHelp")}</button
       >
-        {$_("menuLogout")}
-      </a>
+      <button type="button" onclick={() => (open = false)}
+        >{$_("menuDiscord")}</button
+      >
+      <button type="button" onclick={() => (open = false)}
+        >{$_("menuAbout")}</button
+      >
+      <button type="button" onclick={() => (open = false)}
+        >{$_("menuGithub")}</button
+      >
+      <button type="button" onclick={() => (open = false)}
+        >{$_("menuChangelog")}</button
+      >
+      <button type="button" onclick={() => (open = false)}
+        >{$_("menuRoadmap")}</button
+      >
+      <button type="button" onclick={() => (open = false)}
+        >{$_("menuContact")}</button
+      >
+      <button type="button" onclick={() => (open = false)}
+        >{$_("menuDonate")}</button
+      >
+      <button type="button" onclick={handleLogout}>{$_("menuLogout")}</button>
     </div>
   </div>
 </div>

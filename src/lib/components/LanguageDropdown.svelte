@@ -63,21 +63,14 @@
   </button>
   <div class="lang-dropdown" class:visible={open}>
     {#each ORDER as code (code)}
-      <a
+      <button
+        type="button"
         data-lang={code}
         class:active={$locale === code}
         onclick={() => pick(code)}
-        role="button"
-        tabindex="0"
-        onkeydown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            pick(code);
-          }
-        }}
       >
         {LABELS[code]}
-      </a>
+      </button>
     {/each}
   </div>
 </div>

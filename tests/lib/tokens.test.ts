@@ -33,10 +33,15 @@ describe("generateDeviceToken", () => {
 });
 
 describe("hashToken", () => {
-  it("produces a bcrypt hash that does not match the plaintext", async () => {
+  it("produces a 64-char hex SHA-256 digest", () => {
     const token = "sk_device_test123";
-    const hash = await hashToken(token);
+    const hash = hashToken(token);
     expect(hash).not.toBe(token);
-    expect(hash).toMatch(/^\$2[aby]\$/);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("produces the same hash for the same input", () => {
+    const token = "sk_device_deterministic";
+    expect(hashToken(token)).toBe(hashToken(token));
   });
 });

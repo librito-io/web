@@ -22,7 +22,9 @@
   let expanded = $state(false);
   let timer: ReturnType<typeof setTimeout> | null = null;
   let saveSeq = 0;
-  let textareaEl: HTMLTextAreaElement;
+  let textareaEl: HTMLTextAreaElement | undefined = $state();
+  let displayEl: HTMLDivElement | undefined = $state();
+  let needsShowMore = $state(false);
 
   const relativeStrings = {
     justNow: "just now",
@@ -31,7 +33,7 @@
     yesterday: "Yesterday",
   };
 
-  function scheduleSave() {
+  function scheduleSave(): void {
     status = "saving";
     if (timer) clearTimeout(timer);
     timer = setTimeout(flush, 1500);
@@ -63,12 +65,12 @@
       await save(value);
     } catch {
       await new Promise((r) => setTimeout(r, 500));
-      if (seq !== saveSeq) return; // newer save superseded us during backoff
+      if (seq !== saveSeq) return;
       await save(value);
     }
   }
 
-  function enterEditor() {
+  function enterEditor(): void {
     mode = "editor";
     expanded = false;
     queueMicrotask(() => textareaEl?.focus());
@@ -85,30 +87,30 @@
     });
   }
 
-  function onInput() {
+  function onInput(): void {
     scheduleSave();
     autoresize();
   }
 
-  function autoresize() {
+  function autoresize(): void {
     if (!textareaEl) return;
     textareaEl.style.height = "auto";
     textareaEl.style.height = `${textareaEl.scrollHeight}px`;
   }
 
-  function onKeydown(e: KeyboardEvent) {
+  function onKeydown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
       e.preventDefault();
       exitEditorAndSave();
     }
   }
 
-  async function handleDelete(): Promise<void> {
+  export async function handleDelete(): Promise<void> {
     if (timer) {
       clearTimeout(timer);
       timer = null;
     }
-    saveSeq++; // invalidate any in-flight save so its late status write is ignored
+    saveSeq++;
     try {
       await remove();
       text = "";
@@ -124,138 +126,88 @@
   $effect(() => {
     if (mode === "editor") autoresize();
   });
+
+  $effect(() => {
+    if (mode !== "display" || !displayEl) return;
+    needsShowMore = displayEl.scrollHeight > displayEl.clientHeight + 2;
+  });
 </script>
 
-{#if mode === "empty"}
-  <button class="placeholder" onclick={enterEditor}>
-    {$_("note.placeholder")}
-  </button>
-{:else if mode === "display"}
+<div class="note-area">
   <div
-    class="display"
-    role="button"
-    tabindex="0"
-    onclick={enterEditor}
-    onkeydown={(e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        enterEditor();
-      }
-    }}
+    class="note-saving"
+    class:visible={status === "saving" ||
+      status === "saved" ||
+      status === "error"}
+    class:error={status === "error"}
   >
-    <div class="head">
-      <span class="label">{$_("note.label")}</span>
+    {#if status === "saving"}{$_("noteSaving")}{/if}
+    {#if status === "saved"}{$_("noteSaved")}{/if}
+    {#if status === "error"}{$_("noteFailed")}{/if}
+  </div>
+
+  {#if mode === "empty"}
+    <div
+      class="note-placeholder"
+      role="button"
+      tabindex="0"
+      onclick={enterEditor}
+      onkeydown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          enterEditor();
+        }
+      }}
+    >
+      {$_("addNote")}
+    </div>
+  {:else if mode === "display"}
+    <div class="note-label">
+      {$_("noteLabel")}:
       {#if updatedAt}
-        <span class="when"
-          >{relativeTime(updatedAt, { strings: relativeStrings })}</span
-        >
+        <span class="note-time">
+          {relativeTime(updatedAt, { strings: relativeStrings })}
+        </span>
       {/if}
     </div>
-    <p class="body" class:clamped={!expanded}>{text}</p>
-    {#if text.length > 240}
+    <div
+      bind:this={displayEl}
+      class="note-display"
+      class:truncated={!expanded}
+      role="button"
+      tabindex="0"
+      onclick={enterEditor}
+      onkeydown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          enterEditor();
+        }
+      }}
+    >
+      {text}
+    </div>
+    {#if needsShowMore}
       <button
-        class="toggle"
+        class="note-show-more"
+        style="display: inline"
         onclick={(e) => {
           e.stopPropagation();
           expanded = !expanded;
         }}
       >
-        {expanded ? $_("note.showLess") : $_("note.showMore")}
+        {expanded ? $_("showLess") : $_("showMore")}
       </button>
     {/if}
-  </div>
-{:else}
-  <div class="editor">
+  {:else}
     <textarea
       bind:this={textareaEl}
       bind:value={text}
+      class="note-editor"
       oninput={onInput}
       onblur={exitEditorAndSave}
       onkeydown={onKeydown}
-      placeholder={$_("note.placeholder")}
+      placeholder={$_("addNote")}
       rows="2"
     ></textarea>
-    <div class="foot">
-      <span class="status" data-state={status}>
-        {#if status === "saving"}{$_("note.saving")}
-        {:else if status === "saved"}{$_("note.saved")}
-        {:else if status === "error"}{$_("note.saveFailed")}
-        {/if}
-      </span>
-      <button class="delete" onclick={handleDelete}>×</button>
-    </div>
-  </div>
-{/if}
-
-<style>
-  .placeholder {
-    color: var(--text-muted);
-    padding: 8px 0;
-    font-style: italic;
-  }
-  .display {
-    padding: 10px 12px;
-    border-left: 2px solid var(--border-hover);
-    margin: 8px 0 16px;
-    cursor: text;
-  }
-  .head {
-    display: flex;
-    gap: 8px;
-    color: var(--text-secondary);
-    font-size: 0.8rem;
-    margin-bottom: 4px;
-  }
-  .label {
-    font-weight: 600;
-  }
-  .body {
-    white-space: pre-wrap;
-  }
-  .body.clamped {
-    display: -webkit-box;
-    -webkit-line-clamp: 8;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-  .toggle {
-    margin-top: 4px;
-    color: var(--accent);
-    font-size: 0.85rem;
-  }
-  .editor {
-    margin: 8px 0 16px;
-  }
-  textarea {
-    width: 100%;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 10px 12px;
-    caret-color: var(--accent);
-    resize: none;
-    min-height: 48px;
-    font-family: var(--font-ui);
-  }
-  .foot {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 2px;
-    font-size: 0.75rem;
-    color: var(--text-muted);
-  }
-  .status[data-state="error"] {
-    color: var(--danger);
-  }
-  .status[data-state="saved"] {
-    color: var(--text-secondary);
-  }
-  .delete {
-    color: var(--text-muted);
-    padding: 2px 8px;
-  }
-  .delete:hover {
-    color: var(--danger);
-  }
-</style>
+  {/if}
+</div>

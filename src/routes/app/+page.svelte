@@ -98,9 +98,12 @@
     }
   }
 
+  let fetchGen = 0;
+
   async function onSortChange(next: Sort): Promise<void> {
     if (next === sort) return;
     writeSortCookie(next);
+    fetchGen += 1;
     sort = next;
     items = [];
     cursor = null;
@@ -109,14 +112,17 @@
   }
 
   async function loadMore(): Promise<void> {
+    const myGen = fetchGen;
     const qs = new URLSearchParams({ sort });
     if (cursor) qs.set("cursor", cursor);
     const res = await fetch(`/app/feed?${qs}`);
+    if (myGen !== fetchGen) return;
     if (!res.ok) throw new Error(`feed fetch ${res.status}`);
     const payload = (await res.json()) as {
       rows: FeedRow[];
       nextCursor: string | null;
     };
+    if (myGen !== fetchGen) return;
     items = [...items, ...payload.rows];
     cursor = payload.nextCursor;
     if (!cursor || payload.rows.length === 0) done = true;

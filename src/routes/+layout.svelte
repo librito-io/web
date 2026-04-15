@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import Header from "$lib/components/Header.svelte";
   import MenuOverlay from "$lib/components/MenuOverlay.svelte";
+  import { PRELOAD_FONTS } from "$lib/fonts";
 
   let { data, children } = $props();
   let menuOpen = $state(false);
@@ -25,6 +26,18 @@
     goto("/auth/login");
   }
 </script>
+
+<svelte:head>
+  {#each PRELOAD_FONTS as href (href)}
+    <link
+      rel="preload"
+      {href}
+      as="font"
+      type="font/woff2"
+      crossorigin="anonymous"
+    />
+  {/each}
+</svelte:head>
 
 <Header bind:menuOpen />
 <MenuOverlay bind:open={menuOpen} onLogout={logout} />

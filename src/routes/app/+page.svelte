@@ -99,6 +99,7 @@
   }
 
   let fetchGen = 0;
+  let inflight = false;
 
   async function onSortChange(next: Sort): Promise<void> {
     if (next === sort) return;
@@ -112,20 +113,26 @@
   }
 
   async function loadMore(): Promise<void> {
+    if (inflight) return;
+    inflight = true;
     const myGen = fetchGen;
-    const qs = new URLSearchParams({ sort });
-    if (cursor) qs.set("cursor", cursor);
-    const res = await fetch(`/app/feed?${qs}`);
-    if (myGen !== fetchGen) return;
-    if (!res.ok) throw new Error(`feed fetch ${res.status}`);
-    const payload = (await res.json()) as {
-      rows: FeedRow[];
-      nextCursor: string | null;
-    };
-    if (myGen !== fetchGen) return;
-    items = [...items, ...payload.rows];
-    cursor = payload.nextCursor;
-    if (!cursor || payload.rows.length === 0) done = true;
+    try {
+      const qs = new URLSearchParams({ sort });
+      if (cursor) qs.set("cursor", cursor);
+      const res = await fetch(`/app/feed?${qs}`);
+      if (myGen !== fetchGen) return;
+      if (!res.ok) throw new Error(`feed fetch ${res.status}`);
+      const payload = (await res.json()) as {
+        rows: FeedRow[];
+        nextCursor: string | null;
+      };
+      if (myGen !== fetchGen) return;
+      items = [...items, ...payload.rows];
+      cursor = payload.nextCursor;
+      if (!cursor || payload.rows.length === 0) done = true;
+    } finally {
+      inflight = false;
+    }
   }
 </script>
 

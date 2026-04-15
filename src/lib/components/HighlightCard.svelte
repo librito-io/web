@@ -133,6 +133,7 @@
     text-decoration: none;
   }
   .book-link {
+    display: block;
     text-decoration: none;
     color: inherit;
   }

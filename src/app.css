@@ -417,7 +417,6 @@ header h1 {
   background: #262626;
   border-radius: 12px;
   padding: 20px;
-  cursor: pointer;
   border: 1px solid #2a2a2a;
   transition: border-color 0.15s;
 }
@@ -425,7 +424,6 @@ header h1 {
   border-color: #666;
 }
 .book-card.expanded {
-  cursor: pointer;
   border-color: #666;
 }
 .book-header {
@@ -579,9 +577,6 @@ header h1 {
 }
 .highlights-container {
   margin-top: 16px;
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.2s ease;
 }
 .chapter-heading {
   font-size: 0.95rem;

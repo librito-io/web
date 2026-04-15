@@ -1,10 +1,42 @@
-@import "@fontsource/bitter/500.css";
+/* Critical fonts: self-hosted in /static/fonts/ with font-display:
+   optional so the browser uses the webfont only if it loads before
+   first paint (via the <link rel=preload> in +layout.svelte). If it
+   misses that window, the fallback keeps the current page stable —
+   no swap, no reflow, no CLS. Subsequent page loads hit the HTTP
+   cache and render with the webfont from the first paint. */
+@font-face {
+  font-family: "Bitter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: optional;
+  src: url("/fonts/bitter-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Noto Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/fonts/noto-sans-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Noto Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: optional;
+  src: url("/fonts/noto-sans-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: optional;
+  src: url("/fonts/jetbrains-mono-500.woff2") format("woff2");
+}
+
+/* Non-critical weights still via fontsource (bundled CSS, swap). */
 @import "@fontsource/bitter/700.css";
 @import "@fontsource/bitter/400-italic.css";
-@import "@fontsource/noto-sans/400.css";
 @import "@fontsource/noto-sans/500.css";
-@import "@fontsource/noto-sans/600.css";
-@import "@fontsource/jetbrains-mono/500.css";
 
 html {
   overflow-y: scroll;

@@ -150,6 +150,7 @@
           {onHighlightMenu}
           {registerNoteEditor}
           showHighlightCount={false}
+          linkBookText={false}
         />
       {/each}
     {/if}

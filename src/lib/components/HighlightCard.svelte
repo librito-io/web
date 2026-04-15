@@ -13,6 +13,7 @@
     registerNoteEditor,
     showChapterHeading = true,
     showHighlightCount = true,
+    linkBookText = true,
   } = $props<{
     row: FeedRow;
     supabase: SupabaseClient;
@@ -30,6 +31,7 @@
     ) => void;
     showChapterHeading?: boolean;
     showHighlightCount?: boolean;
+    linkBookText?: boolean;
   }>();
 
   const bookHref = $derived(`/app/book/${encodeURIComponent(row.book_hash)}`);
@@ -74,12 +76,21 @@
       {initial}
     </a>
     <div class="book-info">
-      <a href={bookHref} class="book-title book-link" dir="auto">
-        {row.book_title || $_("untitled")}
-      </a>
-      <a href={bookHref} class="book-author book-link" dir="auto">
-        {row.book_author || $_("unknownAuthor")}
-      </a>
+      {#if linkBookText}
+        <a href={bookHref} class="book-title book-link" dir="auto">
+          {row.book_title || $_("untitled")}
+        </a>
+        <a href={bookHref} class="book-author book-link" dir="auto">
+          {row.book_author || $_("unknownAuthor")}
+        </a>
+      {:else}
+        <div class="book-title" dir="auto">
+          {row.book_title || $_("untitled")}
+        </div>
+        <div class="book-author" dir="auto">
+          {row.book_author || $_("unknownAuthor")}
+        </div>
+      {/if}
       {#if showHighlightCount}
         <a href={bookHref} class="book-meta book-link">
           {$_("highlightCount", {

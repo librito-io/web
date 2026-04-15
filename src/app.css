@@ -249,6 +249,11 @@ header h1 {
 }
 .lang-btn .material-symbols-outlined {
   font-size: 20px;
+  width: 20px;
+  height: 20px;
+  overflow: hidden;
+  display: inline-block;
+  line-height: 1;
   color: #e8e8e8;
 }
 .lang-btn span:last-child {

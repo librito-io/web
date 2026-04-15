@@ -101,10 +101,18 @@
   let fetchGen = 0;
   let inflight = false;
 
+  $effect(() => {
+    sort = data.sort;
+    items = data.rows;
+    cursor = data.nextCursor;
+    done = data.nextCursor === null;
+  });
+
   async function onSortChange(next: Sort): Promise<void> {
     if (next === sort) return;
     writeSortCookie(next);
     fetchGen += 1;
+    inflight = false;
     sort = next;
     cursor = null;
     done = false;

@@ -1,20 +1,21 @@
-import { json, type RequestHandler } from "@sveltejs/kit";
+import type { RequestHandler } from "@sveltejs/kit";
+import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { parseSort } from "$lib/feed/sort";
 import { decodeCursor, encodeCursor } from "$lib/feed/cursor";
-import type { FeedRow } from "$lib/feed/types";
+import { parseFeedRows } from "$lib/feed/types";
 
 export const GET: RequestHandler = async ({
   url,
   locals: { supabase, safeGetSession },
 }) => {
   const { user } = await safeGetSession();
-  if (!user) return json({ error: "unauthorized" }, { status: 401 });
+  if (!user) return jsonError(401, "unauthorized", "Sign in required");
 
   const sort = parseSort(url.searchParams.get("sort"), "recent");
   const cursorParam = url.searchParams.get("cursor");
   const cursor = decodeCursor(cursorParam);
   if (cursorParam && cursor === null) {
-    return json({ error: "bad_cursor" }, { status: 400 });
+    return jsonError(400, "bad_cursor", "Invalid cursor");
   }
   const bookHash = url.searchParams.get("book_hash");
 
@@ -27,11 +28,11 @@ export const GET: RequestHandler = async ({
 
   if (error) {
     console.error("/app/feed rpc error", error);
-    return json({ error: "rpc_failed" }, { status: 500 });
+    return jsonError(500, "rpc_failed", "Feed query failed");
   }
 
-  const rows = (data ?? []) as FeedRow[];
+  const rows = parseFeedRows(data);
   const last = rows.at(-1);
   const nextCursor = last?.next_cursor ? encodeCursor(last.next_cursor) : null;
-  return json({ rows, nextCursor });
+  return jsonSuccess({ rows, nextCursor });
 };

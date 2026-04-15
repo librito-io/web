@@ -39,6 +39,15 @@
     row.book_title?.trim().charAt(0).toUpperCase() || "?",
   );
 
+  let noteOverride = $state<{
+    text: string | null;
+    updatedAt: string | null;
+  } | null>(null);
+  const noteText = $derived(noteOverride ? noteOverride.text : row.note_text);
+  const noteUpdatedAt = $derived(
+    noteOverride ? noteOverride.updatedAt : row.note_updated_at,
+  );
+
   async function saveNote(highlightId: string, text: string): Promise<void> {
     if (text.trim().length === 0) {
       await removeNote(highlightId);
@@ -51,18 +60,17 @@
         { onConflict: "highlight_id" },
       );
     if (error) throw error;
-    row.note_text = text;
-    row.note_updated_at = new Date().toISOString();
+    noteOverride = { text, updatedAt: new Date().toISOString() };
   }
 
   async function removeNote(highlightId: string): Promise<void> {
     const { error } = await supabase
       .from("notes")
       .delete()
-      .eq("highlight_id", highlightId);
+      .eq("highlight_id", highlightId)
+      .eq("user_id", userId);
     if (error) throw error;
-    row.note_text = null;
-    row.note_updated_at = null;
+    noteOverride = { text: null, updatedAt: null };
   }
 </script>
 
@@ -123,13 +131,13 @@
           y,
           highlightId: id,
           text: row.text,
-          hasNote: !!row.note_text,
+          hasNote: !!noteText,
         })}
     />
     <NoteEditor
       highlightId={row.highlight_id}
-      initialText={row.note_text}
-      initialUpdatedAt={row.note_updated_at}
+      initialText={noteText}
+      initialUpdatedAt={noteUpdatedAt}
       save={(t) => saveNote(row.highlight_id, t)}
       remove={() => removeNote(row.highlight_id)}
       onReady={(api) => registerNoteEditor(row.highlight_id, api.handleDelete)}

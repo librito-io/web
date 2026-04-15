@@ -6,7 +6,8 @@
 --   title:   {"t":"<title>","c":<ch>,"s":<sw>,"id":"<uuid>"}
 --   author:  {"a":"<author>","t":"<title>","c":<ch>,"s":<sw>,"id":"<uuid>"}
 --   reading: {"c":<ch>,"s":<sw>,"id":"<uuid>"}
--- Returned next_cursor is NULL on the final row of the final batch.
+-- next_cursor is non-null ONLY on the final row when more pages remain.
+-- Non-final rows always carry NULL next_cursor; client reads rows.at(-1).
 -- ============================================================
 
 DROP FUNCTION IF EXISTS get_library_with_highlights();
@@ -60,8 +61,10 @@ BEGIN
   WITH counts AS (
     SELECT h.book_id, COUNT(*)::int AS cnt
       FROM highlights h
+      JOIN books b ON b.id = h.book_id
      WHERE h.user_id = v_uid
        AND h.deleted_at IS NULL
+       AND (p_book_hash IS NULL OR b.book_hash = p_book_hash)
      GROUP BY h.book_id
   ),
   base AS (
@@ -155,8 +158,7 @@ BEGIN
          n.note_updated_at,
          n.updated_at,
          CASE
-           WHEN n.total < v_limit THEN NULL::jsonb
-           WHEN n.rn = n.total THEN
+           WHEN n.rn = n.total AND n.total >= v_limit THEN
              CASE p_sort
                WHEN 'recent' THEN
                  jsonb_build_object('u', n.updated_at, 'id', n.highlight_id)
@@ -177,11 +179,7 @@ BEGIN
                                     'id', n.highlight_id)
                ELSE NULL::jsonb
              END
-           ELSE
-             -- non-final rows carry the same cursor as the final row
-             -- (client reads rows.at(-1).next_cursor); intermediate copies
-             -- are harmless and keep the output uniform
-             jsonb_build_object('u', n.updated_at, 'id', n.highlight_id)
+           ELSE NULL::jsonb
          END AS next_cursor
     FROM numbered n
    ORDER BY n.rn;

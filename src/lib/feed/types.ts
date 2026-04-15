@@ -23,3 +23,20 @@ export type FeedPage = {
   rows: FeedRow[];
   nextCursor: string | null;
 };
+
+export function parseFeedRows(data: unknown): FeedRow[] {
+  if (!Array.isArray(data)) return [];
+  const rows: FeedRow[] = [];
+  for (const r of data) {
+    if (
+      r !== null &&
+      typeof r === "object" &&
+      typeof (r as { highlight_id?: unknown }).highlight_id === "string" &&
+      typeof (r as { book_hash?: unknown }).book_hash === "string" &&
+      typeof (r as { text?: unknown }).text === "string"
+    ) {
+      rows.push(r as FeedRow);
+    }
+  }
+  return rows;
+}

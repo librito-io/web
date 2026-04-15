@@ -2,6 +2,7 @@ import type { PageServerLoad } from "./$types";
 import { error } from "@sveltejs/kit";
 import { parseSort, SORT_COOKIE } from "$lib/feed/sort";
 import { encodeCursor } from "$lib/feed/cursor";
+import { parseFeedRows } from "$lib/feed/types";
 import type { FeedRow, Sort } from "$lib/feed/types";
 
 export const load: PageServerLoad = async ({
@@ -50,7 +51,7 @@ export const load: PageServerLoad = async ({
     };
   }
 
-  const rows = (feedRes.data ?? []) as FeedRow[];
+  const rows = parseFeedRows(feedRes.data);
   const last = rows.at(-1);
   const nextCursor = last?.next_cursor ? encodeCursor(last.next_cursor) : null;
   return {

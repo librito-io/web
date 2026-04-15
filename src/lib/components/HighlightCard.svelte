@@ -12,6 +12,7 @@
     onHighlightMenu,
     registerNoteEditor,
     showChapterHeading = true,
+    showHighlightCount = true,
   } = $props<{
     row: FeedRow;
     supabase: SupabaseClient;
@@ -28,6 +29,7 @@
       handleDelete: () => Promise<void>,
     ) => void;
     showChapterHeading?: boolean;
+    showHighlightCount?: boolean;
   }>();
 
   const bookHref = $derived(`/app/book/${encodeURIComponent(row.book_hash)}`);
@@ -78,11 +80,13 @@
       <a href={bookHref} class="book-author book-link" dir="auto">
         {row.book_author || $_("unknownAuthor")}
       </a>
-      <a href={bookHref} class="book-meta book-link">
-        {$_("highlightCount", {
-          values: { count: row.book_highlight_count },
-        })}
-      </a>
+      {#if showHighlightCount}
+        <a href={bookHref} class="book-meta book-link">
+          {$_("highlightCount", {
+            values: { count: row.book_highlight_count },
+          })}
+        </a>
+      {/if}
     </div>
   </div>
 

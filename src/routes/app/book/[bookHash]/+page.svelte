@@ -149,6 +149,7 @@
           userId={data.user?.id ?? ""}
           {onHighlightMenu}
           {registerNoteEditor}
+          showHighlightCount={false}
         />
       {/each}
     {/if}

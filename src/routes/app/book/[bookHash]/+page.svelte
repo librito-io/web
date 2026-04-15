@@ -149,7 +149,7 @@
           userId={data.user?.id ?? ""}
           {onHighlightMenu}
           {registerNoteEditor}
-          showBookHeader={false}
+          showBookText={false}
         />
       {/each}
     {/if}

@@ -12,6 +12,7 @@
     onHighlightMenu,
     registerNoteEditor,
     showBookHeader = true,
+    showBookText = true,
     showChapterHeading = true,
   } = $props<{
     row: FeedRow;
@@ -29,6 +30,7 @@
       handleDelete: () => Promise<void>,
     ) => void;
     showBookHeader?: boolean;
+    showBookText?: boolean;
     showChapterHeading?: boolean;
   }>();
 
@@ -74,19 +76,21 @@
       >
         {initial}
       </a>
-      <div class="book-info">
-        <a href={bookHref} class="book-title book-link" dir="auto">
-          {row.book_title || $_("untitled")}
-        </a>
-        <a href={bookHref} class="book-author book-link" dir="auto">
-          {row.book_author || $_("unknownAuthor")}
-        </a>
-        <a href={bookHref} class="book-meta book-link">
-          {$_("highlightCount", {
-            values: { count: row.book_highlight_count },
-          })}
-        </a>
-      </div>
+      {#if showBookText}
+        <div class="book-info">
+          <a href={bookHref} class="book-title book-link" dir="auto">
+            {row.book_title || $_("untitled")}
+          </a>
+          <a href={bookHref} class="book-author book-link" dir="auto">
+            {row.book_author || $_("unknownAuthor")}
+          </a>
+          <a href={bookHref} class="book-meta book-link">
+            {$_("highlightCount", {
+              values: { count: row.book_highlight_count },
+            })}
+          </a>
+        </div>
+      {/if}
     </div>
   {/if}
 

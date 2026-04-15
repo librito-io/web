@@ -11,8 +11,6 @@
     userId,
     onHighlightMenu,
     registerNoteEditor,
-    showBookHeader = true,
-    showBookText = true,
     showChapterHeading = true,
   } = $props<{
     row: FeedRow;
@@ -29,8 +27,6 @@
       highlightId: string,
       handleDelete: () => Promise<void>,
     ) => void;
-    showBookHeader?: boolean;
-    showBookText?: boolean;
     showChapterHeading?: boolean;
   }>();
 
@@ -67,32 +63,28 @@
 </script>
 
 <div class="book-card expanded">
-  {#if showBookHeader}
-    <div class="book-header">
-      <a
-        href={bookHref}
-        class="book-cover book-cover-placeholder"
-        aria-hidden="true"
-      >
-        {initial}
+  <div class="book-header">
+    <a
+      href={bookHref}
+      class="book-cover book-cover-placeholder"
+      aria-hidden="true"
+    >
+      {initial}
+    </a>
+    <div class="book-info">
+      <a href={bookHref} class="book-title book-link" dir="auto">
+        {row.book_title || $_("untitled")}
       </a>
-      {#if showBookText}
-        <div class="book-info">
-          <a href={bookHref} class="book-title book-link" dir="auto">
-            {row.book_title || $_("untitled")}
-          </a>
-          <a href={bookHref} class="book-author book-link" dir="auto">
-            {row.book_author || $_("unknownAuthor")}
-          </a>
-          <a href={bookHref} class="book-meta book-link">
-            {$_("highlightCount", {
-              values: { count: row.book_highlight_count },
-            })}
-          </a>
-        </div>
-      {/if}
+      <a href={bookHref} class="book-author book-link" dir="auto">
+        {row.book_author || $_("unknownAuthor")}
+      </a>
+      <a href={bookHref} class="book-meta book-link">
+        {$_("highlightCount", {
+          values: { count: row.book_highlight_count },
+        })}
+      </a>
     </div>
-  {/if}
+  </div>
 
   <div class="highlights-container">
     {#if showChapterHeading && row.chapter_title}

@@ -47,6 +47,7 @@ LANGUAGE plpgsql
 SECURITY INVOKER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_limit int := LEAST(GREATEST(COALESCE(p_limit, 50), 1), 100);
   v_uid   uuid := auth.uid();

@@ -823,7 +823,7 @@ blockquote {
   resize: none;
   overflow: hidden;
   min-height: 4.8em;
-  padding: 0;
+  padding: 4px 0 0;
   caret-color: #2883de;
 }
 .note-editor::placeholder {

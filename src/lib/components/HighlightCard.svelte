@@ -68,13 +68,19 @@
 
 <div class="book-card expanded">
   <div class="book-header">
-    <a
-      href={bookHref}
-      class="book-cover book-cover-placeholder"
-      aria-hidden="true"
-    >
-      {initial}
-    </a>
+    {#if linkBookText}
+      <a
+        href={bookHref}
+        class="book-cover book-cover-placeholder"
+        aria-hidden="true"
+      >
+        {initial}
+      </a>
+    {:else}
+      <div class="book-cover book-cover-placeholder" aria-hidden="true">
+        {initial}
+      </div>
+    {/if}
     <div class="book-info">
       {#if linkBookText}
         <a href={bookHref} class="book-title book-link" dir="auto">

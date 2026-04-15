@@ -106,19 +106,18 @@
     writeSortCookie(next);
     fetchGen += 1;
     sort = next;
-    items = [];
     cursor = null;
     done = false;
-    await loadMore();
+    await loadMore({ replace: true });
   }
 
-  async function loadMore(): Promise<void> {
+  async function loadMore(opts: { replace?: boolean } = {}): Promise<void> {
     if (inflight) return;
     inflight = true;
     const myGen = fetchGen;
     try {
       const qs = new URLSearchParams({ sort });
-      if (cursor) qs.set("cursor", cursor);
+      if (!opts.replace && cursor) qs.set("cursor", cursor);
       const res = await fetch(`/app/feed?${qs}`);
       if (myGen !== fetchGen) return;
       if (!res.ok) throw new Error(`feed fetch ${res.status}`);
@@ -127,7 +126,7 @@
         nextCursor: string | null;
       };
       if (myGen !== fetchGen) return;
-      items = [...items, ...payload.rows];
+      items = opts.replace ? payload.rows : [...items, ...payload.rows];
       cursor = payload.nextCursor;
       if (!cursor || payload.rows.length === 0) done = true;
     } finally {

@@ -1,19 +1,21 @@
 <script lang="ts">
   import { _ } from "$lib/i18n";
-  import BookCard from "$lib/components/BookCard.svelte";
+  import HighlightCard from "$lib/components/HighlightCard.svelte";
+  import SortPillRow from "$lib/components/SortPillRow.svelte";
+  import InfiniteScroll from "$lib/components/InfiniteScroll.svelte";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import Toast from "$lib/components/Toast.svelte";
+  import { FEED_SORT_OPTIONS, writeSortCookie } from "$lib/feed/sort";
+  import type { FeedRow, Sort } from "$lib/feed/types";
 
   let { data } = $props();
 
-  const books = $derived(data.books);
-  const totalHighlights = $derived(
-    books.reduce(
-      (sum: number, b: (typeof books)[number]) =>
-        sum + (b.highlights?.length ?? 0),
-      0,
-    ),
-  );
+  let sort = $state<Sort>(data.sort);
+  let items = $state<FeedRow[]>(data.rows);
+  let cursor = $state<string | null>(data.nextCursor);
+  let done = $state(data.nextCursor === null);
+
+  const totalBooks = $derived(new Set(items.map((r) => r.book_hash)).size);
 
   let ctxVisible = $state(false);
   let ctxX = $state(0);
@@ -79,7 +81,7 @@
       try {
         await navigator.share({ text: ctxTargetText });
       } catch {
-        // user cancelled — silent
+        // user cancelled
       }
     } else {
       await copyText(ctxTargetText);
@@ -95,6 +97,30 @@
       showToast($_("toastNoteDeleted"));
     }
   }
+
+  async function onSortChange(next: Sort): Promise<void> {
+    if (next === sort) return;
+    writeSortCookie(next);
+    sort = next;
+    items = [];
+    cursor = null;
+    done = false;
+    await loadMore();
+  }
+
+  async function loadMore(): Promise<void> {
+    const qs = new URLSearchParams({ sort });
+    if (cursor) qs.set("cursor", cursor);
+    const res = await fetch(`/app/feed?${qs}`);
+    if (!res.ok) throw new Error(`feed fetch ${res.status}`);
+    const payload = (await res.json()) as {
+      rows: FeedRow[];
+      nextCursor: string | null;
+    };
+    items = [...items, ...payload.rows];
+    cursor = payload.nextCursor;
+    if (!cursor || payload.rows.length === 0) done = true;
+  }
 </script>
 
 <div class="content">
@@ -102,18 +128,24 @@
     <h2>{$_("highlights")}</h2>
     <div class="page-subtitle">
       {$_("subtitle", {
-        values: { count: books.length, highlights: totalHighlights },
+        values: { count: totalBooks, highlights: items.length },
       })}
     </div>
   </div>
 
+  <SortPillRow
+    options={FEED_SORT_OPTIONS}
+    active={sort}
+    onChange={onSortChange}
+  />
+
   <div class="book-list">
-    {#if books.length === 0}
+    {#if items.length === 0}
       <div class="empty">{$_("noHighlights")}</div>
     {:else}
-      {#each books as book (book.id)}
-        <BookCard
-          {book}
+      {#each items as row (row.highlight_id)}
+        <HighlightCard
+          {row}
           supabase={data.supabase}
           userId={data.user?.id ?? ""}
           {onHighlightMenu}
@@ -122,6 +154,8 @@
       {/each}
     {/if}
   </div>
+
+  <InfiniteScroll {loadMore} hasMore={!done} />
 </div>
 
 <ContextMenu

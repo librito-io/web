@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { _ } from "$lib/i18n";
 
   let { loadMore, hasMore } = $props<{
@@ -24,7 +23,9 @@
     }
   }
 
-  onMount(() => {
+  // Re-arm observer whenever the sentinel element is remounted
+  // (e.g., hasMore toggles false -> true on sort change with a small feed).
+  $effect(() => {
     if (!sentinel) return;
     const io = new IntersectionObserver(
       (entries) => {

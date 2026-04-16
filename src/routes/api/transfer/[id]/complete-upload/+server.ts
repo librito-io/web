@@ -97,7 +97,6 @@ export const POST: RequestHandler = async ({
   }
 
   // Update row: sha256, status → 'pending', encrypted, iv
-  const uploadedAt = new Date().toISOString();
   const { data: updated, error: updateError } = await supabase
     .from("book_transfers")
     .update({
@@ -105,10 +104,9 @@ export const POST: RequestHandler = async ({
       status: "pending",
       encrypted,
       iv,
-      updated_at: uploadedAt,
     })
     .eq("id", transferId)
-    .select("id, filename, file_size, status, updated_at")
+    .select("id, filename, file_size, status, uploaded_at")
     .single();
 
   if (updateError || !updated) {
@@ -116,12 +114,13 @@ export const POST: RequestHandler = async ({
   }
 
   return jsonSuccess({
+    success: true,
     transfer: {
       id: updated.id,
       filename: updated.filename,
       fileSize: updated.file_size,
       status: updated.status,
-      uploadedAt: updated.updated_at,
+      uploadedAt: updated.uploaded_at,
     },
   });
 };

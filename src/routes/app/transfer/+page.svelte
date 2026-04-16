@@ -8,10 +8,10 @@
   interface Transfer {
     id: string;
     filename: string;
-    file_size: number;
+    fileSize: number;
     status: "pending_upload" | "pending" | "downloaded" | "expired";
-    uploaded_at: string;
-    downloaded_at: string | null;
+    uploadedAt: string;
+    downloadedAt: string | null;
   }
 
   interface UploadState {
@@ -350,7 +350,7 @@
         <li class="transfer-item">
           <div class="transfer-main">
             <span class="filename">{transfer.filename}</span>
-            <span class="filesize">{formatBytes(transfer.file_size)}</span>
+            <span class="filesize">{formatBytes(transfer.fileSize)}</span>
             <span
               class="badge"
               style="color: {statusBadge[transfer.status]?.color ??
@@ -361,9 +361,9 @@
             </span>
           </div>
           <div class="transfer-meta">
-            <span>Uploaded: {formatDate(transfer.uploaded_at)}</span>
-            {#if transfer.downloaded_at}
-              <span>Downloaded: {formatDate(transfer.downloaded_at)}</span>
+            <span>Uploaded: {formatDate(transfer.uploadedAt)}</span>
+            {#if transfer.downloadedAt}
+              <span>Downloaded: {formatDate(transfer.downloadedAt)}</span>
             {/if}
           </div>
           {#if transfer.status === "pending"}

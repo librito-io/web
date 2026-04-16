@@ -1,9 +1,9 @@
 import type { RequestHandler } from "./$types";
-import { json } from "@sveltejs/kit";
 import { createAdminClient } from "$lib/server/supabase";
 import { transferUploadLimiter } from "$lib/server/ratelimit";
-import { jsonError } from "$lib/server/errors";
+import { jsonError, jsonSuccess } from "$lib/server/errors";
 import {
+  sanitizeFilename,
   validateTransferFilename,
   validateTransferSize,
   buildStoragePath,
@@ -35,6 +35,9 @@ export const POST: RequestHandler = async ({
     return jsonError(400, "invalid_request", "fileSize must be a number");
   }
 
+  // Sanitize filename (strip path components to prevent traversal)
+  const safeFilename = sanitizeFilename(filename);
+
   // Rate limit by userId
   const { success, reset } = await transferUploadLimiter.limit(user.id);
   if (!success) {
@@ -43,7 +46,7 @@ export const POST: RequestHandler = async ({
   }
 
   // Validate filename and size
-  const filenameError = validateTransferFilename(filename);
+  const filenameError = validateTransferFilename(safeFilename);
   if (filenameError) return jsonError(400, "invalid_filename", filenameError);
 
   const sizeError = validateTransferSize(fileSize);
@@ -51,7 +54,7 @@ export const POST: RequestHandler = async ({
 
   // Generate transfer ID and build storage path
   const transferId = crypto.randomUUID();
-  const storagePath = buildStoragePath(user.id, transferId, filename);
+  const storagePath = buildStoragePath(user.id, transferId, safeFilename);
 
   const supabase = createAdminClient();
 
@@ -60,7 +63,7 @@ export const POST: RequestHandler = async ({
     id: transferId,
     user_id: user.id,
     device_id: null,
-    filename,
+    filename: safeFilename,
     file_size: fileSize,
     storage_path: storagePath,
     sha256: "",
@@ -78,11 +81,13 @@ export const POST: RequestHandler = async ({
     .createSignedUploadUrl(storagePath);
 
   if (urlError || !uploadData) {
+    // Clean up orphaned DB row
+    await supabase.from("book_transfers").delete().eq("id", transferId);
     return jsonError(500, "server_error", "Failed to create upload URL");
   }
 
-  return json(
+  return jsonSuccess(
     { transferId, uploadUrl: uploadData.signedUrl, expiresIn: UPLOAD_URL_TTL },
-    { status: 201 },
+    201,
   );
 };

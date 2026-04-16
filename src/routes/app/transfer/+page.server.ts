@@ -10,7 +10,17 @@ export const load: PageServerLoad = async ({
   const { data: transfers } = await supabase
     .from("book_transfers")
     .select("id, filename, file_size, status, uploaded_at, downloaded_at")
+    .eq("user_id", session.user.id)
     .order("uploaded_at", { ascending: false });
 
-  return { transfers: transfers ?? [] };
+  return {
+    transfers: (transfers ?? []).map((t) => ({
+      id: t.id,
+      filename: t.filename,
+      fileSize: t.file_size,
+      status: t.status,
+      uploadedAt: t.uploaded_at,
+      downloadedAt: t.downloaded_at,
+    })),
+  };
 };

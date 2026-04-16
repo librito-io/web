@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  sanitizeFilename,
   validateTransferFilename,
   validateTransferSize,
   buildStoragePath,
   computeFileSha256,
   MAX_FILE_SIZE,
+  MAX_FILENAME_LENGTH,
 } from "../../src/lib/server/transfer";
 
 describe("validateTransferFilename", () => {
@@ -36,6 +38,32 @@ describe("validateTransferFilename", () => {
     expect(validateTransferFilename("book.pdf")).toBe(
       "Only EPUB files are accepted",
     );
+  });
+
+  it("rejects filename exceeding 255 characters", () => {
+    const longName = "a".repeat(252) + ".epub"; // 256 chars
+    expect(validateTransferFilename(longName)).toBe(
+      "Filename exceeds 255 character limit",
+    );
+  });
+
+  it("accepts filename at exactly 255 characters", () => {
+    const maxName = "a".repeat(250) + ".epub"; // 255 chars
+    expect(validateTransferFilename(maxName)).toBeNull();
+  });
+});
+
+describe("sanitizeFilename", () => {
+  it("returns basename from path with forward slashes", () => {
+    expect(sanitizeFilename("../../other/file.epub")).toBe("file.epub");
+  });
+
+  it("returns filename unchanged when no path separators", () => {
+    expect(sanitizeFilename("book.epub")).toBe("book.epub");
+  });
+
+  it("strips directory traversal attempts", () => {
+    expect(sanitizeFilename("../../../etc/passwd.epub")).toBe("passwd.epub");
   });
 });
 

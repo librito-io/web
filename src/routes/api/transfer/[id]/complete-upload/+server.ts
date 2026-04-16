@@ -37,7 +37,10 @@ export const POST: RequestHandler = async ({
     .eq("user_id", user.id)
     .maybeSingle();
 
-  if (fetchError || !transfer) {
+  if (fetchError) {
+    return jsonError(500, "server_error", "Failed to fetch transfer");
+  }
+  if (!transfer) {
     return jsonError(404, "not_found", "Transfer not found");
   }
 
@@ -61,16 +64,8 @@ export const POST: RequestHandler = async ({
 
   const buffer = Buffer.from(await fileData.arrayBuffer());
 
-  // Verify file size matches declared size
-  if (buffer.byteLength !== transfer.file_size) {
-    return jsonError(
-      422,
-      "size_mismatch",
-      "File size does not match declared size",
-    );
-  }
-
-  // Compute SHA-256
+  // Compute SHA-256 (sufficient for integrity — size check removed because
+  // encrypted files are larger than declared plaintext size by 28 bytes)
   const sha256 = computeFileSha256(buffer);
 
   // Check for duplicate: same user + same sha256 + status 'pending' + different id

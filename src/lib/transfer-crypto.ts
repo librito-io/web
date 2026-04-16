@@ -15,7 +15,7 @@ export async function deriveKey(secretBase64: string): Promise<CryptoKey> {
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new Uint8Array(32),
+      salt: new TextEncoder().encode("librito-transfer-v1"),
       info: new TextEncoder().encode("librito-transfer"),
     },
     keyMaterial,

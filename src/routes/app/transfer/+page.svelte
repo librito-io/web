@@ -15,6 +15,7 @@
   }
 
   interface UploadState {
+    id: string;
     file: File;
     status:
       | "validating"
@@ -58,7 +59,9 @@
   }
 
   async function processFile(file: File) {
+    const uploadId = crypto.randomUUID();
     const upload: UploadState = {
+      id: uploadId,
       file,
       status: "validating",
       progress: 0,
@@ -68,8 +71,9 @@
     uploads = [...uploads, upload];
 
     function updateUpload(patch: Partial<UploadState>) {
-      uploads = uploads.map((u) => (u === upload ? { ...u, ...patch } : u));
-      Object.assign(upload, patch);
+      uploads = uploads.map((u) =>
+        u.id === uploadId ? { ...u, ...patch } : u,
+      );
     }
 
     // Validate
@@ -214,12 +218,12 @@
   }
 
   function retryUpload(upload: UploadState) {
-    uploads = uploads.filter((u) => u !== upload);
+    uploads = uploads.filter((u) => u.id !== upload.id);
     processFile(upload.file);
   }
 
   function dismissUpload(upload: UploadState) {
-    uploads = uploads.filter((u) => u !== upload);
+    uploads = uploads.filter((u) => u.id !== upload.id);
   }
 
   function formatBytes(bytes: number): string {
@@ -288,7 +292,7 @@
   <section>
     <h2>Uploading</h2>
     <ul class="upload-list">
-      {#each activeUploads as upload (upload.file.name + upload.file.size)}
+      {#each activeUploads as upload (upload.id)}
         <li class="upload-item">
           <div class="upload-header">
             <span class="filename">{upload.file.name}</span>

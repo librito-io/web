@@ -13,13 +13,13 @@ export const GET: RequestHandler = async ({ url, locals: { supabase } }) => {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (user?.email_confirmed_at) {
+  if (user?.email_confirmed_at && user.email) {
     const confirmedAt = new Date(user.email_confirmed_at).getTime();
     const now = Date.now();
     if (now - confirmedAt < 60_000) {
       const siteUrl = url.origin;
       // Fire and forget — don't block the redirect
-      sendWelcomeEmail(user.email!, siteUrl).catch(() => {});
+      sendWelcomeEmail(user.email, siteUrl).catch(() => {});
     }
   }
 

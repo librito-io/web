@@ -1,5 +1,10 @@
 import type { SupabaseClient, Session, User } from "@supabase/supabase-js";
 
+declare module "*?raw" {
+  const content: string;
+  export default content;
+}
+
 declare global {
   namespace App {
     interface Locals {

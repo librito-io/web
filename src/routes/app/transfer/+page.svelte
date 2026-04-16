@@ -247,8 +247,8 @@
     Transfer["status"],
     { label: string; color: string; bg: string }
   > = {
-    pending_upload: { label: "Uploading...", color: "#1d4ed8", bg: "#dbeafe" },
-    pending: { label: "Pending", color: "#92400e", bg: "#fef3c7" },
+    pending_upload: { label: "Processing", color: "#1d4ed8", bg: "#dbeafe" },
+    pending: { label: "Queued", color: "#92400e", bg: "#fef3c7" },
     downloaded: { label: "Downloaded", color: "#065f46", bg: "#d1fae5" },
     expired: { label: "Expired", color: "#6b7280", bg: "#f3f4f6" },
   };
@@ -257,141 +257,143 @@
   const hasContent = $derived(transfers.length > 0 || activeUploads.length > 0);
 </script>
 
-<h1>Transfer Books</h1>
+<div class="content">
+  <h1>Transfer Books</h1>
 
-<section>
-  <h2>Upload EPUBs</h2>
-
-  <!-- Drop zone -->
-  <div
-    class="drop-zone"
-    class:drag-over={dragOver}
-    ondrop={handleDrop}
-    ondragover={handleDragOver}
-    ondragleave={handleDragLeave}
-    role="region"
-    aria-label="File upload drop zone"
-  >
-    <p>Drag &amp; drop EPUB files here, or</p>
-    <label class="file-label">
-      Choose Files
-      <input
-        type="file"
-        multiple
-        accept=".epub"
-        onchange={handleFileInput}
-        style="display: none;"
-      />
-    </label>
-    <p class="drop-hint">EPUB only &middot; max 20 MB per file</p>
-  </div>
-</section>
-
-<!-- Active uploads -->
-{#if activeUploads.length > 0}
   <section>
-    <h2>Uploading</h2>
-    <ul class="upload-list">
-      {#each activeUploads as upload (upload.id)}
-        <li class="upload-item">
-          <div class="upload-header">
-            <span class="filename">{upload.file.name}</span>
-            <span class="filesize">{formatBytes(upload.file.size)}</span>
-          </div>
+    <h2>Upload EPUBs</h2>
 
-          {#if upload.status === "error"}
-            <p class="upload-error">{upload.error}</p>
-            <div class="upload-actions">
-              <button class="btn-small" onclick={() => retryUpload(upload)}
-                >Retry</button
-              >
-              <button
-                class="btn-small btn-ghost"
-                onclick={() => dismissUpload(upload)}>Dismiss</button
-              >
-            </div>
-          {:else}
-            <div class="progress-bar-track">
-              <div
-                class="progress-bar-fill"
-                style="width: {upload.progress}%"
-              ></div>
-            </div>
-            <p class="upload-status-label">
-              {#if upload.status === "validating"}
-                Validating...
-              {:else if upload.status === "initiating"}
-                Preparing...
-              {:else if upload.status === "encrypting"}
-                Encrypting...
-              {:else if upload.status === "uploading"}
-                Uploading... {upload.progress}%
-              {:else if upload.status === "completing"}
-                Finishing...
-              {/if}
-            </p>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+    <!-- Drop zone -->
+    <div
+      class="drop-zone"
+      class:drag-over={dragOver}
+      ondrop={handleDrop}
+      ondragover={handleDragOver}
+      ondragleave={handleDragLeave}
+      role="region"
+      aria-label="File upload drop zone"
+    >
+      <p>Drag &amp; drop EPUB files here, or</p>
+      <label class="file-label">
+        Choose Files
+        <input
+          type="file"
+          multiple
+          accept=".epub"
+          onchange={handleFileInput}
+          style="display: none;"
+        />
+      </label>
+      <p class="drop-hint">EPUB only &middot; max 20 MB per file</p>
+    </div>
   </section>
-{/if}
 
-<!-- Transfer history -->
-<section>
-  <h2>Transfer History</h2>
+  <!-- Active uploads -->
+  {#if activeUploads.length > 0}
+    <section>
+      <h2>Uploading</h2>
+      <ul class="upload-list">
+        {#each activeUploads as upload (upload.id)}
+          <li class="upload-item">
+            <div class="upload-header">
+              <span class="filename">{upload.file.name}</span>
+              <span class="filesize">{formatBytes(upload.file.size)}</span>
+            </div>
 
-  {#if !hasContent}
-    <p class="empty-state">
-      Upload EPUBs here. They'll be encrypted and delivered to your Librito on
-      next sync.
-    </p>
-  {:else if transfers.length === 0}
-    <p class="empty-state">No transfers yet.</p>
-  {:else}
-    <ul class="transfer-list">
-      {#each transfers as transfer (transfer.id)}
-        <li class="transfer-item">
-          <div class="transfer-main">
-            <span class="filename">{transfer.filename}</span>
-            <span class="filesize">{formatBytes(transfer.fileSize)}</span>
-            <span
-              class="badge"
-              style="color: {statusBadge[transfer.status]?.color ??
-                '#374151'}; background: {statusBadge[transfer.status]?.bg ??
-                '#f3f4f6'};"
-            >
-              {statusBadge[transfer.status]?.label ?? transfer.status}
-            </span>
-          </div>
-          <div class="transfer-meta">
-            <span>Uploaded: {formatDate(transfer.uploadedAt)}</span>
-            {#if transfer.downloadedAt}
-              <span>Downloaded: {formatDate(transfer.downloadedAt)}</span>
+            {#if upload.status === "error"}
+              <p class="upload-error">{upload.error}</p>
+              <div class="upload-actions">
+                <button class="btn-small" onclick={() => retryUpload(upload)}
+                  >Retry</button
+                >
+                <button
+                  class="btn-small btn-ghost"
+                  onclick={() => dismissUpload(upload)}>Dismiss</button
+                >
+              </div>
+            {:else}
+              <div class="progress-bar-track">
+                <div
+                  class="progress-bar-fill"
+                  style="width: {upload.progress}%"
+                ></div>
+              </div>
+              <p class="upload-status-label">
+                {#if upload.status === "validating"}
+                  Validating...
+                {:else if upload.status === "initiating"}
+                  Preparing...
+                {:else if upload.status === "encrypting"}
+                  Encrypting...
+                {:else if upload.status === "uploading"}
+                  Uploading... {upload.progress}%
+                {:else if upload.status === "completing"}
+                  Finishing...
+                {/if}
+              </p>
             {/if}
-          </div>
-          {#if transfer.status === "pending"}
-            <button
-              class="btn-small btn-danger"
-              onclick={() => handleCancel(transfer.id)}
-            >
-              Cancel
-            </button>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+          </li>
+        {/each}
+      </ul>
+    </section>
   {/if}
-</section>
 
-<!-- Privacy notice -->
-<section class="privacy-notice">
-  <p>
-    Your books are encrypted end-to-end. Librito's servers store only encrypted
-    data and cannot read your book content. Files are automatically deleted
-    after your device downloads them.
-  </p>
-</section>
+  <!-- Transfer history -->
+  <section>
+    <h2>Queued</h2>
+
+    {#if !hasContent}
+      <p class="empty-state">
+        Upload EPUBs here. They'll be encrypted and delivered to your Librito on
+        next sync.
+      </p>
+    {:else if transfers.length === 0}
+      <p class="empty-state">No transfers yet.</p>
+    {:else}
+      <ul class="transfer-list">
+        {#each transfers as transfer (transfer.id)}
+          <li class="transfer-item">
+            <div class="transfer-main">
+              <span class="filename">{transfer.filename}</span>
+              <span class="filesize">{formatBytes(transfer.fileSize)}</span>
+              <span
+                class="badge"
+                style="color: {statusBadge[transfer.status]?.color ??
+                  '#374151'}; background: {statusBadge[transfer.status]?.bg ??
+                  '#f3f4f6'};"
+              >
+                {statusBadge[transfer.status]?.label ?? transfer.status}
+              </span>
+            </div>
+            <div class="transfer-meta">
+              <span>Added: {formatDate(transfer.uploadedAt)}</span>
+              {#if transfer.downloadedAt}
+                <span>Downloaded: {formatDate(transfer.downloadedAt)}</span>
+              {/if}
+            </div>
+            {#if transfer.status === "pending"}
+              <button
+                class="btn-small btn-danger"
+                onclick={() => handleCancel(transfer.id)}
+              >
+                Cancel
+              </button>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+
+  <!-- Privacy notice -->
+  <section class="privacy-notice">
+    <p>
+      Your books are encrypted end-to-end. Librito's servers store only
+      encrypted data and cannot read your book content. Files are automatically
+      deleted after your device downloads them.
+    </p>
+  </section>
+</div>
 
 <style>
   .drop-zone {

@@ -8,6 +8,13 @@
   let resent = $state(false);
   let resendError = $state("");
   let cooldown = $state(false);
+  let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
+
+  $effect(() => {
+    return () => {
+      if (cooldownTimer) clearTimeout(cooldownTimer);
+    };
+  });
 
   async function handleResend() {
     if (cooldown || !email) return;
@@ -27,7 +34,7 @@
     } else {
       resent = true;
       cooldown = true;
-      setTimeout(() => {
+      cooldownTimer = setTimeout(() => {
         cooldown = false;
       }, 60000);
     }

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Set env var before module is imported so getClient() returns a client
-process.env.RESEND_API_KEY = "test-key";
+// Mock $env/static/private before importing email.ts
+vi.mock("$env/static/private", () => ({
+  RESEND_API_KEY: "test-key",
+}));
 
 // Mock the resend module before importing email.ts
 vi.mock("resend", () => {

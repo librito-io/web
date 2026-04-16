@@ -1,13 +1,12 @@
 import { Resend } from "resend";
-// @ts-ignore — Vite ?raw import, not recognized by tsc
+import { RESEND_API_KEY } from "$env/static/private";
 import welcomeHtml from "../../../supabase/templates/welcome.html?raw";
 
 let resend: Resend | null = null;
 
 function getClient(): Resend | null {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return null;
-  if (!resend) resend = new Resend(apiKey);
+  if (!RESEND_API_KEY) return null;
+  if (!resend) resend = new Resend(RESEND_API_KEY);
   return resend;
 }
 
@@ -25,10 +24,7 @@ export async function sendWelcomeEmail(
       return;
     }
 
-    const html = (welcomeHtml as string).replace(
-      /\{\{APP_URL\}\}/g,
-      `${siteUrl}/app`,
-    );
+    const html = welcomeHtml.replace(/\{\{APP_URL\}\}/g, `${siteUrl}/app`);
 
     await client.emails.send({
       from: "Librito <noreply@librito.io>",

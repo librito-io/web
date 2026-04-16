@@ -44,5 +44,11 @@
   "noteJustNow": "just now",
   "noteMinutesAgo": "{n}m ago",
   "noteHoursAgo": "{n}h ago",
-  "noteYesterday": "Yesterday"
+  "noteYesterday": "Yesterday",
+  "sortRecent": "Recent",
+  "sortTitle": "Title",
+  "sortAuthor": "Author",
+  "sortReading": "Reading order",
+  "backToFeed": "Back to highlights",
+  "retry": "Retry"
 }

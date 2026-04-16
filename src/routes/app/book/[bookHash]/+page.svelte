@@ -3,9 +3,10 @@
   import HighlightCard from "$lib/components/HighlightCard.svelte";
   import SortPillRow from "$lib/components/SortPillRow.svelte";
   import InfiniteScroll from "$lib/components/InfiniteScroll.svelte";
+  import Breadcrumb from "$lib/components/Breadcrumb.svelte";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import Toast from "$lib/components/Toast.svelte";
-  import { FEED_SORT_OPTIONS, writeSortCookie } from "$lib/feed/sort";
+  import { BOOK_SORT_OPTIONS, writeSortCookie } from "$lib/feed/sort";
   import type { FeedRow, Sort } from "$lib/feed/types";
 
   let { data } = $props();
@@ -14,8 +15,6 @@
   let items = $state<FeedRow[]>(data.rows);
   let cursor = $state<string | null>(data.nextCursor);
   let done = $state(data.nextCursor === null);
-
-  const totalBooks = $derived(new Set(items.map((r) => r.book_hash)).size);
 
   let ctxVisible = $state(false);
   let ctxX = $state(0);
@@ -124,7 +123,7 @@
     inflight = true;
     const myGen = fetchGen;
     try {
-      const qs = new URLSearchParams({ sort });
+      const qs = new URLSearchParams({ sort, book_hash: data.book.book_hash });
       if (!opts.replace && cursor) qs.set("cursor", cursor);
       const res = await fetch(`/app/feed?${qs}`);
       if (myGen !== fetchGen) return;
@@ -144,24 +143,24 @@
 </script>
 
 <div class="content">
+  <Breadcrumb href="/app" label={$_("backToFeed")} />
+
   <div class="page-header">
-    <h2>{$_("highlights")}</h2>
-    <div class="page-subtitle">
-      {$_("subtitle", {
-        values: { count: totalBooks, highlights: items.length },
-      })}
+    <h2 dir="auto">{data.book.title || $_("untitled")}</h2>
+    <div class="page-subtitle" dir="auto">
+      {data.book.author || $_("unknownAuthor")}
     </div>
   </div>
 
   <SortPillRow
-    options={FEED_SORT_OPTIONS}
+    options={BOOK_SORT_OPTIONS}
     active={sort}
     onChange={onSortChange}
   />
 
   <div class="book-list">
     {#if items.length === 0}
-      <div class="empty">{$_("noHighlights")}</div>
+      <div class="empty">{$_("noHighlightsInBook")}</div>
     {:else}
       {#each items as row (row.highlight_id)}
         <HighlightCard
@@ -170,6 +169,8 @@
           userId={data.user?.id ?? ""}
           {onHighlightMenu}
           {registerNoteEditor}
+          showHighlightCount={false}
+          linkBookText={false}
         />
       {/each}
     {/if}

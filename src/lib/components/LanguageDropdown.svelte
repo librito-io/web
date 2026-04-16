@@ -58,7 +58,24 @@
 
 <div class="lang-wrap" bind:this={wrap}>
   <button class="lang-btn" onclick={toggle} aria-label="Language">
-    <span class="material-symbols-outlined">language</span>
+    <svg
+      class="lang-icon"
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.75"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path
+        d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+      />
+    </svg>
     <span>{($locale ?? "en").toUpperCase()}</span>
   </button>
   <div class="lang-dropdown" class:visible={open}>

@@ -63,6 +63,8 @@ export interface ResponseTransfer {
   id: string;
   filename: string;
   fileSize: number;
+  encrypted: boolean;
+  iv: string | null;
 }
 
 // --- Validation ---
@@ -430,7 +432,7 @@ export async function processSync(
 
     supabase
       .from("book_transfers")
-      .select("id, filename, file_size")
+      .select("id, filename, file_size, encrypted, iv")
       .eq("user_id", userId)
       .eq("status", "pending")
       .or(`device_id.eq.${deviceId},device_id.is.null`),
@@ -476,6 +478,8 @@ export async function processSync(
     id: t.id,
     filename: t.filename,
     fileSize: t.file_size,
+    encrypted: t.encrypted,
+    iv: t.iv,
   }));
 
   // 3. Update device timestamps
@@ -520,4 +524,6 @@ interface TransferRow {
   id: string;
   filename: string;
   file_size: number;
+  encrypted: boolean;
+  iv: string | null;
 }

@@ -3,6 +3,7 @@ import { basename } from "path";
 
 export const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 export const MAX_FILENAME_LENGTH = 255;
+export const MAX_PENDING_TRANSFERS = 20;
 export const UPLOAD_URL_TTL = 300; // 5 minutes
 export const DOWNLOAD_URL_TTL = 3600; // 1 hour
 

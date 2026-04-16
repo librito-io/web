@@ -8,6 +8,7 @@ import {
   validateTransferSize,
   buildStoragePath,
   UPLOAD_URL_TTL,
+  MAX_PENDING_TRANSFERS,
 } from "$lib/server/transfer";
 
 export const POST: RequestHandler = async ({
@@ -52,11 +53,29 @@ export const POST: RequestHandler = async ({
   const sizeError = validateTransferSize(fileSize);
   if (sizeError) return jsonError(400, "file_too_large", sizeError);
 
+  const supabase = createAdminClient();
+
+  // Check pending transfer cap
+  const { count, error: countError } = await supabase
+    .from("book_transfers")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .in("status", ["pending_upload", "pending"]);
+
+  if (countError) {
+    return jsonError(500, "server_error", "Failed to check transfer quota");
+  }
+  if ((count ?? 0) >= MAX_PENDING_TRANSFERS) {
+    return jsonError(
+      409,
+      "queue_full",
+      `You can have at most ${MAX_PENDING_TRANSFERS} pending transfers`,
+    );
+  }
+
   // Generate transfer ID and build storage path
   const transferId = crypto.randomUUID();
   const storagePath = buildStoragePath(user.id, transferId, safeFilename);
-
-  const supabase = createAdminClient();
 
   // Create book_transfers row
   const { error: insertError } = await supabase.from("book_transfers").insert({

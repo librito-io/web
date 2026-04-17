@@ -59,22 +59,79 @@ describe("checkPairingStatus", () => {
     expect(result).toEqual({ paired: false });
   });
 
-  it("returns paired: true with token when code is claimed", async () => {
+  it("returns paired: true with token and transferSecret when code is claimed", async () => {
     const supabase = createMockSupabase();
     const redis = createMockRedis();
     supabase._results.set("pairing_codes.select", {
       data: {
         claimed: true,
         expires_at: new Date(Date.now() + 60000).toISOString(),
+        transfer_secret: null,
       },
       error: null,
     });
+    supabase._results.set("pairing_codes.update", { data: null, error: null });
+    await redis.set("pair:token:pairing-uuid", "sk_device_test_token", {
+      ex: 600,
+    });
+    await redis.set("pair:secret:pairing-uuid", "base64secret==", { ex: 600 });
+
+    const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
+    expect(result).toEqual({
+      paired: true,
+      token: "sk_device_test_token",
+      transferSecret: "base64secret==",
+    });
+  });
+
+  it("returns transferSecret from DB when Redis secret is missing", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        transfer_secret: "db_fallback_secret==",
+      },
+      error: null,
+    });
+    supabase._results.set("pairing_codes.update", { data: null, error: null });
     await redis.set("pair:token:pairing-uuid", "sk_device_test_token", {
       ex: 600,
     });
 
     const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
-    expect(result).toEqual({ paired: true, token: "sk_device_test_token" });
+    expect(result).toEqual({
+      paired: true,
+      token: "sk_device_test_token",
+      transferSecret: "db_fallback_secret==",
+    });
+    // Should clear the DB secret
+    expect(supabase._results.get("pairing_codes.update")).toBeDefined();
+  });
+
+  it("returns null transferSecret when neither Redis nor DB has the secret", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        transfer_secret: null,
+      },
+      error: null,
+    });
+    supabase._results.set("pairing_codes.update", { data: null, error: null });
+    await redis.set("pair:token:pairing-uuid", "sk_device_test_token", {
+      ex: 600,
+    });
+
+    const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
+    expect(result).toEqual({
+      paired: true,
+      token: "sk_device_test_token",
+      transferSecret: null,
+    });
   });
 
   it("returns not_found when pairingId does not exist", async () => {
@@ -139,10 +196,20 @@ describe("claimPairingCode", () => {
       "482901",
     );
 
-    expect(result).toEqual({ deviceId: "device-uuid", deviceName: "Librito" });
+    expect(result).toMatchObject({
+      deviceId: "device-uuid",
+      deviceName: "Librito",
+    });
+    expect("transferSecret" in result && !("error" in result)).toBe(true);
     expect(redis.set).toHaveBeenCalledWith(
       "pair:token:pairing-uuid",
       "sk_device_test_token_abc123",
+      { ex: 600 },
+    );
+    // Also stores transfer secret in Redis
+    expect(redis.set).toHaveBeenCalledWith(
+      "pair:secret:pairing-uuid",
+      expect.any(String),
       { ex: 600 },
     );
   });
@@ -178,13 +245,19 @@ describe("claimPairingCode", () => {
       "482901",
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       deviceId: "existing-device-uuid",
       deviceName: "My Reader",
     });
+    expect("transferSecret" in result && !("error" in result)).toBe(true);
     expect(redis.set).toHaveBeenCalledWith(
       "pair:token:pairing-uuid-2",
       "sk_device_test_token_abc123",
+      { ex: 600 },
+    );
+    expect(redis.set).toHaveBeenCalledWith(
+      "pair:secret:pairing-uuid-2",
+      expect.any(String),
       { ex: 600 },
     );
   });

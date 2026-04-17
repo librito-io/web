@@ -1,0 +1,26 @@
+import { redirect } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types";
+
+export const load: PageServerLoad = async ({
+  locals: { safeGetSession, supabase },
+}) => {
+  const { session } = await safeGetSession();
+  if (!session) redirect(303, "/auth/login");
+
+  const { data: transfers } = await supabase
+    .from("book_transfers")
+    .select("id, filename, file_size, status, uploaded_at, downloaded_at")
+    .eq("user_id", session.user.id)
+    .order("uploaded_at", { ascending: false });
+
+  return {
+    transfers: (transfers ?? []).map((t) => ({
+      id: t.id,
+      filename: t.filename,
+      fileSize: t.file_size,
+      status: t.status,
+      uploadedAt: t.uploaded_at,
+      downloadedAt: t.downloaded_at,
+    })),
+  };
+};

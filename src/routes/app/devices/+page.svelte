@@ -1,6 +1,7 @@
 <script lang="ts">
   import { enhance } from "$app/forms";
   import { invalidateAll } from "$app/navigation";
+  import { storeTransferKey } from "$lib/transfer-crypto";
 
   let { data } = $props();
   let pairingCode = $state("");
@@ -25,6 +26,11 @@
       if (!res.ok) {
         claimError = body.message || "Failed to claim code";
         return;
+      }
+
+      // Store transfer encryption key for later use during uploads
+      if (body.transferSecret) {
+        storeTransferKey(body.deviceId, body.transferSecret);
       }
 
       pairingCode = "";

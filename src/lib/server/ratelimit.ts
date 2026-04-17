@@ -37,3 +37,17 @@ export const syncLimiter = new Ratelimit({
   limiter: Ratelimit.slidingWindow(1, "30s"),
   prefix: "rl:sync",
 });
+
+// Transfer: upload initiation (browser, per user)
+export const transferUploadLimiter = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(5, "1m"),
+  prefix: "rl:transfer:upload",
+});
+
+// Transfer: download URL (device, per device)
+export const transferDownloadLimiter = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(1, "10s"),
+  prefix: "rl:transfer:download",
+});

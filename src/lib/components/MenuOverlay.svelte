@@ -72,13 +72,13 @@
       <a href="/app" class="menu-primary-item" onclick={() => (open = false)}>
         {$_("menuHighlightManager")}
       </a>
-      <button
-        type="button"
+      <a
+        href="/app/transfer"
         class="menu-primary-item"
         onclick={() => (open = false)}
       >
         {$_("menuBookTransfer")}
-      </button>
+      </a>
       <a
         href="/app/devices"
         class="menu-primary-item"

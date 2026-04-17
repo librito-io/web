@@ -13,6 +13,6 @@ export function jsonError(
   return json({ error, message }, { status, headers });
 }
 
-export function jsonSuccess(data: object): Response {
-  return json(data);
+export function jsonSuccess(data: object, status = 200): Response {
+  return json(data, { status });
 }

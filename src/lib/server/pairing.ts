@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generatePairingCode, generateDeviceToken, hashToken } from "./tokens";
 
@@ -10,11 +11,11 @@ type PairingResult = { code: string; pairingId: string; expiresIn: number };
 
 type StatusResult =
   | { paired: false }
-  | { paired: true; token: string }
+  | { paired: true; token: string; transferSecret: string | null }
   | { error: "not_found" | "code_expired" };
 
 type ClaimResult =
-  | { deviceId: string; deviceName: string }
+  | { deviceId: string; deviceName: string; transferSecret: string }
   | {
       error:
         | "invalid_code"
@@ -59,7 +60,7 @@ export async function checkPairingStatus(
 ): Promise<StatusResult> {
   const { data, error } = await supabase
     .from("pairing_codes")
-    .select("claimed, expires_at")
+    .select("claimed, expires_at, transfer_secret")
     .eq("id", pairingId)
     .single();
 
@@ -72,7 +73,21 @@ export async function checkPairingStatus(
   const token = await redis.get(`pair:token:${pairingId}`);
   if (!token) return { error: "code_expired" };
 
-  return { paired: true, token };
+  const transferSecret = await redis.get(`pair:secret:${pairingId}`);
+
+  // Clear transfer_secret from DB after reading (one-time delivery)
+  if (data.transfer_secret) {
+    await supabase
+      .from("pairing_codes")
+      .update({ transfer_secret: null })
+      .eq("id", pairingId);
+  }
+
+  return {
+    paired: true,
+    token,
+    transferSecret: transferSecret ?? data.transfer_secret ?? null,
+  };
 }
 
 export async function claimPairingCode(
@@ -146,5 +161,17 @@ export async function claimPairingCode(
   // Store plaintext token in Redis for device to pick up on next poll (10 min TTL)
   await redis.set(`pair:token:${pairingCode.id}`, token, { ex: 600 });
 
-  return { deviceId, deviceName };
+  // Generate transfer secret for E2E encryption key exchange
+  const transferSecret = randomBytes(32).toString("base64");
+
+  // Store transfer_secret in pairing_codes for status endpoint fallback
+  await supabase
+    .from("pairing_codes")
+    .update({ transfer_secret: transferSecret })
+    .eq("id", pairingCode.id);
+
+  // Store in Redis for device pickup alongside token (10 min TTL)
+  await redis.set(`pair:secret:${pairingCode.id}`, transferSecret, { ex: 600 });
+
+  return { deviceId, deviceName, transferSecret };
 }

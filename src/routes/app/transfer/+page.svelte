@@ -371,12 +371,12 @@
                 <span>Downloaded: {formatDate(transfer.downloadedAt)}</span>
               {/if}
             </div>
-            {#if transfer.status === "pending"}
+            {#if transfer.status === "pending" || transfer.status === "pending_upload"}
               <button
                 class="btn-small btn-danger"
                 onclick={() => handleCancel(transfer.id)}
               >
-                Cancel
+                Remove
               </button>
             {/if}
           </li>

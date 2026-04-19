@@ -11,7 +11,12 @@ type PairingResult = { code: string; pairingId: string; expiresIn: number };
 
 type StatusResult =
   | { paired: false }
-  | { paired: true; token: string; transferSecret: string | null }
+  | {
+      paired: true;
+      token: string;
+      transferSecret: string | null;
+      userEmail: string;
+    }
   | { error: "not_found" | "code_expired" };
 
 type ClaimResult =
@@ -60,7 +65,7 @@ export async function checkPairingStatus(
 ): Promise<StatusResult> {
   const { data, error } = await supabase
     .from("pairing_codes")
-    .select("claimed, expires_at, transfer_secret")
+    .select("claimed, expires_at, transfer_secret, user_id")
     .eq("id", pairingId)
     .single();
 
@@ -75,6 +80,16 @@ export async function checkPairingStatus(
 
   const transferSecret = await redis.get(`pair:secret:${pairingId}`);
 
+  // Fetch the claimer's email from auth.users (device displays it in the
+  // Cloud submenu so the user can confirm the right account)
+  let userEmail = "";
+  if (data.user_id) {
+    const { data: userRes } = await supabase.auth.admin.getUserById(
+      data.user_id,
+    );
+    userEmail = userRes?.user?.email ?? "";
+  }
+
   // Clear transfer_secret from DB after reading (one-time delivery)
   if (data.transfer_secret) {
     await supabase
@@ -87,6 +102,7 @@ export async function checkPairingStatus(
     paired: true,
     token,
     transferSecret: transferSecret ?? data.transfer_secret ?? null,
+    userEmail,
   };
 }
 
@@ -127,7 +143,11 @@ export async function claimPairingCode(
     // Re-pair: update existing device
     const { error: updateError } = await supabase
       .from("devices")
-      .update({ api_token_hash: tokenHash, revoked_at: null })
+      .update({
+        api_token_hash: tokenHash,
+        revoked_at: null,
+        paired_at: new Date().toISOString(),
+      })
       .eq("id", existing.id);
 
     if (updateError) return { error: "server_error" };

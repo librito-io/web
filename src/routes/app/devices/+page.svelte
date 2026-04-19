@@ -115,7 +115,7 @@
           {:else}
             <strong>{device.name}</strong>
             <span>Last synced: {formatDate(device.last_synced_at)}</span>
-            <span>Paired: {formatDate(device.created_at)}</span>
+            <span>Paired: {formatDate(device.paired_at ?? device.created_at)}</span>
             <button onclick={() => (renamingId = device.id)}>Rename</button>
             <form
               method="POST"

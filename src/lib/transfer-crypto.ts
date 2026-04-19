@@ -25,26 +25,30 @@ export async function deriveKey(secretBase64: string): Promise<CryptoKey> {
   );
 }
 
+export interface EncryptedFile {
+  data: ArrayBuffer;
+  iv: Uint8Array;
+}
+
 export async function encryptFile(
   data: ArrayBuffer,
   key: CryptoKey,
-): Promise<ArrayBuffer> {
+): Promise<EncryptedFile> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
   const encrypted = await crypto.subtle.encrypt({ name: ALGO, iv }, key, data);
-  const combined = new Uint8Array(IV_LENGTH + encrypted.byteLength);
-  combined.set(iv);
-  combined.set(new Uint8Array(encrypted), IV_LENGTH);
-  return combined.buffer;
+  return { data: encrypted, iv };
 }
 
 export async function decryptFile(
   data: ArrayBuffer,
+  iv: Uint8Array,
   key: CryptoKey,
 ): Promise<ArrayBuffer> {
-  const bytes = new Uint8Array(data);
-  const iv = bytes.slice(0, IV_LENGTH);
-  const ciphertext = bytes.slice(IV_LENGTH);
-  return crypto.subtle.decrypt({ name: ALGO, iv }, key, ciphertext);
+  return crypto.subtle.decrypt(
+    { name: ALGO, iv: iv as BufferSource },
+    key,
+    data,
+  );
 }
 
 export function storeTransferKey(deviceId: string, secretBase64: string): void {

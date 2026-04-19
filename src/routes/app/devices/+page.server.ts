@@ -9,10 +9,12 @@ export const load: PageServerLoad = async ({ locals: { safeGetSession } }) => {
   const supabase = createAdminClient();
   const { data: devices } = await supabase
     .from("devices")
-    .select("id, name, hardware_id, last_synced_at, created_at, revoked_at")
+    .select(
+      "id, name, hardware_id, last_synced_at, created_at, paired_at, revoked_at",
+    )
     .eq("user_id", user.id)
     .is("revoked_at", null)
-    .order("created_at", { ascending: false });
+    .order("paired_at", { ascending: false });
 
   return { devices: devices ?? [] };
 };

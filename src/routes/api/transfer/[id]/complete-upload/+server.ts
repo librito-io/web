@@ -64,8 +64,6 @@ export const POST: RequestHandler = async ({
 
   const buffer = Buffer.from(await fileData.arrayBuffer());
 
-  // Compute SHA-256 (sufficient for integrity — size check removed because
-  // encrypted files are larger than declared plaintext size by 28 bytes)
   const sha256 = computeFileSha256(buffer);
 
   // Check for duplicate: same user + same sha256 + status 'pending' + different id
@@ -91,7 +89,8 @@ export const POST: RequestHandler = async ({
     );
   }
 
-  // Update row: sha256, status → 'pending', encrypted, iv
+  // Update row: sha256, status → 'pending', encrypted, iv, file_size to stored buffer length
+  // (stored buffer = ciphertext+tag for encrypted, or plaintext for unencrypted)
   const { data: updated, error: updateError } = await supabase
     .from("book_transfers")
     .update({
@@ -99,6 +98,7 @@ export const POST: RequestHandler = async ({
       status: "pending",
       encrypted,
       iv,
+      file_size: buffer.length,
     })
     .eq("id", transferId)
     .select("id, filename, file_size, status, uploaded_at")

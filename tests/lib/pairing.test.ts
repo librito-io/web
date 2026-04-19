@@ -81,6 +81,7 @@ describe("checkPairingStatus", () => {
       paired: true,
       token: "sk_device_test_token",
       transferSecret: "base64secret==",
+      userEmail: "",
     });
   });
 
@@ -105,6 +106,7 @@ describe("checkPairingStatus", () => {
       paired: true,
       token: "sk_device_test_token",
       transferSecret: "db_fallback_secret==",
+      userEmail: "",
     });
     // Should clear the DB secret
     expect(supabase._results.get("pairing_codes.update")).toBeDefined();
@@ -131,6 +133,7 @@ describe("checkPairingStatus", () => {
       paired: true,
       token: "sk_device_test_token",
       transferSecret: null,
+      userEmail: "",
     });
   });
 

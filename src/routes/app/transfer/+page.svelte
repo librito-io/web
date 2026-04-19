@@ -133,11 +133,9 @@
         updateUpload({ status: "encrypting" });
         const key = await deriveKey(transferKeyBase64);
         const encResult = await encryptFile(fileData, key);
-        fileData = encResult;
+        fileData = encResult.data;
         encrypted = true;
-        iv = btoa(
-          String.fromCharCode(...new Uint8Array(encResult.slice(0, 12))),
-        );
+        iv = btoa(String.fromCharCode(...encResult.iv));
       }
 
       // Upload

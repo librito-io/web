@@ -45,32 +45,28 @@ describe("deriveKey", () => {
   it("produces the same key material deterministically", async () => {
     const key1 = await deriveKey(TEST_SECRET_BASE64);
     const key2 = await deriveKey(TEST_SECRET_BASE64);
-    // Both keys should successfully decrypt data encrypted with the other
     const plaintext = new TextEncoder().encode("hello");
-    const encrypted = await encryptFile(plaintext.buffer, key1);
-    const decrypted = await decryptFile(encrypted, key2);
+    const enc = await encryptFile(plaintext.buffer, key1);
+    const decrypted = await decryptFile(enc.data, enc.iv, key2);
     expect(new TextDecoder().decode(decrypted)).toBe("hello");
   });
 });
 
 describe("encryptFile", () => {
-  it("output is larger than input (IV + AES-GCM tag overhead)", async () => {
+  it("data is plaintext length + 16 (GCM auth tag), iv is 12 bytes", async () => {
     const key = await deriveKey(TEST_SECRET_BASE64);
     const plaintext = new Uint8Array(100).fill(0xab);
-    const encrypted = await encryptFile(plaintext.buffer, key);
-    // 12-byte IV + 16-byte GCM auth tag = at least 28 bytes overhead
-    expect(encrypted.byteLength).toBeGreaterThan(plaintext.byteLength);
+    const enc = await encryptFile(plaintext.buffer, key);
+    expect(enc.data.byteLength).toBe(plaintext.byteLength + 16);
+    expect(enc.iv.byteLength).toBe(12);
   });
 
-  it("output starts with a 12-byte IV", async () => {
+  it("iv is random per call", async () => {
     const key = await deriveKey(TEST_SECRET_BASE64);
     const plaintext = new Uint8Array(64).fill(0x01);
-    const encrypted1 = await encryptFile(plaintext.buffer, key);
-    const encrypted2 = await encryptFile(plaintext.buffer, key);
-    const iv1 = new Uint8Array(encrypted1).slice(0, 12);
-    const iv2 = new Uint8Array(encrypted2).slice(0, 12);
-    // IVs should be random and thus differ between calls
-    expect(iv1).not.toEqual(iv2);
+    const enc1 = await encryptFile(plaintext.buffer, key);
+    const enc2 = await encryptFile(plaintext.buffer, key);
+    expect(enc1.iv).not.toEqual(enc2.iv);
   });
 });
 
@@ -78,8 +74,8 @@ describe("decryptFile", () => {
   it("round-trip: encrypt then decrypt returns the original data", async () => {
     const key = await deriveKey(TEST_SECRET_BASE64);
     const original = new TextEncoder().encode("Hello, Librito!");
-    const encrypted = await encryptFile(original.buffer, key);
-    const decrypted = await decryptFile(encrypted, key);
+    const enc = await encryptFile(original.buffer, key);
+    const decrypted = await decryptFile(enc.data, enc.iv, key);
     expect(new Uint8Array(decrypted)).toEqual(original);
   });
 
@@ -87,8 +83,8 @@ describe("decryptFile", () => {
     const key = await deriveKey(TEST_SECRET_BASE64);
     const original = new Uint8Array(256);
     for (let i = 0; i < 256; i++) original[i] = i;
-    const encrypted = await encryptFile(original.buffer, key);
-    const decrypted = await decryptFile(encrypted, key);
+    const enc = await encryptFile(original.buffer, key);
+    const decrypted = await decryptFile(enc.data, enc.iv, key);
     expect(new Uint8Array(decrypted)).toEqual(original);
   });
 
@@ -98,8 +94,8 @@ describe("decryptFile", () => {
       btoa(String.fromCharCode(...new Array(32).fill(0x99))),
     );
     const plaintext = new Uint8Array(64).fill(0x01);
-    const encrypted = await encryptFile(plaintext.buffer, key1);
-    await expect(decryptFile(encrypted, key2)).rejects.toThrow();
+    const enc = await encryptFile(plaintext.buffer, key1);
+    await expect(decryptFile(enc.data, enc.iv, key2)).rejects.toThrow();
   });
 });
 

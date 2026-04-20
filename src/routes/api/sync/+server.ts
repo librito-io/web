@@ -16,8 +16,10 @@ export const POST: RequestHandler = async ({ request }) => {
       invalid_token: "Invalid device token",
       token_revoked: "Device token has been revoked. Re-pair the device.",
     } as const satisfies Record<typeof authResult.error, string>;
-    const status = authResult.error === "token_revoked" ? 403 : 401;
-    return jsonError(status, authResult.error, messages[authResult.error]);
+    // All auth errors map to 401 (per RFC 7235 — missing/invalid/revoked
+    // credentials all mean "you are not authenticated"). Matches the other
+    // authenticated device endpoints (download-url, confirm, unpair).
+    return jsonError(401, authResult.error, messages[authResult.error]);
   }
 
   const { device } = authResult;

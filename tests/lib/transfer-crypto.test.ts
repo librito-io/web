@@ -7,6 +7,7 @@ import {
   storeTransferKey,
   getTransferKey,
   getAnyTransferKey,
+  clearTransferKey,
 } from "$lib/transfer-crypto";
 
 vi.stubGlobal("crypto", webcrypto);
@@ -115,6 +116,46 @@ describe("storeTransferKey / getTransferKey", () => {
     storeTransferKey("device-abc", newSecret);
     expect(getTransferKey("device-abc")).toBe(newSecret);
   });
+
+  it("evicts prior entries under a different deviceId on store", () => {
+    const newSecret = btoa(String.fromCharCode(...new Array(32).fill(0x11)));
+    storeTransferKey("device-old", TEST_SECRET_BASE64);
+    storeTransferKey("device-new", newSecret);
+    expect(getTransferKey("device-old")).toBeNull();
+    expect(getTransferKey("device-new")).toBe(newSecret);
+    // Exactly one transfer-prefixed entry remains.
+    const transferKeys = [...storage.keys()].filter((k) =>
+      k.startsWith("librito_transfer_key_"),
+    );
+    expect(transferKeys).toHaveLength(1);
+  });
+
+  it("leaves unrelated localStorage entries untouched on store", () => {
+    storage.set("unrelated_key", "keep-me");
+    storeTransferKey("device-abc", TEST_SECRET_BASE64);
+    expect(storage.get("unrelated_key")).toBe("keep-me");
+  });
+});
+
+describe("clearTransferKey", () => {
+  it("removes only the matching entry", () => {
+    const secret2 = btoa(String.fromCharCode(...new Array(32).fill(0x55)));
+    // storeTransferKey evicts on each call, so seed via the mock store
+    // directly to exercise clearTransferKey against multiple entries.
+    storage.set("librito_transfer_key_device-1", TEST_SECRET_BASE64);
+    storage.set("librito_transfer_key_device-2", secret2);
+    storage.set("unrelated_key", "keep-me");
+    clearTransferKey("device-1");
+    expect(getTransferKey("device-1")).toBeNull();
+    expect(getTransferKey("device-2")).toBe(secret2);
+    expect(storage.get("unrelated_key")).toBe("keep-me");
+  });
+
+  it("is a no-op when the deviceId has no stored key", () => {
+    storeTransferKey("device-abc", TEST_SECRET_BASE64);
+    clearTransferKey("device-nonexistent");
+    expect(getTransferKey("device-abc")).toBe(TEST_SECRET_BASE64);
+  });
 });
 
 describe("getAnyTransferKey", () => {
@@ -132,11 +173,12 @@ describe("getAnyTransferKey", () => {
     expect(getAnyTransferKey()).toBeNull();
   });
 
-  it("returns one of the keys when multiple transfer keys exist", () => {
+  it("returns null when multiple transfer keys exist (ambiguous)", () => {
     const secret2 = btoa(String.fromCharCode(...new Array(32).fill(0x55)));
-    storeTransferKey("device-1", TEST_SECRET_BASE64);
-    storeTransferKey("device-2", secret2);
-    const result = getAnyTransferKey();
-    expect([TEST_SECRET_BASE64, secret2]).toContain(result);
+    // Bypass storeTransferKey's eviction to create an ambiguous state,
+    // matching the legacy-localStorage scenarios this guard exists for.
+    storage.set("librito_transfer_key_device-1", TEST_SECRET_BASE64);
+    storage.set("librito_transfer_key_device-2", secret2);
+    expect(getAnyTransferKey()).toBeNull();
   });
 });

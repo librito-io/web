@@ -1,7 +1,7 @@
 <script lang="ts">
   import { enhance } from "$app/forms";
   import { invalidateAll } from "$app/navigation";
-  import { storeTransferKey } from "$lib/transfer-crypto";
+  import { storeTransferKey, clearTransferKey } from "$lib/transfer-crypto";
 
   let { data } = $props();
   let pairingCode = $state("");
@@ -115,12 +115,20 @@
           {:else}
             <strong>{device.name}</strong>
             <span>Last synced: {formatDate(device.last_synced_at)}</span>
-            <span>Paired: {formatDate(device.paired_at ?? device.created_at)}</span>
+            <span
+              >Paired: {formatDate(device.paired_at ?? device.created_at)}</span
+            >
             <button onclick={() => (renamingId = device.id)}>Rename</button>
             <form
               method="POST"
               action="?/revoke"
-              use:enhance
+              use:enhance={({ formData }) => {
+                const deviceId = formData.get("deviceId") as string;
+                return async ({ update }) => {
+                  clearTransferKey(deviceId);
+                  await update();
+                };
+              }}
               style="display: inline;"
             >
               <input type="hidden" name="deviceId" value={device.id} />

@@ -1,9 +1,18 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { enhance } from "$app/forms";
   import { invalidateAll } from "$app/navigation";
-  import { storeTransferKey, clearTransferKey } from "$lib/transfer-crypto";
+  import {
+    storeTransferKey,
+    clearTransferKey,
+    reconcileTransferKeys,
+  } from "$lib/transfer-crypto";
 
   let { data } = $props();
+
+  onMount(() => {
+    reconcileTransferKeys(data.devices.map((d) => d.id));
+  });
   let pairingCode = $state("");
   let claimError = $state("");
   let claimLoading = $state(false);

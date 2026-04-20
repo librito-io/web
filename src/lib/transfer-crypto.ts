@@ -1,6 +1,6 @@
 const ALGO = "AES-GCM";
 const IV_LENGTH = 12;
-const KEY_STORAGE_PREFIX = "librito_transfer_key_";
+export const KEY_STORAGE_PREFIX = "librito_transfer_key_";
 
 export async function deriveKey(secretBase64: string): Promise<CryptoKey> {
   const rawKey = Uint8Array.from(atob(secretBase64), (c) => c.charCodeAt(0));
@@ -68,6 +68,16 @@ export function getTransferKey(deviceId: string): string | null {
 
 export function clearTransferKey(deviceId: string): void {
   localStorage.removeItem(`${KEY_STORAGE_PREFIX}${deviceId}`);
+}
+
+export function reconcileTransferKeys(liveDeviceIds: string[]): void {
+  const live = new Set(liveDeviceIds);
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const k = localStorage.key(i);
+    if (!k?.startsWith(KEY_STORAGE_PREFIX)) continue;
+    const id = k.slice(KEY_STORAGE_PREFIX.length);
+    if (!live.has(id)) localStorage.removeItem(k);
+  }
 }
 
 /**

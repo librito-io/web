@@ -8,6 +8,7 @@ import {
   getTransferKey,
   getAnyTransferKey,
   clearTransferKey,
+  reconcileTransferKeys,
 } from "$lib/transfer-crypto";
 
 vi.stubGlobal("crypto", webcrypto);
@@ -180,5 +181,37 @@ describe("getAnyTransferKey", () => {
     storage.set("librito_transfer_key_device-1", TEST_SECRET_BASE64);
     storage.set("librito_transfer_key_device-2", secret2);
     expect(getAnyTransferKey()).toBeNull();
+  });
+});
+
+describe("reconcileTransferKeys", () => {
+  it("removes entries whose deviceId is not in the live set", () => {
+    const secret2 = btoa(String.fromCharCode(...new Array(32).fill(0x55)));
+    storage.set("librito_transfer_key_device-1", TEST_SECRET_BASE64);
+    storage.set("librito_transfer_key_device-2", secret2);
+    reconcileTransferKeys(["device-1"]);
+    expect(getTransferKey("device-1")).toBe(TEST_SECRET_BASE64);
+    expect(getTransferKey("device-2")).toBeNull();
+  });
+
+  it("removes all transfer entries when live list is empty", () => {
+    storage.set("librito_transfer_key_device-1", TEST_SECRET_BASE64);
+    reconcileTransferKeys([]);
+    expect(getTransferKey("device-1")).toBeNull();
+  });
+
+  it("retains an entry whose deviceId is in the live set", () => {
+    storage.set("librito_transfer_key_device-1", TEST_SECRET_BASE64);
+    reconcileTransferKeys(["device-1"]);
+    expect(getTransferKey("device-1")).toBe(TEST_SECRET_BASE64);
+  });
+
+  it("leaves non-prefixed localStorage entries untouched", () => {
+    storage.set("librito_transfer_key_device-1", TEST_SECRET_BASE64);
+    storage.set("unrelated_key", "keep-me");
+    storage.set("another_key", "also-keep");
+    reconcileTransferKeys([]);
+    expect(storage.get("unrelated_key")).toBe("keep-me");
+    expect(storage.get("another_key")).toBe("also-keep");
   });
 });

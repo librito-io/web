@@ -34,6 +34,7 @@
   let transfers = $state<Transfer[]>(data.transfers);
   let uploads = $state<UploadState[]>([]);
   let dragOver = $state(false);
+  let cancellingIds = $state<Set<string>>(new Set());
 
   const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -201,15 +202,22 @@
   }
 
   async function handleCancel(transferId: string) {
+    if (cancellingIds.has(transferId)) return;
+    cancellingIds = new Set(cancellingIds).add(transferId);
     try {
       const res = await fetchWithSafariRetry(`/api/transfer/${transferId}`, {
         method: "DELETE",
       });
-      if (res.ok) {
+      // Treat 404 as success: row already gone, UI and server now agree.
+      if (res.ok || res.status === 404) {
         await refreshTransfers();
       }
     } catch {
       // Swallow network error; user can retry.
+    } finally {
+      const next = new Set(cancellingIds);
+      next.delete(transferId);
+      cancellingIds = next;
     }
   }
 
@@ -394,9 +402,10 @@
             {#if transfer.status === "pending" || transfer.status === "pending_upload"}
               <button
                 class="btn-small btn-danger"
+                disabled={cancellingIds.has(transfer.id)}
                 onclick={() => handleCancel(transfer.id)}
               >
-                Remove
+                {cancellingIds.has(transfer.id) ? "Removing..." : "Remove"}
               </button>
             {/if}
           </li>

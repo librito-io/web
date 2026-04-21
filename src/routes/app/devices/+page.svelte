@@ -23,12 +23,23 @@
     claimLoading = true;
     claimError = "";
 
-    try {
-      const res = await fetch("/api/pair/claim", {
+    const doFetch = () =>
+      fetch("/api/pair/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: pairingCode.trim() }),
       });
+
+    try {
+      let res: Response;
+      try {
+        res = await doFetch();
+      } catch {
+        // Safari/WebKit reuses idle HTTP keep-alive sockets the server already
+        // closed; first POST fails mid-flight with "network connection was lost".
+        // Retry once on a fresh connection.
+        res = await doFetch();
+      }
 
       const body = await res.json();
 
@@ -101,10 +112,17 @@
             <form
               method="POST"
               action="?/rename"
-              use:enhance={() => {
-                return async ({ update }) => {
+              use:enhance={({ formElement }) => {
+                return async ({ result, update }) => {
+                  // Safari/WebKit stale keep-alive: retry once on a fresh socket.
+                  if (result.type === "error" && !formElement.dataset.retried) {
+                    formElement.dataset.retried = "1";
+                    formElement.requestSubmit();
+                    return;
+                  }
+                  delete formElement.dataset.retried;
                   renamingId = null;
-                  update();
+                  await update();
                 };
               }}
             >
@@ -131,10 +149,19 @@
             <form
               method="POST"
               action="?/revoke"
-              use:enhance={({ formData }) => {
+              use:enhance={({ formElement, formData }) => {
                 const deviceId = formData.get("deviceId") as string;
-                return async ({ update }) => {
-                  clearTransferKey(deviceId);
+                return async ({ result, update }) => {
+                  // Safari/WebKit stale keep-alive: retry once on a fresh socket.
+                  if (result.type === "error" && !formElement.dataset.retried) {
+                    formElement.dataset.retried = "1";
+                    formElement.requestSubmit();
+                    return;
+                  }
+                  delete formElement.dataset.retried;
+                  if (result.type === "success") {
+                    clearTransferKey(deviceId);
+                  }
                   await update();
                 };
               }}

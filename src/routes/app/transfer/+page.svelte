@@ -54,7 +54,7 @@
       });
       xhr.addEventListener("error", () => reject(new Error("Upload failed")));
       xhr.open("PUT", url);
-      xhr.send(fileData);
+      xhr.send(new Uint8Array(fileData));
     });
   }
 
@@ -98,7 +98,7 @@
     try {
       // Initiate
       updateUpload({ status: "initiating" });
-      const initiateRes = await fetch("/api/transfer/initiate", {
+      const initiateRes = await fetchWithSafariRetry("/api/transfer/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filename: file.name, fileSize: file.size }),
@@ -146,7 +146,7 @@
 
       // Complete
       updateUpload({ status: "completing" });
-      const completeRes = await fetch(
+      const completeRes = await fetchWithSafariRetry(
         `/api/transfer/${transferId}/complete-upload`,
         {
           method: "POST",
@@ -174,20 +174,42 @@
     }
   }
 
+  async function fetchWithSafariRetry(
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> {
+    try {
+      return await fetch(input, init);
+    } catch {
+      // Safari/WebKit reuses idle HTTP keep-alive sockets the server already
+      // closed; first request fails mid-flight with "Load failed" / "network
+      // connection was lost". Retry once on a fresh connection.
+      return await fetch(input, init);
+    }
+  }
+
   async function refreshTransfers() {
-    const res = await fetch("/api/transfer/list");
-    if (res.ok) {
-      const body = await res.json();
-      transfers = body.transfers;
+    try {
+      const res = await fetchWithSafariRetry("/api/transfer/list");
+      if (res.ok) {
+        const body = await res.json();
+        transfers = body.transfers;
+      }
+    } catch {
+      // Swallow: stale list is fine, next action will refresh.
     }
   }
 
   async function handleCancel(transferId: string) {
-    const res = await fetch(`/api/transfer/${transferId}`, {
-      method: "DELETE",
-    });
-    if (res.ok) {
-      await refreshTransfers();
+    try {
+      const res = await fetchWithSafariRetry(`/api/transfer/${transferId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        await refreshTransfers();
+      }
+    } catch {
+      // Swallow network error; user can retry.
     }
   }
 

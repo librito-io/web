@@ -34,6 +34,7 @@
   let transfers = $state<Transfer[]>(data.transfers);
   let uploads = $state<UploadState[]>([]);
   let dragOver = $state(false);
+  let cancellingIds = $state<Set<string>>(new Set());
 
   const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -54,7 +55,7 @@
       });
       xhr.addEventListener("error", () => reject(new Error("Upload failed")));
       xhr.open("PUT", url);
-      xhr.send(fileData);
+      xhr.send(new Uint8Array(fileData));
     });
   }
 
@@ -98,7 +99,7 @@
     try {
       // Initiate
       updateUpload({ status: "initiating" });
-      const initiateRes = await fetch("/api/transfer/initiate", {
+      const initiateRes = await fetchWithSafariRetry("/api/transfer/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filename: file.name, fileSize: file.size }),
@@ -146,7 +147,7 @@
 
       // Complete
       updateUpload({ status: "completing" });
-      const completeRes = await fetch(
+      const completeRes = await fetchWithSafariRetry(
         `/api/transfer/${transferId}/complete-upload`,
         {
           method: "POST",
@@ -174,20 +175,49 @@
     }
   }
 
+  async function fetchWithSafariRetry(
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> {
+    try {
+      return await fetch(input, init);
+    } catch {
+      // Safari/WebKit reuses idle HTTP keep-alive sockets the server already
+      // closed; first request fails mid-flight with "Load failed" / "network
+      // connection was lost". Retry once on a fresh connection.
+      return await fetch(input, init);
+    }
+  }
+
   async function refreshTransfers() {
-    const res = await fetch("/api/transfer/list");
-    if (res.ok) {
-      const body = await res.json();
-      transfers = body.transfers;
+    try {
+      const res = await fetchWithSafariRetry("/api/transfer/list");
+      if (res.ok) {
+        const body = await res.json();
+        transfers = body.transfers;
+      }
+    } catch {
+      // Swallow: stale list is fine, next action will refresh.
     }
   }
 
   async function handleCancel(transferId: string) {
-    const res = await fetch(`/api/transfer/${transferId}`, {
-      method: "DELETE",
-    });
-    if (res.ok) {
-      await refreshTransfers();
+    if (cancellingIds.has(transferId)) return;
+    cancellingIds = new Set(cancellingIds).add(transferId);
+    try {
+      const res = await fetchWithSafariRetry(`/api/transfer/${transferId}`, {
+        method: "DELETE",
+      });
+      // Treat 404 as success: row already gone, UI and server now agree.
+      if (res.ok || res.status === 404) {
+        await refreshTransfers();
+      }
+    } catch {
+      // Swallow network error; user can retry.
+    } finally {
+      const next = new Set(cancellingIds);
+      next.delete(transferId);
+      cancellingIds = next;
     }
   }
 
@@ -372,9 +402,10 @@
             {#if transfer.status === "pending" || transfer.status === "pending_upload"}
               <button
                 class="btn-small btn-danger"
+                disabled={cancellingIds.has(transfer.id)}
                 onclick={() => handleCancel(transfer.id)}
               >
-                Remove
+                {cancellingIds.has(transfer.id) ? "Removing..." : "Remove"}
               </button>
             {/if}
           </li>

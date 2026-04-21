@@ -112,10 +112,17 @@
             <form
               method="POST"
               action="?/rename"
-              use:enhance={() => {
-                return async ({ update }) => {
+              use:enhance={({ formElement }) => {
+                return async ({ result, update }) => {
+                  // Safari/WebKit stale keep-alive: retry once on a fresh socket.
+                  if (result.type === "error" && !formElement.dataset.retried) {
+                    formElement.dataset.retried = "1";
+                    formElement.requestSubmit();
+                    return;
+                  }
+                  delete formElement.dataset.retried;
                   renamingId = null;
-                  update();
+                  await update();
                 };
               }}
             >
@@ -142,10 +149,19 @@
             <form
               method="POST"
               action="?/revoke"
-              use:enhance={({ formData }) => {
+              use:enhance={({ formElement, formData }) => {
                 const deviceId = formData.get("deviceId") as string;
-                return async ({ update }) => {
-                  clearTransferKey(deviceId);
+                return async ({ result, update }) => {
+                  // Safari/WebKit stale keep-alive: retry once on a fresh socket.
+                  if (result.type === "error" && !formElement.dataset.retried) {
+                    formElement.dataset.retried = "1";
+                    formElement.requestSubmit();
+                    return;
+                  }
+                  delete formElement.dataset.retried;
+                  if (result.type === "success") {
+                    clearTransferKey(deviceId);
+                  }
                   await update();
                 };
               }}

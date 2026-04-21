@@ -23,12 +23,23 @@
     claimLoading = true;
     claimError = "";
 
-    try {
-      const res = await fetch("/api/pair/claim", {
+    const doFetch = () =>
+      fetch("/api/pair/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: pairingCode.trim() }),
       });
+
+    try {
+      let res: Response;
+      try {
+        res = await doFetch();
+      } catch {
+        // Safari/WebKit reuses idle HTTP keep-alive sockets the server already
+        // closed; first POST fails mid-flight with "network connection was lost".
+        // Retry once on a fresh connection.
+        res = await doFetch();
+      }
 
       const body = await res.json();
 

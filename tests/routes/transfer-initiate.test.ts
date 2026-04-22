@@ -34,7 +34,7 @@ function buildEvent(
 
 beforeEach(() => {
   supabase._results.clear();
-  supabase._storage?.clear();
+  supabase._storage.clear();
 });
 
 describe("POST /api/transfer/initiate — Deploy 1 (sha256 optional)", () => {

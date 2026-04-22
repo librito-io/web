@@ -34,6 +34,7 @@ function buildEvent(
 
 beforeEach(() => {
   supabase._results.clear();
+  supabase._storage?.clear();
 });
 
 describe("POST /api/transfer/initiate — Deploy 1 (sha256 optional)", () => {
@@ -46,5 +47,21 @@ describe("POST /api/transfer/initiate — Deploy 1 (sha256 optional)", () => {
     );
 
     expect(res.status).toBe(201);
+  });
+
+  it("returns the signed upload URL in the response", async () => {
+    supabase._results.set("book_transfers.select", { data: [], error: null });
+    supabase._results.set("book_transfers.insert", { data: null, error: null });
+    supabase._storage.set("createSignedUploadUrl", {
+      data: { signedUrl: "https://storage/x" },
+      error: null,
+    });
+
+    const res = await POST(
+      buildEvent({ filename: "book.epub", fileSize: 100 }),
+    );
+    const body = await res.json();
+
+    expect(body.uploadUrl).toBe("https://storage/x");
   });
 });

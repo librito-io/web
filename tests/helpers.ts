@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  */
 export function createMockSupabase() {
   const results = new Map<string, { data: unknown; error: unknown }>();
+  const storageResults = new Map<string, { data: unknown; error: unknown }>();
 
   function makeChain(table: string, operation: string) {
     const key = `${table}.${operation}`;
@@ -38,6 +39,25 @@ export function createMockSupabase() {
     return new Proxy(chain, handler);
   }
 
+  function storageBucket(_bucket: string) {
+    return {
+      createSignedUploadUrl: async (..._args: unknown[]) =>
+        storageResults.get("createSignedUploadUrl") ?? {
+          data: { signedUrl: "https://mock/upload" },
+          error: null,
+        },
+      createSignedUrl: async (..._args: unknown[]) =>
+        storageResults.get("createSignedUrl") ?? {
+          data: { signedUrl: "https://mock/download" },
+          error: null,
+        },
+      remove: async (..._args: unknown[]) =>
+        storageResults.get("remove") ?? { data: null, error: null },
+      list: async (..._args: unknown[]) =>
+        storageResults.get("list") ?? { data: [], error: null },
+    };
+  }
+
   const client = {
     from: (table: string) => ({
       insert: (..._args: unknown[]) => makeChain(table, "insert"),
@@ -46,11 +66,14 @@ export function createMockSupabase() {
       upsert: (..._args: unknown[]) => makeChain(table, "upsert"),
       delete: (..._args: unknown[]) => makeChain(table, "delete"),
     }),
+    storage: { from: storageBucket },
     _results: results,
+    _storage: storageResults,
   };
 
   return client as unknown as SupabaseClient & {
     _results: Map<string, { data: unknown; error: unknown }>;
+    _storage: Map<string, { data: unknown; error: unknown }>;
   };
 }
 

@@ -17,8 +17,13 @@ export function createMockSupabase() {
     const chain: Record<string, unknown> = {};
 
     const terminal = () => {
-      const result = results.get(key) ?? { data: null, error: null };
-      return Promise.resolve(result);
+      const raw = results.get(key) ?? { data: null, error: null };
+      // Mirror real Supabase: .single()/.maybeSingle() returns a scalar row.
+      // Tests often set `data: []` or `data: [row]` on the same select key
+      // (because the handler also uses it for non-terminal awaits); unwrap
+      // the first element (or null) so `.maybeSingle()` semantics match.
+      const data = Array.isArray(raw.data) ? (raw.data[0] ?? null) : raw.data;
+      return Promise.resolve({ data, error: raw.error });
     };
 
     // Every method returns the chain, except terminal methods.

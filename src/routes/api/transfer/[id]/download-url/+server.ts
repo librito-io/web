@@ -32,7 +32,7 @@ export const GET: RequestHandler = async ({ request, params }) => {
   const { data: transfer, error: fetchError } = await supabase
     .from("book_transfers")
     .select(
-      "id, user_id, device_id, status, storage_path, sha256, filename, file_size, encrypted, iv",
+      "id, user_id, device_id, status, storage_path, sha256, filename, file_size",
     )
     .eq("id", params.id)
     .maybeSingle();
@@ -69,7 +69,5 @@ export const GET: RequestHandler = async ({ request, params }) => {
     filename: transfer.filename,
     fileSize: transfer.file_size,
     expiresIn: DOWNLOAD_URL_TTL,
-    encrypted: transfer.encrypted,
-    iv: transfer.iv,
   });
 };

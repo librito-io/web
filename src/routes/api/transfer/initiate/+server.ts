@@ -87,7 +87,6 @@ export const POST: RequestHandler = async ({
     storage_path: storagePath,
     sha256: "",
     status: "pending_upload",
-    encrypted: false,
   });
 
   if (insertError) {

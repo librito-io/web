@@ -1,4 +1,3 @@
-import { randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generatePairingCode, generateDeviceToken, hashToken } from "./tokens";
 
@@ -11,16 +10,11 @@ type PairingResult = { code: string; pairingId: string; expiresIn: number };
 
 type StatusResult =
   | { paired: false }
-  | {
-      paired: true;
-      token: string;
-      transferSecret: string | null;
-      userEmail: string;
-    }
+  | { paired: true; token: string; userEmail: string }
   | { error: "not_found" | "code_expired" };
 
 type ClaimResult =
-  | { deviceId: string; deviceName: string; transferSecret: string }
+  | { deviceId: string; deviceName: string }
   | {
       error:
         | "invalid_code"
@@ -28,6 +22,10 @@ type ClaimResult =
         | "already_claimed"
         | "server_error";
     };
+
+// Pairing codes expire after 5 minutes; align Redis TTL so the token lives
+// exactly as long as the code that produced it.
+const PAIR_REDIS_TTL_SEC = 300;
 
 export async function requestPairingCode(
   supabase: SupabaseClient,
@@ -65,7 +63,7 @@ export async function checkPairingStatus(
 ): Promise<StatusResult> {
   const { data, error } = await supabase
     .from("pairing_codes")
-    .select("claimed, expires_at, transfer_secret, user_id")
+    .select("claimed, expires_at, user_id")
     .eq("id", pairingId)
     .single();
 
@@ -78,8 +76,6 @@ export async function checkPairingStatus(
   const token = await redis.get(`pair:token:${pairingId}`);
   if (!token) return { error: "code_expired" };
 
-  const transferSecret = await redis.get(`pair:secret:${pairingId}`);
-
   // Fetch the claimer's email from auth.users (device displays it in the
   // Cloud submenu so the user can confirm the right account)
   let userEmail = "";
@@ -90,20 +86,7 @@ export async function checkPairingStatus(
     userEmail = userRes?.user?.email ?? "";
   }
 
-  // Clear transfer_secret from DB after reading (one-time delivery)
-  if (data.transfer_secret) {
-    await supabase
-      .from("pairing_codes")
-      .update({ transfer_secret: null })
-      .eq("id", pairingId);
-  }
-
-  return {
-    paired: true,
-    token,
-    transferSecret: transferSecret ?? data.transfer_secret ?? null,
-    userEmail,
-  };
+  return { paired: true, token, userEmail };
 }
 
 export async function claimPairingCode(
@@ -112,17 +95,33 @@ export async function claimPairingCode(
   userId: string,
   code: string,
 ): Promise<ClaimResult> {
-  // Look up code (include claimed codes so we can return specific error messages)
+  // Look up code (include claimed codes so we can make the idempotent path work
+  // and still reject replay from another account).
   const { data: pairingCode, error: lookupError } = await supabase
     .from("pairing_codes")
-    .select("id, hardware_id, claimed, expires_at")
+    .select("id, hardware_id, claimed, expires_at, user_id")
     .eq("code", code)
     .single();
 
   if (lookupError || !pairingCode) return { error: "invalid_code" };
   if (new Date(pairingCode.expires_at) < new Date())
     return { error: "code_expired" };
-  if (pairingCode.claimed) return { error: "already_claimed" };
+
+  // Idempotent replay — same user claiming the same code. Safari's stale
+  // keep-alive sockets can drop the first response mid-flight; the browser
+  // retries and previously got "already_claimed" with no way to recover.
+  // Return the same shape as the original success so the UI finishes cleanly.
+  if (pairingCode.claimed) {
+    if (pairingCode.user_id !== userId) return { error: "already_claimed" };
+    const { data: device } = await supabase
+      .from("devices")
+      .select("id, name")
+      .eq("user_id", userId)
+      .eq("hardware_id", pairingCode.hardware_id)
+      .maybeSingle();
+    if (!device) return { error: "already_claimed" };
+    return { deviceId: device.id, deviceName: device.name };
+  }
 
   // Generate device token
   const token = generateDeviceToken();
@@ -178,20 +177,10 @@ export async function claimPairingCode(
 
   if (markError) return { error: "server_error" };
 
-  // Store plaintext token in Redis for device to pick up on next poll (10 min TTL)
-  await redis.set(`pair:token:${pairingCode.id}`, token, { ex: 600 });
+  // Store plaintext token in Redis for device to pick up on next poll
+  await redis.set(`pair:token:${pairingCode.id}`, token, {
+    ex: PAIR_REDIS_TTL_SEC,
+  });
 
-  // Generate transfer secret for E2E encryption key exchange
-  const transferSecret = randomBytes(32).toString("base64");
-
-  // Store transfer_secret in pairing_codes for status endpoint fallback
-  await supabase
-    .from("pairing_codes")
-    .update({ transfer_secret: transferSecret })
-    .eq("id", pairingCode.id);
-
-  // Store in Redis for device pickup alongside token (10 min TTL)
-  await redis.set(`pair:secret:${pairingCode.id}`, transferSecret, { ex: 600 });
-
-  return { deviceId, deviceName, transferSecret };
+  return { deviceId, deviceName };
 }

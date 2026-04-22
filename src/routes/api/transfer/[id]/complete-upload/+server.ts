@@ -5,7 +5,6 @@ import { computeFileSha256 } from "$lib/server/transfer";
 
 export const POST: RequestHandler = async ({
   params,
-  request,
   locals: { safeGetSession },
 }) => {
   // Auth check — must be logged in
@@ -13,19 +12,6 @@ export const POST: RequestHandler = async ({
   if (!user) return jsonError(401, "unauthorized", "Must be logged in");
 
   const transferId = params.id;
-
-  // Parse optional request body
-  let encrypted = false;
-  let iv: string | null = null;
-  try {
-    const body = await request.json();
-    if (body && typeof body === "object") {
-      if (typeof body.encrypted === "boolean") encrypted = body.encrypted;
-      if (typeof body.iv === "string") iv = body.iv;
-    }
-  } catch {
-    // Empty or non-JSON body is fine — encryption metadata is optional
-  }
 
   const supabase = createAdminClient();
 
@@ -89,15 +75,12 @@ export const POST: RequestHandler = async ({
     );
   }
 
-  // Update row: sha256, status → 'pending', encrypted, iv, file_size to stored buffer length
-  // (stored buffer = ciphertext+tag for encrypted, or plaintext for unencrypted)
+  // Update row: sha256, status → 'pending', file_size to stored buffer length
   const { data: updated, error: updateError } = await supabase
     .from("book_transfers")
     .update({
       sha256,
       status: "pending",
-      encrypted,
-      iv,
       file_size: buffer.length,
     })
     .eq("id", transferId)

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 vi.mock("$lib/server/tokens", () => ({
   generatePairingCode: vi.fn(() => "482901"),
@@ -59,82 +59,43 @@ describe("checkPairingStatus", () => {
     expect(result).toEqual({ paired: false });
   });
 
-  it("returns paired: true with token and transferSecret when code is claimed", async () => {
+  it("returns paired: true with token and userEmail when code is claimed", async () => {
     const supabase = createMockSupabase();
     const redis = createMockRedis();
     supabase._results.set("pairing_codes.select", {
       data: {
         claimed: true,
         expires_at: new Date(Date.now() + 60000).toISOString(),
-        transfer_secret: null,
+        user_id: null,
       },
       error: null,
     });
-    supabase._results.set("pairing_codes.update", { data: null, error: null });
     await redis.set("pair:token:pairing-uuid", "sk_device_test_token", {
-      ex: 600,
+      ex: 300,
     });
-    await redis.set("pair:secret:pairing-uuid", "base64secret==", { ex: 600 });
 
     const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
     expect(result).toEqual({
       paired: true,
       token: "sk_device_test_token",
-      transferSecret: "base64secret==",
       userEmail: "",
     });
   });
 
-  it("returns transferSecret from DB when Redis secret is missing", async () => {
+  it("returns code_expired when the pairing token has disappeared from redis", async () => {
     const supabase = createMockSupabase();
     const redis = createMockRedis();
     supabase._results.set("pairing_codes.select", {
       data: {
         claimed: true,
         expires_at: new Date(Date.now() + 60000).toISOString(),
-        transfer_secret: "db_fallback_secret==",
+        user_id: null,
       },
       error: null,
     });
-    supabase._results.set("pairing_codes.update", { data: null, error: null });
-    await redis.set("pair:token:pairing-uuid", "sk_device_test_token", {
-      ex: 600,
-    });
 
     const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
-    expect(result).toEqual({
-      paired: true,
-      token: "sk_device_test_token",
-      transferSecret: "db_fallback_secret==",
-      userEmail: "",
-    });
-    // Should clear the DB secret
-    expect(supabase._results.get("pairing_codes.update")).toBeDefined();
-  });
-
-  it("returns null transferSecret when neither Redis nor DB has the secret", async () => {
-    const supabase = createMockSupabase();
-    const redis = createMockRedis();
-    supabase._results.set("pairing_codes.select", {
-      data: {
-        claimed: true,
-        expires_at: new Date(Date.now() + 60000).toISOString(),
-        transfer_secret: null,
-      },
-      error: null,
-    });
-    supabase._results.set("pairing_codes.update", { data: null, error: null });
-    await redis.set("pair:token:pairing-uuid", "sk_device_test_token", {
-      ex: 600,
-    });
-
-    const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
-    expect(result).toEqual({
-      paired: true,
-      token: "sk_device_test_token",
-      transferSecret: null,
-      userEmail: "",
-    });
+    expect(result).toEqual({ error: "code_expired" });
   });
 
   it("returns not_found when pairingId does not exist", async () => {
@@ -177,12 +138,13 @@ describe("claimPairingCode", () => {
         hardware_id: "hw-device-1",
         claimed: false,
         expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_id: null,
       },
       error: null,
     });
     // Code update (mark claimed)
     supabase._results.set("pairing_codes.update", { data: null, error: null });
-    // Device insert
+    // Device insert path (no existing device)
     supabase._results.set("devices.select", {
       data: null,
       error: { code: "PGRST116" },
@@ -199,21 +161,14 @@ describe("claimPairingCode", () => {
       "482901",
     );
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       deviceId: "device-uuid",
       deviceName: "Librito",
     });
-    expect("transferSecret" in result && !("error" in result)).toBe(true);
     expect(redis.set).toHaveBeenCalledWith(
       "pair:token:pairing-uuid",
       "sk_device_test_token_abc123",
-      { ex: 600 },
-    );
-    // Also stores transfer secret in Redis
-    expect(redis.set).toHaveBeenCalledWith(
-      "pair:secret:pairing-uuid",
-      expect.any(String),
-      { ex: 600 },
+      { ex: 300 },
     );
   });
 
@@ -221,24 +176,21 @@ describe("claimPairingCode", () => {
     const supabase = createMockSupabase();
     const redis = createMockRedis();
 
-    // Code lookup
     supabase._results.set("pairing_codes.select", {
       data: {
         id: "pairing-uuid-2",
         hardware_id: "hw-device-1",
         claimed: false,
         expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_id: null,
       },
       error: null,
     });
-    // Code update (mark claimed)
     supabase._results.set("pairing_codes.update", { data: null, error: null });
-    // Existing device found (re-pair case)
     supabase._results.set("devices.select", {
       data: { id: "existing-device-uuid", name: "My Reader" },
       error: null,
     });
-    // Device update (token rotation)
     supabase._results.set("devices.update", { data: null, error: null });
 
     const result = await claimPairingCode(
@@ -248,20 +200,14 @@ describe("claimPairingCode", () => {
       "482901",
     );
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       deviceId: "existing-device-uuid",
       deviceName: "My Reader",
     });
-    expect("transferSecret" in result && !("error" in result)).toBe(true);
     expect(redis.set).toHaveBeenCalledWith(
       "pair:token:pairing-uuid-2",
       "sk_device_test_token_abc123",
-      { ex: 600 },
-    );
-    expect(redis.set).toHaveBeenCalledWith(
-      "pair:secret:pairing-uuid-2",
-      expect.any(String),
-      { ex: 600 },
+      { ex: 300 },
     );
   });
 
@@ -274,6 +220,7 @@ describe("claimPairingCode", () => {
         hardware_id: "hw-1",
         claimed: false,
         expires_at: new Date(Date.now() - 5000).toISOString(),
+        user_id: null,
       },
       error: null,
     });
@@ -287,7 +234,9 @@ describe("claimPairingCode", () => {
     expect(result).toEqual({ error: "code_expired" });
   });
 
-  it("returns already_claimed for claimed codes", async () => {
+  it("replays idempotently when the same user re-claims a code they already own", async () => {
+    // Safari/WebKit can silently drop a successful claim response; the browser
+    // retries and must not get stuck on "already_claimed".
     const supabase = createMockSupabase();
     const redis = createMockRedis();
     supabase._results.set("pairing_codes.select", {
@@ -296,9 +245,66 @@ describe("claimPairingCode", () => {
         hardware_id: "hw-1",
         claimed: true,
         expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_id: "user-uuid",
       },
       error: null,
     });
+    supabase._results.set("devices.select", {
+      data: { id: "device-uuid", name: "Librito" },
+      error: null,
+    });
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "222222",
+    );
+    expect(result).toEqual({
+      deviceId: "device-uuid",
+      deviceName: "Librito",
+    });
+    // Must not touch the token: prior claim remains authoritative.
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-user replay of a claimed code", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        id: "claimed-uuid",
+        hardware_id: "hw-1",
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_id: "owner-user",
+      },
+      error: null,
+    });
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "attacker-user",
+      "222222",
+    );
+    expect(result).toEqual({ error: "already_claimed" });
+  });
+
+  it("returns already_claimed when the matching device row cannot be located on replay", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        id: "claimed-uuid",
+        hardware_id: "hw-1",
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_id: "user-uuid",
+      },
+      error: null,
+    });
+    supabase._results.set("devices.select", { data: null, error: null });
 
     const result = await claimPairingCode(
       supabase,

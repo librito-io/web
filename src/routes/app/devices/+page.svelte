@@ -1,18 +1,9 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { enhance } from "$app/forms";
   import { invalidateAll } from "$app/navigation";
-  import {
-    storeTransferKey,
-    clearTransferKey,
-    reconcileTransferKeys,
-  } from "$lib/transfer-crypto";
 
   let { data } = $props();
 
-  onMount(() => {
-    reconcileTransferKeys(data.devices.map((d) => d.id));
-  });
   let pairingCode = $state("");
   let claimError = $state("");
   let claimLoading = $state(false);
@@ -46,11 +37,6 @@
       if (!res.ok) {
         claimError = body.message || "Failed to claim code";
         return;
-      }
-
-      // Store transfer encryption key for later use during uploads
-      if (body.transferSecret) {
-        storeTransferKey(body.deviceId, body.transferSecret);
       }
 
       pairingCode = "";
@@ -149,8 +135,7 @@
             <form
               method="POST"
               action="?/revoke"
-              use:enhance={({ formElement, formData }) => {
-                const deviceId = formData.get("deviceId") as string;
+              use:enhance={({ formElement }) => {
                 return async ({ result, update }) => {
                   // Safari/WebKit stale keep-alive: retry once on a fresh socket.
                   if (result.type === "error" && !formElement.dataset.retried) {
@@ -159,9 +144,6 @@
                     return;
                   }
                   delete formElement.dataset.retried;
-                  if (result.type === "success") {
-                    clearTransferKey(deviceId);
-                  }
                   await update();
                 };
               }}

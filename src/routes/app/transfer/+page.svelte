@@ -1,10 +1,4 @@
 <script lang="ts">
-  import {
-    getAnyTransferKey,
-    deriveKey,
-    encryptFile,
-  } from "$lib/transfer-crypto";
-
   interface Transfer {
     id: string;
     filename: string;
@@ -20,7 +14,6 @@
     status:
       | "validating"
       | "initiating"
-      | "encrypting"
       | "uploading"
       | "completing"
       | "done"
@@ -124,20 +117,7 @@
       const { transferId, uploadUrl } = await initiateRes.json();
       updateUpload({ transferId });
 
-      // Encrypt if key available
-      let fileData: ArrayBuffer = await file.arrayBuffer();
-      let encrypted = false;
-      let iv: string | null = null;
-
-      const transferKeyBase64 = getAnyTransferKey();
-      if (transferKeyBase64) {
-        updateUpload({ status: "encrypting" });
-        const key = await deriveKey(transferKeyBase64);
-        const encResult = await encryptFile(fileData, key);
-        fileData = encResult.data;
-        encrypted = true;
-        iv = btoa(String.fromCharCode(...encResult.iv));
-      }
+      const fileData = await file.arrayBuffer();
 
       // Upload
       updateUpload({ status: "uploading" });
@@ -149,11 +129,7 @@
       updateUpload({ status: "completing" });
       const completeRes = await fetchWithSafariRetry(
         `/api/transfer/${transferId}/complete-upload`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ encrypted, iv }),
-        },
+        { method: "POST" },
       );
 
       if (!completeRes.ok) {
@@ -351,8 +327,6 @@
                   Validating...
                 {:else if upload.status === "initiating"}
                   Preparing...
-                {:else if upload.status === "encrypting"}
-                  Encrypting...
                 {:else if upload.status === "uploading"}
                   Uploading... {upload.progress}%
                 {:else if upload.status === "completing"}
@@ -372,8 +346,7 @@
 
     {#if !hasContent}
       <p class="empty-state">
-        Upload EPUBs here. They'll be encrypted and delivered to your Librito on
-        next sync.
+        Upload EPUBs here. They'll be delivered to your Librito on next sync.
       </p>
     {:else if transfers.length === 0}
       <p class="empty-state">No transfers yet.</p>
@@ -417,9 +390,10 @@
   <!-- Privacy notice -->
   <section class="privacy-notice">
     <p>
-      Your books are encrypted end-to-end. Librito's servers store only
-      encrypted data and cannot read your book content. Files are automatically
-      deleted after your device downloads them.
+      Books you upload are encrypted in transit and at rest. Our servers have
+      technical access to book content during the short delivery window, and
+      automatically delete the file after your device downloads it — usually
+      within minutes.
     </p>
   </section>
 </div>

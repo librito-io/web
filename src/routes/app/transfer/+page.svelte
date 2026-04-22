@@ -11,13 +11,7 @@
   interface UploadState {
     id: string;
     file: File;
-    status:
-      | "validating"
-      | "initiating"
-      | "uploading"
-      | "completing"
-      | "done"
-      | "error";
+    status: "validating" | "initiating" | "uploading" | "done" | "error";
     progress: number;
     error: string | null;
     transferId: string | null;
@@ -328,8 +322,6 @@
                   Preparing...
                 {:else if upload.status === "uploading"}
                   Uploading... {upload.progress}%
-                {:else if upload.status === "completing"}
-                  Finishing...
                 {/if}
               </p>
             {/if}

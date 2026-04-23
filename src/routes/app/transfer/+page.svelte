@@ -3,7 +3,7 @@
     id: string;
     filename: string;
     fileSize: number;
-    status: "pending_upload" | "pending" | "downloaded" | "expired" | "failed";
+    status: "pending" | "downloaded" | "expired" | "failed";
     uploadedAt: string;
     downloadedAt: string | null;
   }
@@ -96,9 +96,7 @@
     }
 
     const isDuplicate = transfers.some(
-      (t) =>
-        t.filename === file.name &&
-        (t.status === "pending" || t.status === "pending_upload"),
+      (t) => t.filename === file.name && t.status === "pending",
     );
     if (isDuplicate) {
       updateUpload({ status: "error", error: "This file is already pending" });
@@ -256,7 +254,6 @@
     Transfer["status"],
     { label: string; color: string; bg: string }
   > = {
-    pending_upload: { label: "Processing", color: "#1d4ed8", bg: "#dbeafe" },
     pending: { label: "Queued", color: "#92400e", bg: "#fef3c7" },
     downloaded: { label: "Downloaded", color: "#065f46", bg: "#d1fae5" },
     expired: { label: "Expired", color: "#6b7280", bg: "#f3f4f6" },
@@ -386,7 +383,7 @@
                 <span>Downloaded: {formatDate(transfer.downloadedAt)}</span>
               {/if}
             </div>
-            {#if transfer.status === "pending" || transfer.status === "pending_upload"}
+            {#if transfer.status === "pending"}
               <button
                 class="btn-small btn-danger"
                 disabled={cancellingIds.has(transfer.id)}

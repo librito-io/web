@@ -74,7 +74,12 @@ export const POST: RequestHandler = async ({ request }) => {
     .lt("scrubbed_at", cutoff);
 
   if (deleteError) {
-    return jsonError(500, "server_error", "Pass B delete failed");
+    console.error("Pass B delete failed:", JSON.stringify(deleteError));
+    return jsonError(
+      500,
+      "server_error",
+      `Pass B delete failed: ${deleteError.message ?? "unknown"}`,
+    );
   }
 
   const passB = passBCount ?? 0;

@@ -59,7 +59,17 @@ export function createMockSupabase() {
     async (bucket: string, path: string, ttl: number) => {
       const key = `storage.createSignedUrl.${bucket}.${path}`;
       const override = results.get(key);
-      if (override) return override;
+      if (override) {
+        if (
+          override.data === null &&
+          typeof override.error === "object" &&
+          override.error !== null &&
+          "__reject" in override.error
+        ) {
+          throw (override.error as { __reject: unknown }).__reject;
+        }
+        return override;
+      }
       return {
         data: { signedUrl: `https://mock.example/${path}?ttl=${ttl}` },
         error: null,

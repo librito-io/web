@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { validateSyncPayload, processSync } from "$lib/server/sync";
 import { createMockSupabase } from "../helpers";
 
@@ -761,5 +761,59 @@ describe("processSync", () => {
       "user-1/transfer-2/b.epub",
       3600,
     );
+  });
+
+  it("degrades gracefully when createSignedUrl rejects for one transfer", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set(
+      "storage.createSignedUrl.book-transfers.user-1/transfer-2/b.epub",
+      { data: null, error: { __reject: new Error("network down") } },
+    );
+    setupSyncMocks(supabase, {
+      "book_transfers.select": {
+        data: [
+          {
+            id: "transfer-1",
+            filename: "A.epub",
+            file_size: 100,
+            storage_path: "user-1/transfer-1/a.epub",
+            sha256: "a".repeat(64),
+          },
+          {
+            id: "transfer-2",
+            filename: "B.epub",
+            file_size: 200,
+            storage_path: "user-1/transfer-2/b.epub",
+            sha256: "b".repeat(64),
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(result.pendingTransfers).toEqual([
+      {
+        id: "transfer-1",
+        filename: "A.epub",
+        fileSize: 100,
+        downloadUrl: "https://mock.example/user-1/transfer-1/a.epub?ttl=3600",
+        sha256: "a".repeat(64),
+        urlExpiresIn: 3600,
+      },
+      {
+        id: "transfer-2",
+        filename: "B.epub",
+        fileSize: 200,
+      },
+    ]);
+
+    warnSpy.mockRestore();
   });
 });

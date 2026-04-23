@@ -25,6 +25,7 @@
   "menuAbout": "About",
   "menuRoadmap": "Roadmap",
   "menuContact": "Contact",
+  "menuPrivacy": "Privacy",
   "menuDonate": "Donate",
   "subtitle": "{count, plural, one {# book} other {# books}} · {highlights, plural, one {# highlight} other {# highlights}}",
   "highlightCount": "{count, plural, one {# highlight} other {# highlights}}",

@@ -25,6 +25,7 @@
   "menuAbout": "О проекте",
   "menuRoadmap": "Дорожная карта",
   "menuContact": "Контакт",
+  "menuPrivacy": "Конфиденциальность",
   "menuDonate": "Поддержать",
   "subtitle": "{count, plural, one {# книга} few {# книги} other {# книг}} · {highlights, plural, one {# выделение} few {# выделения} other {# выделений}}",
   "highlightCount": "{count, plural, one {# выделение} few {# выделения} other {# выделений}}"

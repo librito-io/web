@@ -3,7 +3,7 @@
     id: string;
     filename: string;
     fileSize: number;
-    status: "pending_upload" | "pending" | "downloaded" | "expired";
+    status: "pending" | "downloaded" | "expired" | "failed";
     uploadedAt: string;
     downloadedAt: string | null;
   }
@@ -22,6 +22,20 @@
   let uploads = $state<UploadState[]>([]);
   let dragOver = $state(false);
   let cancellingIds = $state<Set<string>>(new Set());
+
+  let now = $state(Date.now());
+  $effect(() => {
+    const id = setInterval(() => {
+      now = Date.now();
+    }, 60_000);
+    return () => clearInterval(id);
+  });
+
+  const PENDING_TTL_MS = 48 * 3600 * 1000;
+  function hoursRemaining(uploadedAt: string): number {
+    const expiresAt = new Date(uploadedAt).getTime() + PENDING_TTL_MS;
+    return Math.max(0, Math.floor((expiresAt - now) / 3600000));
+  }
 
   const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -82,9 +96,7 @@
     }
 
     const isDuplicate = transfers.some(
-      (t) =>
-        t.filename === file.name &&
-        (t.status === "pending" || t.status === "pending_upload"),
+      (t) => t.filename === file.name && t.status === "pending",
     );
     if (isDuplicate) {
       updateUpload({ status: "error", error: "This file is already pending" });
@@ -132,8 +144,6 @@
         updateUpload({ progress: pct });
       });
 
-      // New flow: server already inserted status='pending' with the client sha.
-      // No /complete-upload call.
       updateUpload({ status: "done", progress: 100 });
       await refreshTransfers();
     } catch (err) {
@@ -244,10 +254,10 @@
     Transfer["status"],
     { label: string; color: string; bg: string }
   > = {
-    pending_upload: { label: "Processing", color: "#1d4ed8", bg: "#dbeafe" },
     pending: { label: "Queued", color: "#92400e", bg: "#fef3c7" },
     downloaded: { label: "Downloaded", color: "#065f46", bg: "#d1fae5" },
     expired: { label: "Expired", color: "#6b7280", bg: "#f3f4f6" },
+    failed: { label: "Failed", color: "#991b1b", bg: "#fee2e2" },
   };
 
   const activeUploads = $derived(uploads.filter((u) => u.status !== "done"));
@@ -359,11 +369,21 @@
             </div>
             <div class="transfer-meta">
               <span>Added: {formatDate(transfer.uploadedAt)}</span>
+              {#if transfer.status === "pending"}
+                {@const hrs = hoursRemaining(transfer.uploadedAt)}
+                <span
+                  class="countdown"
+                  class:urgent={hrs < 12}
+                  class:critical={hrs < 2}
+                >
+                  {hrs > 0 ? `Expires in ${hrs}h` : "Expiring…"}
+                </span>
+              {/if}
               {#if transfer.downloadedAt}
                 <span>Downloaded: {formatDate(transfer.downloadedAt)}</span>
               {/if}
             </div>
-            {#if transfer.status === "pending" || transfer.status === "pending_upload"}
+            {#if transfer.status === "pending"}
               <button
                 class="btn-small btn-danger"
                 disabled={cancellingIds.has(transfer.id)}
@@ -376,16 +396,6 @@
         {/each}
       </ul>
     {/if}
-  </section>
-
-  <!-- Privacy notice -->
-  <section class="privacy-notice">
-    <p>
-      Books you upload are encrypted in transit and at rest. Our servers have
-      technical access to book content during the short delivery window, and
-      automatically delete the file after your device downloads it — usually
-      within minutes.
-    </p>
   </section>
 </div>
 
@@ -550,16 +560,16 @@
     font-style: italic;
   }
 
-  .privacy-notice {
-    margin-top: 2rem;
-    padding: 1rem;
-    background: #f9fafb;
-    border-radius: 6px;
-    font-size: 0.85rem;
+  .countdown {
     color: #6b7280;
   }
 
-  .privacy-notice p {
-    margin: 0;
+  .countdown.urgent {
+    color: #b45309;
+  }
+
+  .countdown.critical {
+    color: #b91c1c;
+    font-weight: 600;
   }
 </style>

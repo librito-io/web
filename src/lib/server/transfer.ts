@@ -1,4 +1,3 @@
-import { createHash } from "crypto";
 import { basename } from "path";
 
 export const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -33,8 +32,4 @@ export function buildStoragePath(
   filename: string,
 ): string {
   return `${userId}/${transferId}/${filename}`;
-}
-
-export function computeFileSha256(buffer: Buffer): string {
-  return createHash("sha256").update(buffer).digest("hex");
 }

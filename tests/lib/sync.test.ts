@@ -425,6 +425,7 @@ function setupSyncMocks(
     "notes.select": { data: [], error: null },
     "highlights.select": { data: [], error: null },
     "book_transfers.select": { data: [], error: null },
+    "book_transfers.select.count": { data: null, error: null },
     "devices.update": { data: null, error: null },
   };
   for (const [key, value] of Object.entries({ ...defaults, ...overrides })) {
@@ -668,5 +669,49 @@ describe("processSync", () => {
         ],
       }),
     ).rejects.toThrow("Failed to upsert highlights");
+  });
+
+  it("returns failedTransferCount=0 by default", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase);
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 0,
+      books: [],
+    });
+    expect(result.failedTransferCount).toBe(0);
+  });
+
+  it("returns the failed transfer count from the head-count query", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "book_transfers.select.count": {
+        data: null,
+        error: null,
+        count: 3,
+      } as unknown as {
+        data: unknown;
+        error: unknown;
+      },
+    });
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 0,
+      books: [],
+    });
+    expect(result.failedTransferCount).toBe(3);
+  });
+
+  it("defaults failedTransferCount to 0 when the count query errors", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "book_transfers.select.count": {
+        data: null,
+        error: { message: "boom" },
+      },
+    });
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 0,
+      books: [],
+    });
+    expect(result.failedTransferCount).toBe(0);
   });
 });

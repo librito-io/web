@@ -37,34 +37,7 @@ beforeEach(() => {
   supabase._storage.clear();
 });
 
-describe("POST /api/transfer/initiate — Deploy 1 (sha256 optional)", () => {
-  it("accepts a request that omits sha256 (legacy path) and inserts status='pending_upload'", async () => {
-    supabase._results.set("book_transfers.select", { data: [], error: null });
-    supabase._results.set("book_transfers.insert", { data: null, error: null });
-
-    const res = await POST(
-      buildEvent({ filename: "book.epub", fileSize: 100 }),
-    );
-
-    expect(res.status).toBe(201);
-  });
-
-  it("returns the signed upload URL in the response", async () => {
-    supabase._results.set("book_transfers.select", { data: [], error: null });
-    supabase._results.set("book_transfers.insert", { data: null, error: null });
-    supabase._storage.set("createSignedUploadUrl", {
-      data: { signedUrl: "https://storage/x" },
-      error: null,
-    });
-
-    const res = await POST(
-      buildEvent({ filename: "book.epub", fileSize: 100 }),
-    );
-    const body = await res.json();
-
-    expect(body.uploadUrl).toBe("https://storage/x");
-  });
-
+describe("POST /api/transfer/initiate — Deploy 2 (sha256 required)", () => {
   it("rejects unauthenticated requests with 401", async () => {
     const res = await POST(
       buildEvent({ filename: "a.epub", fileSize: 10 }, null),
@@ -150,5 +123,29 @@ describe("POST /api/transfer/initiate — Deploy 1 (sha256 optional)", () => {
 
     expect(res.status).toBe(409);
     expect(body.error).toBe("duplicate_transfer");
+  });
+
+  it("rejects missing sha256 with 400 invalid_sha256 (deploy 2)", async () => {
+    const res = await POST(buildEvent({ filename: "x.epub", fileSize: 10 }));
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe("invalid_sha256");
+  });
+
+  it("returns the signed upload URL in the response (sha path)", async () => {
+    supabase._results.set("book_transfers.select", { data: [], error: null });
+    supabase._results.set("book_transfers.insert", { data: null, error: null });
+    supabase._storage.set("createSignedUploadUrl", {
+      data: { signedUrl: "https://storage/x" },
+      error: null,
+    });
+
+    const sha = "d".repeat(64);
+    const res = await POST(
+      buildEvent({ filename: "book.epub", fileSize: 100, sha256: sha }),
+    );
+    const body = await res.json();
+
+    expect(body.uploadUrl).toBe("https://storage/x");
   });
 });

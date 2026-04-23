@@ -110,6 +110,7 @@
       <button type="button" onclick={() => (open = false)}
         >{$_("menuContact")}</button
       >
+      <a href="/privacy" onclick={() => (open = false)}>{$_("menuPrivacy")}</a>
       <button type="button" onclick={() => (open = false)}
         >{$_("menuDonate")}</button
       >

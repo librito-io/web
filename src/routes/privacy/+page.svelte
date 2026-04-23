@@ -16,7 +16,6 @@
     margin: 2rem auto;
     padding: 0 1.25rem;
     line-height: 1.6;
-    color: #1f2937;
   }
   .prose :global(h1) {
     font-size: 1.75rem;

@@ -11,13 +11,7 @@
   interface UploadState {
     id: string;
     file: File;
-    status:
-      | "validating"
-      | "initiating"
-      | "uploading"
-      | "completing"
-      | "done"
-      | "error";
+    status: "validating" | "initiating" | "uploading" | "done" | "error";
     progress: number;
     error: string | null;
     transferId: string | null;
@@ -52,6 +46,14 @@
     });
   }
 
+  async function hashFileSha256(file: File): Promise<string> {
+    const buf = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
   async function processFile(file: File) {
     const uploadId = crypto.randomUUID();
     const upload: UploadState = {
@@ -70,7 +72,6 @@
       );
     }
 
-    // Validate
     if (!file.name.toLowerCase().endsWith(".epub")) {
       updateUpload({ status: "error", error: "Only EPUB files are accepted" });
       return;
@@ -80,9 +81,10 @@
       return;
     }
 
-    // Check for duplicate pending
     const isDuplicate = transfers.some(
-      (t) => t.filename === file.name && t.status === "pending",
+      (t) =>
+        t.filename === file.name &&
+        (t.status === "pending" || t.status === "pending_upload"),
     );
     if (isDuplicate) {
       updateUpload({ status: "error", error: "This file is already pending" });
@@ -90,12 +92,18 @@
     }
 
     try {
-      // Initiate
+      updateUpload({ status: "validating" });
+      const sha256 = await hashFileSha256(file);
+
       updateUpload({ status: "initiating" });
       const initiateRes = await fetchWithSafariRetry("/api/transfer/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: file.name, fileSize: file.size }),
+        body: JSON.stringify({
+          filename: file.name,
+          fileSize: file.size,
+          sha256,
+        }),
       });
 
       if (initiateRes.status === 429) {
@@ -119,28 +127,13 @@
 
       const fileData = await file.arrayBuffer();
 
-      // Upload
       updateUpload({ status: "uploading" });
       await uploadToSignedUrl(uploadUrl, fileData, (pct) => {
         updateUpload({ progress: pct });
       });
 
-      // Complete
-      updateUpload({ status: "completing" });
-      const completeRes = await fetchWithSafariRetry(
-        `/api/transfer/${transferId}/complete-upload`,
-        { method: "POST" },
-      );
-
-      if (!completeRes.ok) {
-        const body = await completeRes.json().catch(() => ({}));
-        updateUpload({
-          status: "error",
-          error: body.message || "Upload failed",
-        });
-        return;
-      }
-
+      // New flow: server already inserted status='pending' with the client sha.
+      // No /complete-upload call.
       updateUpload({ status: "done", progress: 100 });
       await refreshTransfers();
     } catch (err) {
@@ -329,8 +322,6 @@
                   Preparing...
                 {:else if upload.status === "uploading"}
                   Uploading... {upload.progress}%
-                {:else if upload.status === "completing"}
-                  Finishing...
                 {/if}
               </p>
             {/if}

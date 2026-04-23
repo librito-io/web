@@ -11,6 +11,7 @@ export const load: PageServerLoad = async ({
     .from("book_transfers")
     .select("id, filename, file_size, status, uploaded_at, downloaded_at")
     .eq("user_id", session.user.id)
+    .is("scrubbed_at", null)
     .order("uploaded_at", { ascending: false });
 
   return {

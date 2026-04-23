@@ -595,7 +595,7 @@ describe("processSync", () => {
     ]);
   });
 
-  it("transforms pending transfers from DB format", async () => {
+  it("transforms pending transfers with embedded signed URL, sha256, and TTL", async () => {
     const supabase = createMockSupabase();
     setupSyncMocks(supabase, {
       "book_transfers.select": {
@@ -604,6 +604,8 @@ describe("processSync", () => {
             id: "transfer-1",
             filename: "The Martian.epub",
             file_size: 1250000,
+            storage_path: "user-1/transfer-1/the-martian.epub",
+            sha256: "a".repeat(64),
           },
         ],
         error: null,
@@ -620,6 +622,10 @@ describe("processSync", () => {
         id: "transfer-1",
         filename: "The Martian.epub",
         fileSize: 1250000,
+        downloadUrl:
+          "https://mock.example/user-1/transfer-1/the-martian.epub?ttl=3600",
+        sha256: "a".repeat(64),
+        urlExpiresIn: 3600,
       },
     ]);
   });

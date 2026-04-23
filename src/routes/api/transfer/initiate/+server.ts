@@ -44,18 +44,14 @@ export const POST: RequestHandler = async ({
   const sizeError = validateTransferSize(fileSize);
   if (sizeError) return jsonError(400, "file_too_large", sizeError);
 
-  // Optional in Deploy 1, required in Deploy 2.
-  let clientSha: string | null = null;
-  if (sha256 !== undefined) {
-    if (typeof sha256 !== "string" || !SHA256_RE.test(sha256)) {
-      return jsonError(
-        400,
-        "invalid_sha256",
-        "sha256 must be 64 lowercase hex chars",
-      );
-    }
-    clientSha = sha256;
+  if (typeof sha256 !== "string" || !SHA256_RE.test(sha256)) {
+    return jsonError(
+      400,
+      "invalid_sha256",
+      "sha256 must be 64 lowercase hex chars",
+    );
   }
+  const clientSha = sha256;
 
   const { success, reset } = await transferUploadLimiter.limit(user.id);
   if (!success) {
@@ -65,18 +61,11 @@ export const POST: RequestHandler = async ({
 
   const supabase = createAdminClient();
 
-  // Queue cap — TRANSIENT LIST during Deploy 1 only.
-  // Legacy pending_upload rows coexist with new pending rows until the drain
-  // window + Task 9 migration complete. Without counting both, a user could
-  // sit at 20 pending_upload + 20 pending = 40 effective queue. Task 9
-  // collapses this back to `.eq("status", "pending")` once the enum is
-  // tightened. If you touch this code after Deploy 2 lands and still see the
-  // `.in(...)` call here, that is a missed cleanup — fix it.
   const { count, error: countError } = await supabase
     .from("book_transfers")
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id)
-    .in("status", ["pending_upload", "pending"]);
+    .eq("status", "pending");
 
   if (countError) {
     return jsonError(500, "server_error", "Failed to check transfer quota");
@@ -89,22 +78,19 @@ export const POST: RequestHandler = async ({
     );
   }
 
-  // Dedup SELECT — only when the client supplied a sha.
-  if (clientSha !== null) {
-    const { data: existing } = await supabase
-      .from("book_transfers")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("sha256", clientSha)
-      .eq("status", "pending")
-      .maybeSingle();
-    if (existing) {
-      return jsonError(
-        409,
-        "duplicate_transfer",
-        "An identical file is already pending transfer",
-      );
-    }
+  const { data: existing } = await supabase
+    .from("book_transfers")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("sha256", clientSha)
+    .eq("status", "pending")
+    .maybeSingle();
+  if (existing) {
+    return jsonError(
+      409,
+      "duplicate_transfer",
+      "An identical file is already pending transfer",
+    );
   }
 
   const transferId = crypto.randomUUID();
@@ -117,13 +103,12 @@ export const POST: RequestHandler = async ({
     filename: safeFilename,
     file_size: fileSize,
     storage_path: storagePath,
-    sha256: clientSha ?? "",
-    status: clientSha ? "pending" : "pending_upload",
+    sha256: clientSha,
+    status: "pending",
   });
 
   if (insertError) {
-    // Postgres unique_violation on the partial unique index — Deploy 2 only,
-    // but the handler is written once and covers both.
+    // Postgres unique_violation on the partial unique index.
     const code = (insertError as { code?: string }).code;
     if (code === "23505") {
       return jsonError(

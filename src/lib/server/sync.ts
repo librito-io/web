@@ -64,6 +64,9 @@ export interface ResponseTransfer {
   id: string;
   filename: string;
   fileSize: number;
+  downloadUrl?: string;
+  sha256?: string;
+  urlExpiresIn?: number;
 }
 
 // --- Validation ---
@@ -544,4 +547,6 @@ interface TransferRow {
   id: string;
   filename: string;
   file_size: number;
+  storage_path: string;
+  sha256: string;
 }

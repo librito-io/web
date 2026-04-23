@@ -39,6 +39,14 @@ Browser ──cookie session──→ App Routes (/app/*) ──anon key + RLS�
 
 **Server hooks** (`hooks.server.ts`): Creates a per-request Supabase client with cookie persistence and exposes `safeGetSession()` on `event.locals`.
 
+## Scaling Target
+
+Design for ~1k concurrent users as the architectural baseline, even while the current userbase is pre-launch scale. Trade-offs that fall apart at 2-10× current scale are unacceptable. Paid tiers (Vercel Pro, Supabase Pro) are expected and budgeted at roughly 200+ users — free tier is a cost optimization, not an architectural constraint.
+
+Stress-test every significant design decision against 200 and 1k users before locking it in. Breakers that only need money to fix (tier upgrade) are fine. Breakers that require rearchitecture are not. Flag the paid-tier threshold explicitly in any proposal so cost is visible.
+
+Corollary: failed uploads, silent retries, or "rare-edge-case" UX regressions are not acceptable even at current scale, because the design must survive organic growth without a rewrite.
+
 ## Build Commands
 
 ```bash
@@ -63,6 +71,26 @@ supabase start          # Start local Supabase
 supabase db reset       # Reset and re-apply all migrations
 supabase stop           # Stop local Supabase
 ```
+
+## Release Process
+
+**Vercel deploys only the application code. Supabase database migrations do not run automatically.** These are two separate systems with no built-in link.
+
+When a PR adds or modifies a file in `supabase/migrations/`, the migration reaches production in a second step performed manually after the PR merges:
+
+```bash
+# From a machine already linked to the production Supabase project
+# (one-time setup: `supabase login` + `supabase link --project-ref <ref>`)
+cd /path/to/web
+git checkout main && git pull
+supabase migration list        # confirm local has a migration remote does not
+supabase db push --dry-run     # preview what would apply
+supabase db push               # apply
+```
+
+Forgetting this step looks like a post-deploy 500 from any endpoint that reads a new column, because the deployed code references schema the database does not yet have. Always run `supabase migration list` before declaring a schema-touching deploy complete.
+
+For recurring schema work, consider wiring a GitHub Action that runs `supabase db push` on merge to main. At current release cadence (solo dev, ad-hoc schema work) the manual step is preferred — it forces a deliberate "production write" pause.
 
 ## Project Structure
 
@@ -123,7 +151,7 @@ Tables (see `supabase/migrations/` for full DDL):
 - `books` — per-user book metadata (keyed by FNV-1a hash from device)
 - `highlights` — device-created highlights (soft-delete via `deleted_at`)
 - `notes` — web-created notes (one per highlight)
-- `book_transfers` — EPUB upload queue (7-day TTL)
+- `book_transfers` — EPUB upload queue (48 h pending TTL; downloaded rows PII-scrubbed 24 h post-delivery, hard-deleted 24 h after scrub; expired rows scrubbed 49 h post-upload)
 - `cover_cache` — shared cover library (deduplicated by ISBN, permanent)
 
 **Sync hot path indexes**: `(user_id, updated_at)` on highlights and notes. The `updated_at` trigger fires on every row change, making `WHERE updated_at > :lastSyncedAt` pick up all changes including soft-deletes.
@@ -151,14 +179,18 @@ See `.env.example`. Required:
 
 ## Implementation Phases
 
-The cloud sync system is built incrementally. Each phase has a spec and plan in the reader repo:
+The cloud sync system is built incrementally. Each phase has a spec and plan in the reader repo at `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 
-| Phase | Status  | Scope                                   |
-| ----- | ------- | --------------------------------------- |
-| 1     | Done    | Supabase setup (schema, auth, storage)  |
-| 2     | Done    | Device pairing (API + web UI)           |
-| 3     | Done    | Sync API (auth middleware, merge logic) |
-| 4     | Planned | Web app highlight viewer                |
-| 5     | Planned | Book transfer endpoints                 |
-| 6     | Planned | ESP32 firmware sync client              |
-| 7     | Planned | Polish (realtime, covers, export)       |
+| Phase | Status  | Scope                                                                            |
+| ----- | ------- | -------------------------------------------------------------------------------- |
+| 1     | Done    | Supabase setup (schema, auth, storage)                                           |
+| 2     | Done    | Device pairing (API + web UI)                                                    |
+| 3     | Done    | Sync API (auth middleware, merge logic)                                          |
+| 4     | Done    | Web app highlight viewer + highlight feed                                        |
+| 5     | Done    | Book transfer endpoints (client-side E2EE removed 2026-04-22, Identity A)        |
+| 6     | Done    | ESP32 firmware sync client                                                       |
+| WS-A  | Done    | Transfer schema consolidation + deletion hygiene + /privacy (2026-04-23)         |
+| WS-B  | Planned | Embed signed download URL + sha256 in sync response (spec ready)                 |
+| WS-C  | Planned | Firmware Range-resume, keep-alive, retry cadence, StatusBar + FileBrowser polish |
+| WS-D  | Planned | Populate `attempt_count` / `last_error`; retry UI; attempt-cap → `failed`        |
+| 7     | Planned | Further polish (realtime, covers, export)                                        |

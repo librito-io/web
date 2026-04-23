@@ -25,6 +25,7 @@
   "menuAbout": "حول",
   "menuRoadmap": "خارطة الطريق",
   "menuContact": "اتصل",
+  "menuPrivacy": "الخصوصية",
   "menuDonate": "تبرع",
   "subtitle": "{count, plural, one {# كتاب} other {# كتب}} · {highlights, plural, one {# تمييز} other {# تمييزات}}",
   "highlightCount": "{count, plural, one {# تمييز} other {# تمييزات}}"

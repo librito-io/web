@@ -25,6 +25,7 @@
   "menuAbout": "소개",
   "menuRoadmap": "로드맵",
   "menuContact": "문의",
+  "menuPrivacy": "개인정보 처리방침",
   "menuDonate": "후원",
   "subtitle": "{count}권 · {highlights}개의 하이라이트",
   "highlightCount": "{count}개의 하이라이트"

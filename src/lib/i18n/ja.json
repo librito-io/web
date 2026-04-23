@@ -25,6 +25,7 @@
   "menuAbout": "概要",
   "menuRoadmap": "ロードマップ",
   "menuContact": "お問い合わせ",
+  "menuPrivacy": "プライバシー",
   "menuDonate": "寄付",
   "subtitle": "{count}冊 · {highlights}件のハイライト",
   "highlightCount": "{count}件のハイライト"

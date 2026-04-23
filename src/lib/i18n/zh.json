@@ -25,6 +25,7 @@
   "menuAbout": "关于",
   "menuRoadmap": "路线图",
   "menuContact": "联系",
+  "menuPrivacy": "隐私",
   "menuDonate": "捐赠",
   "subtitle": "{count} 本书 · {highlights} 条高亮",
   "highlightCount": "{count} 条高亮"

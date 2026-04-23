@@ -51,11 +51,15 @@ describe("POST /api/cron/transfer-sweep", () => {
     expect(body.sweep.passB).toBe(0);
   });
 
-  it("Pass A removes storage objects for expired rows and nulls storage_path", async () => {
+  it("Pass A removes storage objects for retired rows (expired + downloaded) and nulls storage_path", async () => {
+    // Mock returns a mix of expired and downloaded rows — the handler's
+    // .in("status", ["expired", "downloaded"]) filter is exercised against
+    // the DB in production; the mock is status-agnostic and returns what
+    // it's told, so the assertion covers behavior for both statuses.
     supabase._results.set("book_transfers.select", {
       data: [
-        { id: "t1", storage_path: "u/t1/a.epub" },
-        { id: "t2", storage_path: "u/t2/b.epub" },
+        { id: "t1", storage_path: "u/t1/a.epub" }, // represents 'expired'
+        { id: "t2", storage_path: "u/t2/b.epub" }, // represents 'downloaded' where confirm's remove failed
       ],
       error: null,
     });

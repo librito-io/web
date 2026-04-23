@@ -25,11 +25,14 @@ export const POST: RequestHandler = async ({ request }) => {
   const start = Date.now();
   const supabase = createAdminClient();
 
-  // Pass A — delete Storage objects for expired rows.
-  const { data: expiredRows, error: selectError } = await supabase
+  // Pass A — delete Storage objects for retired rows (expired or
+  // downloaded). Confirm's best-effort remove may have failed on a
+  // downloaded row; this pass closes the gap before scrub NULLs
+  // storage_path 24 h later and the object becomes an orphan.
+  const { data: retiredRows, error: selectError } = await supabase
     .from("book_transfers")
     .select("id, storage_path")
-    .eq("status", "expired")
+    .in("status", ["expired", "downloaded"])
     .not("storage_path", "is", null)
     .limit(PASS_A_BATCH);
 
@@ -41,7 +44,7 @@ export const POST: RequestHandler = async ({ request }) => {
   // nulls storage_path, which orphans the object. Pass C (future workstream,
   // plan §14) sweeps orphans by listing the bucket and reconciling.
   let passA = 0;
-  for (const row of (expiredRows ?? []) as Array<{
+  for (const row of (retiredRows ?? []) as Array<{
     id: string;
     storage_path: string;
   }>) {

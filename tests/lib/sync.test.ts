@@ -855,4 +855,58 @@ describe("processSync", () => {
 
     warnSpy.mockRestore();
   });
+
+  it("emits a transfer_url_gen_failed warn log per URL-gen failure", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set(
+      "storage.createSignedUrl.book-transfers.user-1/transfer-1/a.epub",
+      { data: null, error: { __reject: new Error("timeout") } },
+    );
+    supabase._results.set(
+      "storage.createSignedUrl.book-transfers.user-1/transfer-2/b.epub",
+      { data: null, error: { message: "bucket unavailable" } },
+    );
+    setupSyncMocks(supabase, {
+      "book_transfers.select": {
+        data: [
+          {
+            id: "transfer-1",
+            filename: "A.epub",
+            file_size: 100,
+            storage_path: "user-1/transfer-1/a.epub",
+            sha256: "a".repeat(64),
+          },
+          {
+            id: "transfer-2",
+            filename: "B.epub",
+            file_size: 200,
+            storage_path: "user-1/transfer-2/b.epub",
+            sha256: "b".repeat(64),
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith("transfer_url_gen_failed", {
+      transferId: "transfer-1",
+      storagePath: "user-1/transfer-1/a.epub",
+      error: "Error: timeout",
+    });
+    expect(warnSpy).toHaveBeenCalledWith("transfer_url_gen_failed", {
+      transferId: "transfer-2",
+      storagePath: "user-1/transfer-2/b.epub",
+      error: "bucket unavailable",
+    });
+
+    warnSpy.mockRestore();
+  });
 });

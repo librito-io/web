@@ -720,4 +720,46 @@ describe("processSync", () => {
     });
     expect(result.failedTransferCount).toBe(0);
   });
+
+  it("calls storage.createSignedUrl once per pending transfer with the row's storage_path and a 1h TTL", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "book_transfers.select": {
+        data: [
+          {
+            id: "transfer-1",
+            filename: "A.epub",
+            file_size: 100,
+            storage_path: "user-1/transfer-1/a.epub",
+            sha256: "a".repeat(64),
+          },
+          {
+            id: "transfer-2",
+            filename: "B.epub",
+            file_size: 200,
+            storage_path: "user-1/transfer-2/b.epub",
+            sha256: "b".repeat(64),
+          },
+        ],
+        error: null,
+      },
+    });
+
+    await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(supabase._storageSpy).toHaveBeenCalledTimes(2);
+    expect(supabase._storageSpy).toHaveBeenCalledWith(
+      "book-transfers",
+      "user-1/transfer-1/a.epub",
+      3600,
+    );
+    expect(supabase._storageSpy).toHaveBeenCalledWith(
+      "book-transfers",
+      "user-1/transfer-2/b.epub",
+      3600,
+    );
+  });
 });

@@ -55,18 +55,27 @@ export function createMockSupabase() {
     return makeChain(table, "select");
   }
 
-  function storageBucket(_bucket: string) {
+  const storageSpy = vi.fn(
+    async (bucket: string, path: string, ttl: number) => {
+      const key = `storage.createSignedUrl.${bucket}.${path}`;
+      const override = results.get(key);
+      if (override) return override;
+      return {
+        data: { signedUrl: `https://mock.example/${path}?ttl=${ttl}` },
+        error: null,
+      };
+    },
+  );
+
+  function storageBucket(bucket: string) {
     return {
       createSignedUploadUrl: async (..._args: unknown[]) =>
         storageResults.get("createSignedUploadUrl") ?? {
           data: { signedUrl: "https://mock/upload" },
           error: null,
         },
-      createSignedUrl: async (..._args: unknown[]) =>
-        storageResults.get("createSignedUrl") ?? {
-          data: { signedUrl: "https://mock/download" },
-          error: null,
-        },
+      createSignedUrl: (path: string, ttl: number) =>
+        storageSpy(bucket, path, ttl),
       remove: async (..._args: unknown[]) =>
         storageResults.get("remove") ?? { data: null, error: null },
       list: async (..._args: unknown[]) =>
@@ -85,11 +94,13 @@ export function createMockSupabase() {
     storage: { from: storageBucket },
     _results: results,
     _storage: storageResults,
+    _storageSpy: storageSpy,
   };
 
   return client as unknown as SupabaseClient & {
     _results: Map<string, { data: unknown; error: unknown }>;
     _storage: Map<string, { data: unknown; error: unknown }>;
+    _storageSpy: typeof storageSpy;
   };
 }
 

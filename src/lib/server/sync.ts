@@ -64,8 +64,15 @@ export interface ResponseTransfer {
   id: string;
   filename: string;
   fileSize: number;
+  /**
+   * Signed download URL for the stored EPUB. Atomic triplet with `sha256` and
+   * `urlExpiresIn`: all three present on URL-gen success, all three absent on
+   * URL-gen failure (device falls back to GET /api/transfer/[id]/download-url).
+   */
   downloadUrl?: string;
+  /** Lowercase 64-hex SHA-256 of the stored object. See `downloadUrl`. */
   sha256?: string;
+  /** Seconds until `downloadUrl` expires, measured from sync-response issue time. See `downloadUrl`. */
   urlExpiresIn?: number;
 }
 
@@ -543,6 +550,12 @@ interface DeletedHighlightRow {
   books: { book_hash: string };
 }
 
+/**
+ * Internal shape of a pending book_transfers row as consumed by processSync.
+ * `storage_path` and `sha256` are projected by the SELECT at the transfers query
+ * (see Task 3 of WS-B); the `WHERE status='pending'` predicate plus the WS-A
+ * `valid_sha256` CHECK guarantee both are non-null on every returned row.
+ */
 interface TransferRow {
   id: string;
   filename: string;

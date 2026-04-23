@@ -37,6 +37,9 @@ export const POST: RequestHandler = async ({ request }) => {
     return jsonError(500, "server_error", "Pass A select failed");
   }
 
+  // Storage remove errors are intentionally swallowed: a failed remove still
+  // nulls storage_path, which orphans the object. Pass C (future workstream,
+  // plan §14) sweeps orphans by listing the bucket and reconciling.
   let passA = 0;
   for (const row of (expiredRows ?? []) as Array<{
     id: string;

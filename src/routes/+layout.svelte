@@ -43,3 +43,20 @@
 <MenuOverlay bind:open={menuOpen} onLogout={logout} />
 
 {@render children()}
+
+<footer class="site-footer">
+  <a href="/privacy">Privacy</a>
+</footer>
+
+<style>
+  .site-footer {
+    padding: 1.5rem 1.25rem 2rem;
+    text-align: center;
+    font-size: 0.85rem;
+    color: #9ca3af;
+  }
+  .site-footer a {
+    color: inherit;
+    text-decoration: underline;
+  }
+</style>

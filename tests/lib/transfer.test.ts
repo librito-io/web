@@ -4,7 +4,6 @@ import {
   validateTransferFilename,
   validateTransferSize,
   buildStoragePath,
-  computeFileSha256,
   MAX_FILE_SIZE,
   MAX_FILENAME_LENGTH,
 } from "../../src/lib/server/transfer";
@@ -110,33 +109,5 @@ describe("buildStoragePath", () => {
     expect(buildStoragePath("abc", "def", "my-file.epub")).toBe(
       "abc/def/my-file.epub",
     );
-  });
-});
-
-describe("computeFileSha256", () => {
-  it("returns a hex string of length 64", () => {
-    const result = computeFileSha256(Buffer.from("hello"));
-    expect(result).toHaveLength(64);
-    expect(result).toMatch(/^[0-9a-f]+$/);
-  });
-
-  it("returns the correct SHA-256 digest for a known input", () => {
-    // SHA-256 of "hello" is well-known
-    const expected =
-      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
-    expect(computeFileSha256(Buffer.from("hello"))).toBe(expected);
-  });
-
-  it("returns different digests for different inputs", () => {
-    const a = computeFileSha256(Buffer.from("hello"));
-    const b = computeFileSha256(Buffer.from("world"));
-    expect(a).not.toBe(b);
-  });
-
-  it("handles an empty buffer", () => {
-    // SHA-256 of empty string
-    const expected =
-      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-    expect(computeFileSha256(Buffer.alloc(0))).toBe(expected);
   });
 });

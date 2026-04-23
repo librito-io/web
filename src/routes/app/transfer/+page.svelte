@@ -132,8 +132,6 @@
         updateUpload({ progress: pct });
       });
 
-      // New flow: server already inserted status='pending' with the client sha.
-      // No /complete-upload call.
       updateUpload({ status: "done", progress: 100 });
       await refreshTransfers();
     } catch (err) {

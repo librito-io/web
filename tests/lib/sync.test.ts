@@ -816,4 +816,43 @@ describe("processSync", () => {
 
     warnSpy.mockRestore();
   });
+
+  it("degrades gracefully when createSignedUrl returns an error result", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set(
+      "storage.createSignedUrl.book-transfers.user-1/transfer-1/a.epub",
+      { data: null, error: { message: "bucket unavailable" } },
+    );
+    setupSyncMocks(supabase, {
+      "book_transfers.select": {
+        data: [
+          {
+            id: "transfer-1",
+            filename: "A.epub",
+            file_size: 100,
+            storage_path: "user-1/transfer-1/a.epub",
+            sha256: "a".repeat(64),
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(result.pendingTransfers).toEqual([
+      {
+        id: "transfer-1",
+        filename: "A.epub",
+        fileSize: 100,
+      },
+    ]);
+
+    warnSpy.mockRestore();
+  });
 });

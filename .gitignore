@@ -11,3 +11,5 @@ vite.config.ts.timestamp-*
 .superpowers/
 .vercel
 .worktrees/
+supabase/.temp/
+supabase/.branches/

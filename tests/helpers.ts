@@ -12,8 +12,8 @@ export function createMockSupabase() {
   const results = new Map<string, { data: unknown; error: unknown }>();
   const storageResults = new Map<string, { data: unknown; error: unknown }>();
 
-  function makeChain(table: string, operation: string) {
-    const key = `${table}.${operation}`;
+  function makeChain(table: string, operation: string, keySuffix = "") {
+    const key = `${table}.${operation}${keySuffix}`;
     const chain: Record<string, unknown> = {};
 
     const terminal = () => {
@@ -44,6 +44,17 @@ export function createMockSupabase() {
     return new Proxy(chain, handler);
   }
 
+  // Detect head-count selects like `.select("id", { count: "exact", head: true })`
+  // and route them to a distinct key `<table>.select.count` so tests can mock
+  // head-count results separately from array-data selects on the same table.
+  function selectChain(table: string, args: unknown[]) {
+    const opts = args[1] as { count?: string; head?: boolean } | undefined;
+    if (opts && opts.head === true) {
+      return makeChain(table, "select", ".count");
+    }
+    return makeChain(table, "select");
+  }
+
   function storageBucket(_bucket: string) {
     return {
       createSignedUploadUrl: async (..._args: unknown[]) =>
@@ -66,7 +77,7 @@ export function createMockSupabase() {
   const client = {
     from: (table: string) => ({
       insert: (..._args: unknown[]) => makeChain(table, "insert"),
-      select: (..._args: unknown[]) => makeChain(table, "select"),
+      select: (...args: unknown[]) => selectChain(table, args),
       update: (..._args: unknown[]) => makeChain(table, "update"),
       upsert: (..._args: unknown[]) => makeChain(table, "upsert"),
       delete: (..._args: unknown[]) => makeChain(table, "delete"),

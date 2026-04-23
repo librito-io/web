@@ -41,6 +41,7 @@ export interface SyncResponse {
   notes: ResponseNote[];
   deletedHighlights: ResponseDeletedHighlight[];
   pendingTransfers: ResponseTransfer[];
+  failedTransferCount: number;
 }
 
 export interface ResponseNote {
@@ -395,11 +396,12 @@ export async function processSync(
   }
 
   // 2. Query notes, deleted highlights, and pending transfers in parallel
-  const [noteResult, deletedResult, transferResult] = await Promise.all([
-    supabase
-      .from("notes")
-      .select(
-        `
+  const [noteResult, deletedResult, transferResult, failedCountResult] =
+    await Promise.all([
+      supabase
+        .from("notes")
+        .select(
+          `
         text,
         updated_at,
         highlights!inner (
@@ -409,32 +411,38 @@ export async function processSync(
           books!inner (book_hash)
         )
       `,
-      )
-      .eq("user_id", userId)
-      .gt("updated_at", lastSynced)
-      .is("highlights.deleted_at", null),
+        )
+        .eq("user_id", userId)
+        .gt("updated_at", lastSynced)
+        .is("highlights.deleted_at", null),
 
-    supabase
-      .from("highlights")
-      .select(
-        `
+      supabase
+        .from("highlights")
+        .select(
+          `
         chapter_index,
         start_word,
         end_word,
         books!inner (book_hash)
       `,
-      )
-      .eq("user_id", userId)
-      .not("deleted_at", "is", null)
-      .gt("updated_at", lastSynced),
+        )
+        .eq("user_id", userId)
+        .not("deleted_at", "is", null)
+        .gt("updated_at", lastSynced),
 
-    supabase
-      .from("book_transfers")
-      .select("id, filename, file_size")
-      .eq("user_id", userId)
-      .eq("status", "pending")
-      .or(`device_id.eq.${deviceId},device_id.is.null`),
-  ]);
+      supabase
+        .from("book_transfers")
+        .select("id, filename, file_size")
+        .eq("user_id", userId)
+        .eq("status", "pending")
+        .or(`device_id.eq.${deviceId},device_id.is.null`),
+
+      supabase
+        .from("book_transfers")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("status", "failed"),
+    ]);
 
   if (noteResult.error) {
     throw new Error(`Failed to fetch notes: ${noteResult.error.message}`);
@@ -493,7 +501,23 @@ export async function processSync(
     );
   }
 
-  return { syncedAt, notes, deletedHighlights, pendingTransfers };
+  let failedTransferCount = 0;
+  if (failedCountResult.error) {
+    console.error(
+      `Failed to fetch failedTransferCount: ${failedCountResult.error.message}`,
+    );
+  } else {
+    failedTransferCount =
+      (failedCountResult as unknown as { count?: number }).count ?? 0;
+  }
+
+  return {
+    syncedAt,
+    notes,
+    deletedHighlights,
+    pendingTransfers,
+    failedTransferCount,
+  };
 }
 
 // --- Internal row types for DB join results ---

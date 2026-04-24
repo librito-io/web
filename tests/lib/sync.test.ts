@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { validateSyncPayload, processSync } from "$lib/server/sync";
 import { createMockSupabase } from "../helpers";
 
@@ -595,7 +595,7 @@ describe("processSync", () => {
     ]);
   });
 
-  it("transforms pending transfers from DB format", async () => {
+  it("transforms pending transfers with embedded signed URL, sha256, and TTL", async () => {
     const supabase = createMockSupabase();
     setupSyncMocks(supabase, {
       "book_transfers.select": {
@@ -604,6 +604,8 @@ describe("processSync", () => {
             id: "transfer-1",
             filename: "The Martian.epub",
             file_size: 1250000,
+            storage_path: "user-1/transfer-1/the-martian.epub",
+            sha256: "a".repeat(64),
           },
         ],
         error: null,
@@ -620,6 +622,10 @@ describe("processSync", () => {
         id: "transfer-1",
         filename: "The Martian.epub",
         fileSize: 1250000,
+        downloadUrl:
+          "https://mock.example/user-1/transfer-1/the-martian.epub?ttl=3600",
+        sha256: "a".repeat(64),
+        urlExpiresIn: 3600,
       },
     ]);
   });
@@ -713,5 +719,194 @@ describe("processSync", () => {
       books: [],
     });
     expect(result.failedTransferCount).toBe(0);
+  });
+
+  it("calls storage.createSignedUrl once per pending transfer with the row's storage_path and a 1h TTL", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "book_transfers.select": {
+        data: [
+          {
+            id: "transfer-1",
+            filename: "A.epub",
+            file_size: 100,
+            storage_path: "user-1/transfer-1/a.epub",
+            sha256: "a".repeat(64),
+          },
+          {
+            id: "transfer-2",
+            filename: "B.epub",
+            file_size: 200,
+            storage_path: "user-1/transfer-2/b.epub",
+            sha256: "b".repeat(64),
+          },
+        ],
+        error: null,
+      },
+    });
+
+    await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(supabase._storageSpy).toHaveBeenCalledTimes(2);
+    expect(supabase._storageSpy).toHaveBeenCalledWith(
+      "book-transfers",
+      "user-1/transfer-1/a.epub",
+      3600,
+    );
+    expect(supabase._storageSpy).toHaveBeenCalledWith(
+      "book-transfers",
+      "user-1/transfer-2/b.epub",
+      3600,
+    );
+  });
+
+  it("degrades gracefully when createSignedUrl rejects for one transfer", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set(
+      "storage.createSignedUrl.book-transfers.user-1/transfer-2/b.epub",
+      { data: null, error: { __reject: new Error("network down") } },
+    );
+    setupSyncMocks(supabase, {
+      "book_transfers.select": {
+        data: [
+          {
+            id: "transfer-1",
+            filename: "A.epub",
+            file_size: 100,
+            storage_path: "user-1/transfer-1/a.epub",
+            sha256: "a".repeat(64),
+          },
+          {
+            id: "transfer-2",
+            filename: "B.epub",
+            file_size: 200,
+            storage_path: "user-1/transfer-2/b.epub",
+            sha256: "b".repeat(64),
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(result.pendingTransfers).toEqual([
+      {
+        id: "transfer-1",
+        filename: "A.epub",
+        fileSize: 100,
+        downloadUrl: "https://mock.example/user-1/transfer-1/a.epub?ttl=3600",
+        sha256: "a".repeat(64),
+        urlExpiresIn: 3600,
+      },
+      {
+        id: "transfer-2",
+        filename: "B.epub",
+        fileSize: 200,
+      },
+    ]);
+
+    warnSpy.mockRestore();
+  });
+
+  it("degrades gracefully when createSignedUrl returns an error result", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set(
+      "storage.createSignedUrl.book-transfers.user-1/transfer-1/a.epub",
+      { data: null, error: { message: "bucket unavailable" } },
+    );
+    setupSyncMocks(supabase, {
+      "book_transfers.select": {
+        data: [
+          {
+            id: "transfer-1",
+            filename: "A.epub",
+            file_size: 100,
+            storage_path: "user-1/transfer-1/a.epub",
+            sha256: "a".repeat(64),
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(result.pendingTransfers).toEqual([
+      {
+        id: "transfer-1",
+        filename: "A.epub",
+        fileSize: 100,
+      },
+    ]);
+
+    warnSpy.mockRestore();
+  });
+
+  it("emits a transfer_url_gen_failed warn log per URL-gen failure", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set(
+      "storage.createSignedUrl.book-transfers.user-1/transfer-1/a.epub",
+      { data: null, error: { __reject: new Error("timeout") } },
+    );
+    supabase._results.set(
+      "storage.createSignedUrl.book-transfers.user-1/transfer-2/b.epub",
+      { data: null, error: { message: "bucket unavailable" } },
+    );
+    setupSyncMocks(supabase, {
+      "book_transfers.select": {
+        data: [
+          {
+            id: "transfer-1",
+            filename: "A.epub",
+            file_size: 100,
+            storage_path: "user-1/transfer-1/a.epub",
+            sha256: "a".repeat(64),
+          },
+          {
+            id: "transfer-2",
+            filename: "B.epub",
+            file_size: 200,
+            storage_path: "user-1/transfer-2/b.epub",
+            sha256: "b".repeat(64),
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith("transfer_url_gen_failed", {
+      transferId: "transfer-1",
+      storagePath: "user-1/transfer-1/a.epub",
+      error: "Error: timeout",
+    });
+    expect(warnSpy).toHaveBeenCalledWith("transfer_url_gen_failed", {
+      transferId: "transfer-2",
+      storagePath: "user-1/transfer-2/b.epub",
+      error: "bucket unavailable",
+    });
+
+    warnSpy.mockRestore();
   });
 });

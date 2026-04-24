@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { DOWNLOAD_URL_TTL } from "./transfer";
 
 // --- Incoming payload types (device → server) ---
 
@@ -64,6 +65,16 @@ export interface ResponseTransfer {
   id: string;
   filename: string;
   fileSize: number;
+  /**
+   * Signed download URL for the stored EPUB. Atomic triplet with `sha256` and
+   * `urlExpiresIn`: all three present on URL-gen success, all three absent on
+   * URL-gen failure (device falls back to GET /api/transfer/[id]/download-url).
+   */
+  downloadUrl?: string;
+  /** Lowercase 64-hex SHA-256 of the stored object. See `downloadUrl`. */
+  sha256?: string;
+  /** Seconds until `downloadUrl` expires, measured from sync-response issue time. See `downloadUrl`. */
+  urlExpiresIn?: number;
 }
 
 // --- Validation ---
@@ -432,7 +443,7 @@ export async function processSync(
 
       supabase
         .from("book_transfers")
-        .select("id, filename, file_size")
+        .select("id, filename, file_size, storage_path, sha256")
         .eq("user_id", userId)
         .eq("status", "pending")
         .or(`device_id.eq.${deviceId},device_id.is.null`),
@@ -478,13 +489,42 @@ export async function processSync(
     endWord: h.end_word,
   }));
 
-  const pendingTransfers: ResponseTransfer[] = (
-    (transferResult.data as TransferRow[] | null) ?? []
-  ).map((t) => ({
-    id: t.id,
-    filename: t.filename,
-    fileSize: t.file_size,
-  }));
+  const transferRows = (transferResult.data as TransferRow[] | null) ?? [];
+  const urlResults = await Promise.allSettled(
+    transferRows.map((t) =>
+      supabase.storage
+        .from("book-transfers")
+        .createSignedUrl(t.storage_path, DOWNLOAD_URL_TTL),
+    ),
+  );
+
+  const pendingTransfers: ResponseTransfer[] = transferRows.map((t, i) => {
+    const urlResult = urlResults[i];
+    const base: ResponseTransfer = {
+      id: t.id,
+      filename: t.filename,
+      fileSize: t.file_size,
+    };
+
+    if (urlResult.status === "fulfilled" && urlResult.value.data?.signedUrl) {
+      return {
+        ...base,
+        downloadUrl: urlResult.value.data.signedUrl,
+        sha256: t.sha256,
+        urlExpiresIn: DOWNLOAD_URL_TTL,
+      };
+    }
+
+    console.warn("transfer_url_gen_failed", {
+      transferId: t.id,
+      storagePath: t.storage_path,
+      error:
+        urlResult.status === "rejected"
+          ? String(urlResult.reason)
+          : (urlResult.value.error?.message ?? "unknown"),
+    });
+    return base;
+  });
 
   // 3. Update device timestamps
   const { error: deviceUpdateError } = await supabase
@@ -540,8 +580,16 @@ interface DeletedHighlightRow {
   books: { book_hash: string };
 }
 
+/**
+ * Internal shape of a pending book_transfers row as consumed by processSync.
+ * `storage_path` and `sha256` are projected by the SELECT at the transfers query
+ * (see Task 3 of WS-B); the `WHERE status='pending'` predicate plus the WS-A
+ * `valid_sha256` CHECK guarantee both are non-null on every returned row.
+ */
 interface TransferRow {
   id: string;
   filename: string;
   file_size: number;
+  storage_path: string;
+  sha256: string;
 }

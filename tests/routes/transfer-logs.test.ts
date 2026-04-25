@@ -9,6 +9,12 @@ vi.mock("$lib/server/ratelimit", () => ({
   transferDownloadLimiter: {
     limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
   },
+  transferConfirmLimiter: {
+    limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+  },
+  transferRetryLimiter: {
+    limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+  },
 }));
 
 const supabase = createMockSupabase();
@@ -43,7 +49,7 @@ describe("transfer log catalog — defensive shape freeze", () => {
     errorSpy.mockRestore();
   });
 
-  it("emits transfer.initiate at info with {transferId, userId, filenameLen, fileSize, sha256} on successful insert", async () => {
+  it("emits transfer.initiate at info with {transferId, userId, filenameLen, fileSize, sha256Prefix} on successful insert", async () => {
     supabase._results.set("book_transfers.select", { data: [], error: null });
     supabase._results.set("book_transfers.select.count", {
       data: null,
@@ -86,7 +92,7 @@ describe("transfer log catalog — defensive shape freeze", () => {
     expect(payload.filenameLen).toBe("book.epub".length);
     expect(typeof payload.filenameLen).toBe("number");
     expect(payload.fileSize).toBe(100);
-    expect(payload.sha256).toBe(sha);
+    expect(payload.sha256Prefix).toBe(sha.slice(0, 12));
   });
 
   it("emits transfer.download_url_issued at info with {transferId, userId, deviceId, ttl} after URL mint", async () => {
@@ -140,7 +146,7 @@ describe("transfer log catalog — defensive shape freeze", () => {
       error: null,
     });
     supabase._results.set("book_transfers.update", {
-      data: null,
+      data: [{ id: "t-1" }],
       error: null,
     });
 

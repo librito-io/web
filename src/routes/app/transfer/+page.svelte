@@ -26,17 +26,9 @@
   let dragOver = $state(false);
   let cancellingIds = $state<Set<string>>(new Set());
   let retryingIds = $state<Set<string>>(new Set());
-  let retryErrors = $state<Map<string, { message: string; expiresAt: number }>>(
-    new Map(),
-  );
-
-  function visibleRetryError(id: string): string | null {
-    const entry = retryErrors.get(id);
-    if (!entry || entry.expiresAt <= now) return null;
-    return entry.message;
-  }
-
+  let retryErrors = $state<Map<string, string>>(new Map());
   let now = $state(Date.now());
+
   $effect(() => {
     const id = setInterval(() => {
       now = Date.now();
@@ -45,12 +37,22 @@
   });
 
   const PENDING_TTL_MS = 48 * 3600 * 1000;
+  const RETRY_ERROR_TTL_MS = 5000;
+  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+  const MAX_TRANSFER_ATTEMPTS = 10;
+
   function hoursRemaining(uploadedAt: string): number {
     const expiresAt = new Date(uploadedAt).getTime() + PENDING_TTL_MS;
     return Math.max(0, Math.floor((expiresAt - now) / 3600000));
   }
 
-  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+  function setRetryError(id: string, message: string) {
+    retryErrors = new Map(retryErrors).set(id, message);
+    setTimeout(() => {
+      const next = new Map(retryErrors);
+      if (next.delete(id)) retryErrors = next;
+    }, RETRY_ERROR_TTL_MS);
+  }
 
   function uploadToSignedUrl(
     url: string,
@@ -225,18 +227,11 @@
         await refreshTransfers();
       } else {
         const body = await res.json().catch(() => ({}));
-        const message = body.message || "Failed to retry";
-        retryErrors = new Map(retryErrors).set(transferId, {
-          message,
-          expiresAt: Date.now() + 5000,
-        });
+        setRetryError(transferId, body.message || "Failed to retry");
         if (res.status === 409) await refreshTransfers();
       }
     } catch {
-      retryErrors = new Map(retryErrors).set(transferId, {
-        message: "Network error — try again",
-        expiresAt: Date.now() + 5000,
-      });
+      setRetryError(transferId, "Network error — try again");
     } finally {
       const next = new Set(retryingIds);
       next.delete(transferId);
@@ -440,8 +435,8 @@
               {#if transfer.lastError}
                 <p class="error-reason">{transfer.lastError}</p>
               {/if}
-              {#if visibleRetryError(transfer.id)}
-                <p class="retry-error">{visibleRetryError(transfer.id)}</p>
+              {#if retryErrors.has(transfer.id)}
+                <p class="retry-error">{retryErrors.get(transfer.id)}</p>
               {/if}
               <button
                 class="btn-small btn-retry"
@@ -450,6 +445,11 @@
               >
                 {retryingIds.has(transfer.id) ? "Retrying..." : "Retry"}
               </button>
+            {/if}
+            {#if transfer.status === "pending" && transfer.attemptCount > 0}
+              <p class="attempt-meta">
+                Attempt {transfer.attemptCount} of {MAX_TRANSFER_ATTEMPTS}
+              </p>
             {/if}
           </li>
         {/each}
@@ -653,5 +653,11 @@
 
   .btn-retry:hover {
     background: #fef2f2;
+  }
+
+  .attempt-meta {
+    margin-top: 0.35rem;
+    font-size: 0.75rem;
+    color: #9ca3af;
   }
 </style>

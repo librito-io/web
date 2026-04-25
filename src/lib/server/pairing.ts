@@ -1,12 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SetCommandOptions } from "@upstash/redis";
 import { generatePairingCode, generateDeviceToken, hashToken } from "./tokens";
 
 type Redis = {
-  // Structural shape of the calls we use — kept loose to absorb upstream
-  // SetCommandOptions drift from @upstash/redis without coupling to the
-  // exhaustive union there.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  set: (key: string, value: string, opts?: any) => Promise<unknown>;
+  set: (
+    key: string,
+    value: string,
+    opts?: SetCommandOptions,
+  ) => Promise<unknown>;
   get: (key: string) => Promise<string | null>;
 };
 

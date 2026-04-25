@@ -134,7 +134,7 @@ export const POST: RequestHandler = async ({
     userId: user.id,
     filenameLen: safeFilename.length,
     fileSize,
-    sha256: clientSha,
+    sha256Prefix: clientSha.slice(0, 12),
   });
 
   return jsonSuccess(

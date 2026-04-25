@@ -129,6 +129,14 @@ export const POST: RequestHandler = async ({
     return jsonError(500, "server_error", "Failed to create upload URL");
   }
 
+  console.info("transfer.initiate", {
+    transferId,
+    userId: user.id,
+    filenameLen: safeFilename.length,
+    fileSize,
+    sha256: clientSha,
+  });
+
   return jsonSuccess(
     { transferId, uploadUrl: uploadData.signedUrl, expiresIn: UPLOAD_URL_TTL },
     201,

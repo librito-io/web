@@ -5,6 +5,7 @@ package-lock.json
 # Build output
 build/
 .svelte-kit/
+.vite/
 
 # Supabase (SQL has its own formatting conventions)
 supabase/

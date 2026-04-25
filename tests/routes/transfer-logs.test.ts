@@ -127,4 +127,44 @@ describe("transfer log catalog — defensive shape freeze", () => {
     expect(payload.deviceId).toBe("d-1");
     expect(typeof payload.ttl).toBe("number");
   });
+
+  it("emits transfer.retry_reset at info with {transferId, userId, previousAttemptCount, previousLastError}", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: {
+        id: "t-1",
+        user_id: "u-1",
+        status: "failed",
+        attempt_count: 10,
+        last_error: "x",
+      },
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", {
+      data: null,
+      error: null,
+    });
+
+    const { POST } =
+      await import("../../src/routes/api/transfer/[id]/retry/+server");
+    const evt = {
+      params: { id: "t-1" },
+      request: new Request("http://x/api/transfer/t-1/retry", {
+        method: "POST",
+      }),
+      locals: {
+        safeGetSession: async () => ({ user: { id: "u-1" }, session: null }),
+      },
+    } as unknown as Parameters<typeof POST>[0];
+    await POST(evt);
+
+    const call = infoSpy.mock.calls.find(
+      (c) => c[0] === "transfer.retry_reset",
+    );
+    expect(call).toBeDefined();
+    const payload = call![1] as Record<string, unknown>;
+    expect(payload.transferId).toBe("t-1");
+    expect(payload.userId).toBe("u-1");
+    expect(payload.previousAttemptCount).toBe(10);
+    expect(payload.previousLastError).toBe("x");
+  });
 });

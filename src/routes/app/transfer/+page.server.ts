@@ -9,7 +9,9 @@ export const load: PageServerLoad = async ({
 
   const { data: transfers } = await supabase
     .from("book_transfers")
-    .select("id, filename, file_size, status, uploaded_at, downloaded_at")
+    .select(
+      "id, filename, file_size, status, uploaded_at, downloaded_at, attempt_count, last_error, last_attempt_at",
+    )
     .eq("user_id", session.user.id)
     .is("scrubbed_at", null)
     .order("uploaded_at", { ascending: false });
@@ -22,6 +24,9 @@ export const load: PageServerLoad = async ({
       status: t.status,
       uploadedAt: t.uploaded_at,
       downloadedAt: t.downloaded_at,
+      attemptCount: t.attempt_count,
+      lastError: t.last_error,
+      lastAttemptAt: t.last_attempt_at,
     })),
   };
 };

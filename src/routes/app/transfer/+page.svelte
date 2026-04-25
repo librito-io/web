@@ -6,6 +6,9 @@
     status: "pending" | "downloaded" | "expired" | "failed";
     uploadedAt: string;
     downloadedAt: string | null;
+    attemptCount: number;
+    lastError: string | null;
+    lastAttemptAt: string | null;
   }
 
   interface UploadState {
@@ -22,6 +25,16 @@
   let uploads = $state<UploadState[]>([]);
   let dragOver = $state(false);
   let cancellingIds = $state<Set<string>>(new Set());
+  let retryingIds = $state<Set<string>>(new Set());
+  let retryErrors = $state<Map<string, { message: string; expiresAt: number }>>(
+    new Map(),
+  );
+
+  function visibleRetryError(id: string): string | null {
+    const entry = retryErrors.get(id);
+    if (!entry || entry.expiresAt <= now) return null;
+    return entry.message;
+  }
 
   let now = $state(Date.now());
   $effect(() => {
@@ -197,6 +210,37 @@
       const next = new Set(cancellingIds);
       next.delete(transferId);
       cancellingIds = next;
+    }
+  }
+
+  async function handleRetry(transferId: string) {
+    if (retryingIds.has(transferId)) return;
+    retryingIds = new Set(retryingIds).add(transferId);
+    try {
+      const res = await fetchWithSafariRetry(
+        `/api/transfer/${transferId}/retry`,
+        { method: "POST" },
+      );
+      if (res.ok) {
+        await refreshTransfers();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        const message = body.message || "Failed to retry";
+        retryErrors = new Map(retryErrors).set(transferId, {
+          message,
+          expiresAt: Date.now() + 5000,
+        });
+        if (res.status === 409) await refreshTransfers();
+      }
+    } catch {
+      retryErrors = new Map(retryErrors).set(transferId, {
+        message: "Network error — try again",
+        expiresAt: Date.now() + 5000,
+      });
+    } finally {
+      const next = new Set(retryingIds);
+      next.delete(transferId);
+      retryingIds = next;
     }
   }
 
@@ -392,6 +436,21 @@
                 {cancellingIds.has(transfer.id) ? "Removing..." : "Remove"}
               </button>
             {/if}
+            {#if transfer.status === "failed"}
+              {#if transfer.lastError}
+                <p class="error-reason">{transfer.lastError}</p>
+              {/if}
+              {#if visibleRetryError(transfer.id)}
+                <p class="retry-error">{visibleRetryError(transfer.id)}</p>
+              {/if}
+              <button
+                class="btn-small btn-retry"
+                disabled={retryingIds.has(transfer.id)}
+                onclick={() => handleRetry(transfer.id)}
+              >
+                {retryingIds.has(transfer.id) ? "Retrying..." : "Retry"}
+              </button>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -571,5 +630,28 @@
   .countdown.critical {
     color: #b91c1c;
     font-weight: 600;
+  }
+
+  .error-reason {
+    margin-top: 0.4rem;
+    font-size: 0.85rem;
+    color: #7f1d1d;
+  }
+
+  .retry-error {
+    margin-top: 0.4rem;
+    font-size: 0.8rem;
+    color: #b91c1c;
+    font-style: italic;
+  }
+
+  .btn-retry {
+    margin-top: 0.5rem;
+    color: #991b1b;
+    border-color: #fca5a5;
+  }
+
+  .btn-retry:hover {
+    background: #fef2f2;
   }
 </style>

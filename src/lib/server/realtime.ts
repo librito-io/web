@@ -1,6 +1,29 @@
 import { SignJWT } from "jose";
+import {
+  PUBLIC_SUPABASE_URL,
+  PUBLIC_SUPABASE_ANON_KEY,
+} from "$env/static/public";
 
 export const REALTIME_TOKEN_TTL_SECONDS = 86400;
+
+/**
+ * Returns the Phoenix Channels WebSocket URL and Supabase anon key the
+ * device needs to open a Realtime connection. Both values are public, so
+ * we serve them from the token endpoint instead of compiling them into
+ * firmware — that lets self-hosters point devices at their own Supabase
+ * project without a firmware rebuild.
+ */
+export function getRealtimeConnectionInfo(): {
+  realtimeUrl: string;
+  anonKey: string;
+} {
+  const realtimeUrl =
+    PUBLIC_SUPABASE_URL.replace(/^https:\/\//, "wss://").replace(
+      /^http:\/\//,
+      "ws://",
+    ) + "/realtime/v1/websocket";
+  return { realtimeUrl, anonKey: PUBLIC_SUPABASE_ANON_KEY };
+}
 
 // HS256 requires a key at least as long as the hash output (256 bits / 32 B)
 // to avoid weakening the signature. Catch a short SUPABASE_JWT_SECRET (env

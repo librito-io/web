@@ -53,10 +53,13 @@
       await removeNote(highlightId);
       return;
     }
+    // deleted_at: null clears any existing tombstone so saving a note on a
+    // previously-trashed highlight resurrects the row instead of writing
+    // text to a soft-deleted ghost (RPCs + sync would hide it on refresh).
     const { error } = await supabase
       .from("notes")
       .upsert(
-        { highlight_id: highlightId, user_id: userId, text },
+        { highlight_id: highlightId, user_id: userId, text, deleted_at: null },
         { onConflict: "highlight_id" },
       );
     if (error) throw error;

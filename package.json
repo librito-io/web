@@ -30,6 +30,7 @@
     "@upstash/ratelimit": "^2.0.0",
     "@upstash/redis": "^1.34.0",
     "@vercel/config": "^0.2.1",
+    "jose": "^6.2.2",
     "marked": "^18.0.2",
     "material-symbols": "^0.44.1",
     "resend": "^6.12.0",

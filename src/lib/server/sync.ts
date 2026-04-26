@@ -445,14 +445,14 @@ export async function processSync(
       .from("notes")
       .select(
         `
-      updated_at,
-      highlights!inner (
-        chapter_index,
-        start_word,
-        end_word,
-        books!inner (book_hash)
-      )
-    `,
+        updated_at,
+        highlights!inner (
+          chapter_index,
+          start_word,
+          end_word,
+          books!inner (book_hash)
+        )
+      `,
       )
       .eq("user_id", userId)
       .gt("updated_at", lastSynced)

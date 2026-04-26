@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { authenticateDevice } from "$lib/server/auth";
+import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import { syncLimiter } from "$lib/server/ratelimit";
 import { validateSyncPayload, processSync } from "$lib/server/sync";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
@@ -11,15 +11,7 @@ export const POST: RequestHandler = async ({ request }) => {
   // 1. Authenticate device
   const authResult = await authenticateDevice(request, supabase);
   if ("error" in authResult) {
-    const messages = {
-      missing_token: "Authorization header with Bearer token required",
-      invalid_token: "Invalid device token",
-      token_revoked: "Device token has been revoked. Re-pair the device.",
-    } as const satisfies Record<typeof authResult.error, string>;
-    // All auth errors map to 401 (per RFC 7235 — missing/invalid/revoked
-    // credentials all mean "you are not authenticated"). Matches the other
-    // authenticated device endpoints (download-url, confirm, unpair).
-    return jsonError(401, authResult.error, messages[authResult.error]);
+    return authErrorResponse(authResult.error);
   }
 
   const { device } = authResult;

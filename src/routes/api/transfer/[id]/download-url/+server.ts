@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { authenticateDevice } from "$lib/server/auth";
+import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import { transferDownloadLimiter } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { DOWNLOAD_URL_TTL } from "$lib/server/transfer";
@@ -11,12 +11,7 @@ export const GET: RequestHandler = async ({ request, params }) => {
   // 1. Authenticate device
   const authResult = await authenticateDevice(request, supabase);
   if ("error" in authResult) {
-    const messages = {
-      missing_token: "Authorization header with Bearer token required",
-      invalid_token: "Invalid device token",
-      token_revoked: "Device token has been revoked. Re-pair the device.",
-    } as const satisfies Record<typeof authResult.error, string>;
-    return jsonError(401, authResult.error, messages[authResult.error]);
+    return authErrorResponse(authResult.error);
   }
 
   const { device } = authResult;

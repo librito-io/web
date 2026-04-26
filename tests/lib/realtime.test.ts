@@ -48,6 +48,16 @@ describe("mintRealtimeToken", () => {
     expect((payload.exp as number) - (payload.iat as number)).toBe(86400);
   });
 
+  it("throws when jwtSecret is shorter than 32 bytes (HS256 minimum)", async () => {
+    await expect(
+      mintRealtimeToken({
+        userId: "11111111-1111-1111-1111-111111111111",
+        deviceId: "22222222-2222-2222-2222-222222222222",
+        jwtSecret: "too-short-for-hs256",
+      }),
+    ).rejects.toThrow(/SUPABASE_JWT_SECRET is too short/);
+  });
+
   it("rejects verification with the wrong secret", async () => {
     const { token } = await mintRealtimeToken({
       userId: "11111111-1111-1111-1111-111111111111",

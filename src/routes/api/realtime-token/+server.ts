@@ -1,8 +1,11 @@
 import type { RequestHandler } from "./$types";
 import { SUPABASE_JWT_SECRET } from "$env/static/private";
 import { createAdminClient } from "$lib/server/supabase";
-import { authenticateDevice } from "$lib/server/auth";
-import { realtimeTokenLimiter } from "$lib/server/ratelimit";
+import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
+import {
+  realtimeTokenLimiter,
+  realtimeTokenUserLimiter,
+} from "$lib/server/ratelimit";
 import { mintRealtimeToken } from "$lib/server/realtime";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
@@ -11,18 +14,19 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const authResult = await authenticateDevice(request, supabase);
   if ("error" in authResult) {
-    const messages = {
-      missing_token: "Authorization header with Bearer token required",
-      invalid_token: "Invalid device token",
-      token_revoked: "Device token has been revoked. Re-pair the device.",
-    } as const satisfies Record<typeof authResult.error, string>;
-    return jsonError(401, authResult.error, messages[authResult.error]);
+    return authErrorResponse(authResult.error);
   }
 
   const { device } = authResult;
 
-  const { success, reset } = await realtimeTokenLimiter.limit(device.id);
-  if (!success) {
+  // Layered rate limit: per-device bounds reconnect storms, per-user bounds
+  // re-pair-loop bypass (new device.id each pair sidesteps the device cap).
+  const [perDevice, perUser] = await Promise.all([
+    realtimeTokenLimiter.limit(device.id),
+    realtimeTokenUserLimiter.limit(device.userId),
+  ]);
+  if (!perDevice.success || !perUser.success) {
+    const reset = Math.max(perDevice.reset, perUser.reset);
     const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
     return jsonError(
       429,

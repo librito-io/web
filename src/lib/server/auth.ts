@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { hashToken } from "./tokens";
+import { jsonError } from "./errors";
 
 export interface AuthenticatedDevice {
   id: string;
@@ -8,9 +9,23 @@ export interface AuthenticatedDevice {
   name: string;
 }
 
-type AuthResult =
-  | { device: AuthenticatedDevice }
-  | { error: "missing_token" | "invalid_token" | "token_revoked" };
+export type AuthErrorCode = "missing_token" | "invalid_token" | "token_revoked";
+
+type AuthResult = { device: AuthenticatedDevice } | { error: AuthErrorCode };
+
+const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
+  missing_token: "Authorization header with Bearer token required",
+  invalid_token: "Invalid device token",
+  token_revoked: "Device token has been revoked. Re-pair the device.",
+};
+
+// All auth errors map to 401 (per RFC 7235 — missing/invalid/revoked
+// credentials all mean "you are not authenticated"). Used by every
+// authenticated device endpoint. /api/device/unpair is the one
+// exception — it treats invalid/revoked as success for idempotency.
+export function authErrorResponse(error: AuthErrorCode): Response {
+  return jsonError(401, error, AUTH_ERROR_MESSAGES[error]);
+}
 
 export async function authenticateDevice(
   request: Request,

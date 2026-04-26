@@ -52,11 +52,19 @@ export const transferDownloadLimiter = new Ratelimit({
   prefix: "rl:transfer:download",
 });
 
-// /api/realtime-token — 1 mint per 60 s per device. Generous: TTL is 24 h, so
-// a healthy device hits this once per day, not once per minute. Cap exists
-// only to bound a runaway-reconnect storm (firmware bug retrying every loop).
+// /api/realtime-token — two limiters layered for defense in depth.
+// Per-device: 1 mint / 60 s. Bounds firmware-bug reconnect storms.
+// Per-user: 30 mints / 1 h. Bounds re-pair-loop bypass (a logged-in user
+// re-pairs to mint a new device.id and skip the per-device cap). 30/h
+// covers a fleet of ~25 devices on one account with reconnect headroom.
 export const realtimeTokenLimiter = new Ratelimit({
   redis,
   limiter: Ratelimit.slidingWindow(1, "60s"),
   prefix: "rl:realtime:token",
+});
+
+export const realtimeTokenUserLimiter = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(30, "1h"),
+  prefix: "rl:realtime:token:user",
 });

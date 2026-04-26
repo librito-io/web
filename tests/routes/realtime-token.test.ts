@@ -9,13 +9,21 @@ vi.mock("$env/static/private", () => ({
 }));
 
 const authMock = vi.fn();
-vi.mock("$lib/server/auth", () => ({
-  authenticateDevice: (...args: unknown[]) => authMock(...args),
-}));
+vi.mock("$lib/server/auth", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    authenticateDevice: (...args: unknown[]) => authMock(...args),
+  };
+});
 
 const limitMock = vi.fn();
+const userLimitMock = vi.fn();
 vi.mock("$lib/server/ratelimit", () => ({
   realtimeTokenLimiter: { limit: (...args: unknown[]) => limitMock(...args) },
+  realtimeTokenUserLimiter: {
+    limit: (...args: unknown[]) => userLimitMock(...args),
+  },
 }));
 
 const supabase = createMockSupabase();
@@ -41,6 +49,14 @@ describe("POST /api/realtime-token (WS-RT)", () => {
   beforeEach(() => {
     authMock.mockReset();
     limitMock.mockReset();
+    userLimitMock.mockReset();
+    // Default both limiters to allow; tests that exercise denial override
+    // with mockResolvedValueOnce so the rest of the suite stays terse.
+    limitMock.mockResolvedValue({ success: true, reset: Date.now() + 60_000 });
+    userLimitMock.mockResolvedValue({
+      success: true,
+      reset: Date.now() + 3_600_000,
+    });
     supabase._results.clear();
     infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -80,13 +96,32 @@ describe("POST /api/realtime-token (WS-RT)", () => {
     expect(body.message).toMatch(/Re-pair the device/);
   });
 
-  it("429 rate_limited with Retry-After header when limiter denies", async () => {
+  it("429 rate_limited with Retry-After header when per-device limiter denies", async () => {
     authMock.mockResolvedValueOnce({
       device: { id: "d-1", userId: "u-1", hardwareId: "hw", name: "n" },
     });
     limitMock.mockResolvedValueOnce({
       success: false,
       reset: Date.now() + 30_000,
+    });
+    const res = await POST(
+      buildRequest({ Authorization: "Bearer sk_device_xxx" }),
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBeTruthy();
+    const body = await res.json();
+    expect(body.error).toBe("rate_limited");
+  });
+
+  it("429 rate_limited when per-user limiter denies (re-pair-loop bypass)", async () => {
+    authMock.mockResolvedValueOnce({
+      device: { id: "d-fresh", userId: "u-1", hardwareId: "hw", name: "n" },
+    });
+    // Per-device cap clears (fresh device.id), per-user cap denies — the
+    // re-pair-loop bypass scenario the user limiter exists to catch.
+    userLimitMock.mockResolvedValueOnce({
+      success: false,
+      reset: Date.now() + 600_000,
     });
     const res = await POST(
       buildRequest({ Authorization: "Bearer sk_device_xxx" }),
@@ -153,48 +188,8 @@ describe("POST /api/realtime-token (WS-RT)", () => {
     });
   });
 
-  it("500 server_error with realtime.token_mint_failed log when signing throws", async () => {
-    // Minting throws when the TextEncoder.encode runs over a non-string secret.
-    // We force the failure path by stubbing the realtime module via dynamic mock.
-    vi.resetModules();
-    vi.doMock("$lib/server/realtime", () => ({
-      mintRealtimeToken: vi.fn(async () => {
-        throw new Error("simulated jose failure");
-      }),
-      REALTIME_TOKEN_TTL_SECONDS: 86400,
-    }));
-    const fresh = await import("../../src/routes/api/realtime-token/+server");
-
-    authMock.mockResolvedValueOnce({
-      device: {
-        id: "22222222-2222-2222-2222-222222222222",
-        userId: "11111111-1111-1111-1111-111111111111",
-        hardwareId: "hw",
-        name: "n",
-      },
-    });
-    limitMock.mockResolvedValueOnce({
-      success: true,
-      reset: Date.now() + 60_000,
-    });
-
-    const res = await fresh.POST(
-      buildRequest({ Authorization: "Bearer sk_device_xxx" }),
-    );
-    expect(res.status).toBe(500);
-    const body = await res.json();
-    expect(body.error).toBe("server_error");
-
-    const call = errorSpy.mock.calls.find(
-      (c) => c[0] === "realtime.token_mint_failed",
-    );
-    expect(call).toBeDefined();
-    expect(call![1]).toMatchObject({
-      userId: "11111111-1111-1111-1111-111111111111",
-      deviceId: "22222222-2222-2222-2222-222222222222",
-    });
-
-    vi.doUnmock("$lib/server/realtime");
-    vi.resetModules();
-  });
+  // The 500 server_error path is exercised in realtime-token.error.test.ts.
+  // Splitting into its own file gives true module-cache isolation under any
+  // test order: vitest 3 has no isolateModulesAsync, so file boundaries are
+  // the cleanest seam to mock $lib/server/realtime without leakage.
 });

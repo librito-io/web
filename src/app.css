@@ -1,3 +1,9 @@
+/* Non-critical weights still via fontsource (bundled CSS, swap).
+   Must precede every other statement per CSS @import rule. */
+@import "@fontsource/bitter/700.css";
+@import "@fontsource/bitter/400-italic.css";
+@import "@fontsource/noto-sans/500.css";
+
 /* Critical fonts: self-hosted in /static/fonts/ with font-display:
    optional so the browser uses the webfont only if it loads before
    first paint (via the <link rel=preload> in +layout.svelte). If it
@@ -32,11 +38,6 @@
   font-display: optional;
   src: url("/fonts/jetbrains-mono-500.woff2") format("woff2");
 }
-
-/* Non-critical weights still via fontsource (bundled CSS, swap). */
-@import "@fontsource/bitter/700.css";
-@import "@fontsource/bitter/400-italic.css";
-@import "@fontsource/noto-sans/500.css";
 
 html {
   overflow-y: scroll;

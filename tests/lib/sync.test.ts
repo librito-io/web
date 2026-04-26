@@ -423,6 +423,7 @@ function setupSyncMocks(
     "highlights.upsert": { data: null, error: null },
     "highlights.update": { data: null, error: null },
     "notes.select": { data: [], error: null },
+    "notes.select.deleted": { data: [], error: null },
     "highlights.select": { data: [], error: null },
     "book_transfers.select": { data: [], error: null },
     "book_transfers.select.count": { data: null, error: null },
@@ -593,6 +594,69 @@ describe("processSync", () => {
         endWord: 250,
       },
     ]);
+  });
+
+  it("returns empty deletedNotes[] for empty payload", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase);
+
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 0,
+      books: [],
+    });
+
+    expect(result.deletedNotes).toEqual([]);
+  });
+
+  it("populates deletedNotes[] from soft-deleted notes (deleted_at IS NOT NULL)", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "notes.select.deleted": {
+        data: [
+          {
+            updated_at: "2026-04-26T10:00:00Z",
+            highlights: {
+              chapter_index: 7,
+              start_word: 300,
+              end_word: 350,
+              books: { book_hash: "abcd1234" },
+            },
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(result.deletedNotes).toEqual([
+      {
+        bookHash: "abcd1234",
+        chapter: 7,
+        startWord: 300,
+        endWord: 350,
+      },
+    ]);
+  });
+
+  it("response shape includes deletedNotes alongside existing fields", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase);
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 0,
+      books: [],
+    });
+    expect(result).toMatchObject({
+      syncedAt: expect.any(Number),
+      notes: [],
+      deletedHighlights: [],
+      deletedNotes: [],
+      pendingTransfers: [],
+      failedTransferCount: 0,
+    });
   });
 
   it("transforms pending transfers with embedded signed URL, sha256, and TTL", async () => {
@@ -908,5 +972,58 @@ describe("processSync", () => {
     });
 
     warnSpy.mockRestore();
+  });
+
+  it("populates both deletedHighlights and deletedNotes for a highlight+note pair tombstoned together", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "highlights.select": {
+        data: [
+          {
+            chapter_index: 4,
+            start_word: 100,
+            end_word: 150,
+            books: { book_hash: "book-x" },
+          },
+        ],
+        error: null,
+      },
+      "notes.select.deleted": {
+        data: [
+          {
+            updated_at: "2026-04-26T12:00:00Z",
+            highlights: {
+              chapter_index: 4,
+              start_word: 100,
+              end_word: 150,
+              books: { book_hash: "book-x" },
+            },
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(result.deletedHighlights).toEqual([
+      {
+        bookHash: "book-x",
+        chapter: 4,
+        startWord: 100,
+        endWord: 150,
+      },
+    ]);
+    expect(result.deletedNotes).toEqual([
+      {
+        bookHash: "book-x",
+        chapter: 4,
+        startWord: 100,
+        endWord: 150,
+      },
+    ]);
   });
 });

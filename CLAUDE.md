@@ -1,6 +1,6 @@
 # CLAUDE.md — Librito Web
 
-SvelteKit web app for the Librito cloud highlight sync system. Hosted at `https://librito.io`. Provides device pairing API, highlight sync API, and a browser-based highlight viewer. Deployed on Vercel (free tier), portable to self-hosted Node.js via `adapter-node`. The device firmware defaults to `https://librito.io` as its API base URL.
+SvelteKit web app for the Librito cloud highlight sync system. Hosted at `https://librito.io`. Provides device pairing API, highlight sync API, and a browser-based highlight viewer. Deployed on Vercel (free tier) via `@sveltejs/adapter-vercel`. Self-hosters: see [Self-hosting](#self-hosting) for the one-line adapter swap. The device firmware defaults to `https://librito.io` as its API base URL.
 
 ## Librito Project Structure
 
@@ -15,14 +15,14 @@ Design spec and implementation plans live in the reader repo at `docs/superpower
 
 ## Tech Stack
 
-| Layer          | Technology            | Notes                                                                 |
-| -------------- | --------------------- | --------------------------------------------------------------------- |
-| Web framework  | SvelteKit (Svelte 5)  | TypeScript, `adapter-auto` (swap to `adapter-node` for self-hosting)  |
-| Database       | Supabase (Postgres)   | Auth, Storage, Realtime. Migrations in `supabase/migrations/`         |
-| Auth (browser) | `@supabase/ssr`       | SSR cookie-based sessions, anon key                                   |
-| Auth (device)  | SHA-256 token hashing | Device sends `Bearer sk_device_xxx`, server hashes and looks up in DB |
-| Rate limiting  | Upstash Redis         | `@upstash/ratelimit` sliding window, serverless                       |
-| Testing        | vitest                | Unit tests with mock Supabase client                                  |
+| Layer          | Technology            | Notes                                                                  |
+| -------------- | --------------------- | ---------------------------------------------------------------------- |
+| Web framework  | SvelteKit (Svelte 5)  | TypeScript, `adapter-vercel` (swap to `adapter-node` for self-hosting) |
+| Database       | Supabase (Postgres)   | Auth, Storage, Realtime. Migrations in `supabase/migrations/`          |
+| Auth (browser) | `@supabase/ssr`       | SSR cookie-based sessions, anon key                                    |
+| Auth (device)  | SHA-256 token hashing | Device sends `Bearer sk_device_xxx`, server hashes and looks up in DB  |
+| Rate limiting  | Upstash Redis         | `@upstash/ratelimit` sliding window, serverless                        |
+| Testing        | vitest                | Unit tests with mock Supabase client                                   |
 
 ## Architecture
 
@@ -91,6 +91,24 @@ supabase db push               # apply
 Forgetting this step looks like a post-deploy 500 from any endpoint that reads a new column, because the deployed code references schema the database does not yet have. Always run `supabase migration list` before declaring a schema-touching deploy complete.
 
 For recurring schema work, consider wiring a GitHub Action that runs `supabase db push` on merge to main. At current release cadence (solo dev, ad-hoc schema work) the manual step is preferred — it forces a deliberate "production write" pause.
+
+## Self-hosting
+
+Production runs on Vercel via `@sveltejs/adapter-vercel`. To self-host on Node.js (Docker, fly.io, bare metal, etc.):
+
+1. Replace the adapter dep:
+   ```bash
+   npm uninstall @sveltejs/adapter-vercel
+   npm install -D @sveltejs/adapter-node
+   ```
+2. In `svelte.config.js`, change the import line from `@sveltejs/adapter-vercel` to `@sveltejs/adapter-node`.
+3. Build + run:
+   ```bash
+   npm run build
+   node build/
+   ```
+
+Env vars required regardless of host: see [Environment Variables](#environment-variables). Supabase, Upstash Redis, and the JWT secret are platform-agnostic; only the SvelteKit adapter is Vercel-specific.
 
 ## PR & Commit Convention
 

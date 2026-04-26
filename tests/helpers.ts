@@ -55,6 +55,44 @@ export function createMockSupabase() {
     return makeChain(table, "select");
   }
 
+  // Notes-specific select chain. processSync issues two select queries on
+  // `notes` in the same Promise.all — one for live (`is('deleted_at', null)`)
+  // and one for soft-deleted (`not('deleted_at', 'is', null)`). Tests need
+  // to mock them separately, so route by the predicate the caller invokes.
+  function makeNotesSelectChain(_args: unknown[]) {
+    let isDeleted = false;
+    const chain: Record<string, unknown> = {};
+
+    const handler: ProxyHandler<Record<string, unknown>> = {
+      get(_, prop: string) {
+        if (prop === "then") {
+          const key = isDeleted ? "notes.select.deleted" : "notes.select";
+          const result = results.get(key) ?? { data: null, error: null };
+          return (onFulfilled: (value: unknown) => unknown) =>
+            Promise.resolve(onFulfilled(result));
+        }
+        if (prop === "single" || prop === "maybeSingle") {
+          return () => {
+            const key = isDeleted ? "notes.select.deleted" : "notes.select";
+            const raw = results.get(key) ?? { data: null, error: null };
+            const data = Array.isArray(raw.data)
+              ? (raw.data[0] ?? null)
+              : raw.data;
+            return Promise.resolve({ data, error: raw.error });
+          };
+        }
+        return (...callArgs: unknown[]) => {
+          if (prop === "not" && callArgs[0] === "deleted_at") {
+            isDeleted = true;
+          }
+          return new Proxy(chain, handler);
+        };
+      },
+    };
+
+    return new Proxy(chain, handler);
+  }
+
   const storageSpy = vi.fn(
     async (bucket: string, path: string, ttl: number) => {
       const key = `storage.createSignedUrl.${bucket}.${path}`;
@@ -96,7 +134,12 @@ export function createMockSupabase() {
   const client = {
     from: (table: string) => ({
       insert: (..._args: unknown[]) => makeChain(table, "insert"),
-      select: (...args: unknown[]) => selectChain(table, args),
+      select: (...args: unknown[]) => {
+        if (table === "notes") {
+          return makeNotesSelectChain(args);
+        }
+        return selectChain(table, args);
+      },
       update: (..._args: unknown[]) => makeChain(table, "update"),
       upsert: (..._args: unknown[]) => makeChain(table, "upsert"),
       delete: (..._args: unknown[]) => makeChain(table, "delete"),

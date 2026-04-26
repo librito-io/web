@@ -41,6 +41,7 @@ export interface SyncResponse {
   syncedAt: number;
   notes: ResponseNote[];
   deletedHighlights: ResponseDeletedHighlight[];
+  deletedNotes: ResponseDeletedNote[];
   pendingTransfers: ResponseTransfer[];
   failedTransferCount: number;
 }
@@ -55,6 +56,13 @@ export interface ResponseNote {
 }
 
 export interface ResponseDeletedHighlight {
+  bookHash: string;
+  chapter: number;
+  startWord: number;
+  endWord: number;
+}
+
+export interface ResponseDeletedNote {
   bookHash: string;
   chapter: number;
   startWord: number;
@@ -407,12 +415,17 @@ export async function processSync(
   }
 
   // 2. Query notes, deleted highlights, and pending transfers in parallel
-  const [noteResult, deletedResult, transferResult, failedCountResult] =
-    await Promise.all([
-      supabase
-        .from("notes")
-        .select(
-          `
+  const [
+    noteResult,
+    deletedNotesResult,
+    deletedResult,
+    transferResult,
+    failedCountResult,
+  ] = await Promise.all([
+    supabase
+      .from("notes")
+      .select(
+        `
         text,
         updated_at,
         highlights!inner (
@@ -422,38 +435,56 @@ export async function processSync(
           books!inner (book_hash)
         )
       `,
-        )
-        .eq("user_id", userId)
-        .gt("updated_at", lastSynced)
-        .is("highlights.deleted_at", null),
+      )
+      .eq("user_id", userId)
+      .gt("updated_at", lastSynced)
+      .is("deleted_at", null)
+      .is("highlights.deleted_at", null),
 
-      supabase
-        .from("highlights")
-        .select(
-          `
+    supabase
+      .from("notes")
+      .select(
+        `
+      updated_at,
+      highlights!inner (
+        chapter_index,
+        start_word,
+        end_word,
+        books!inner (book_hash)
+      )
+    `,
+      )
+      .eq("user_id", userId)
+      .gt("updated_at", lastSynced)
+      .not("deleted_at", "is", null),
+
+    supabase
+      .from("highlights")
+      .select(
+        `
         chapter_index,
         start_word,
         end_word,
         books!inner (book_hash)
       `,
-        )
-        .eq("user_id", userId)
-        .not("deleted_at", "is", null)
-        .gt("updated_at", lastSynced),
+      )
+      .eq("user_id", userId)
+      .not("deleted_at", "is", null)
+      .gt("updated_at", lastSynced),
 
-      supabase
-        .from("book_transfers")
-        .select("id, filename, file_size, storage_path, sha256")
-        .eq("user_id", userId)
-        .eq("status", "pending")
-        .or(`device_id.eq.${deviceId},device_id.is.null`),
+    supabase
+      .from("book_transfers")
+      .select("id, filename, file_size, storage_path, sha256")
+      .eq("user_id", userId)
+      .eq("status", "pending")
+      .or(`device_id.eq.${deviceId},device_id.is.null`),
 
-      supabase
-        .from("book_transfers")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .eq("status", "failed"),
-    ]);
+    supabase
+      .from("book_transfers")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("status", "failed"),
+  ]);
 
   if (noteResult.error) {
     throw new Error(`Failed to fetch notes: ${noteResult.error.message}`);
@@ -461,6 +492,11 @@ export async function processSync(
   if (deletedResult.error) {
     throw new Error(
       `Failed to fetch deleted highlights: ${deletedResult.error.message}`,
+    );
+  }
+  if (deletedNotesResult.error) {
+    throw new Error(
+      `Failed to fetch deleted notes: ${deletedNotesResult.error.message}`,
     );
   }
   if (transferResult.error) {
@@ -487,6 +523,15 @@ export async function processSync(
     chapter: h.chapter_index,
     startWord: h.start_word,
     endWord: h.end_word,
+  }));
+
+  const deletedNotes: ResponseDeletedNote[] = (
+    (deletedNotesResult.data ?? []) as unknown as DeletedNoteRow[]
+  ).map((n) => ({
+    bookHash: n.highlights.books.book_hash,
+    chapter: n.highlights.chapter_index,
+    startWord: n.highlights.start_word,
+    endWord: n.highlights.end_word,
   }));
 
   const transferRows = (transferResult.data as TransferRow[] | null) ?? [];
@@ -555,6 +600,7 @@ export async function processSync(
     syncedAt,
     notes,
     deletedHighlights,
+    deletedNotes,
     pendingTransfers,
     failedTransferCount,
   };
@@ -578,6 +624,16 @@ interface DeletedHighlightRow {
   start_word: number;
   end_word: number;
   books: { book_hash: string };
+}
+
+interface DeletedNoteRow {
+  updated_at: string;
+  highlights: {
+    chapter_index: number;
+    start_word: number;
+    end_word: number;
+    books: { book_hash: string };
+  };
 }
 
 /**

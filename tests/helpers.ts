@@ -131,6 +131,11 @@ export function createMockSupabase() {
     };
   }
 
+  async function rpc(name: string, _args?: unknown) {
+    const key = `rpc.${name}`;
+    return results.get(key) ?? { data: null, error: null };
+  }
+
   const client = {
     from: (table: string) => ({
       insert: (..._args: unknown[]) => makeChain(table, "insert"),
@@ -145,6 +150,7 @@ export function createMockSupabase() {
       delete: (..._args: unknown[]) => makeChain(table, "delete"),
     }),
     storage: { from: storageBucket },
+    rpc,
     _results: results,
     _storage: storageResults,
     _storageSpy: storageSpy,

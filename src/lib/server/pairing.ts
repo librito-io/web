@@ -1,8 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SetCommandOptions } from "@upstash/redis";
 import { generatePairingCode, generateDeviceToken, hashToken } from "./tokens";
 
 type Redis = {
-  set: (key: string, value: string, opts?: { ex?: number }) => Promise<unknown>;
+  set: (
+    key: string,
+    value: string,
+    opts?: SetCommandOptions,
+  ) => Promise<unknown>;
   get: (key: string) => Promise<string | null>;
 };
 

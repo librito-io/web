@@ -57,6 +57,13 @@ export const GET: RequestHandler = async ({ request, params }) => {
     return jsonError(500, "server_error", "Failed to generate download URL");
   }
 
+  console.info("transfer.download_url_issued", {
+    transferId: transfer.id,
+    userId: device.userId,
+    deviceId: device.id,
+    ttl: DOWNLOAD_URL_TTL,
+  });
+
   // 5. Return URL + metadata
   return jsonSuccess({
     url: urlData.signedUrl,

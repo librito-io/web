@@ -52,6 +52,23 @@ export const transferDownloadLimiter = new Ratelimit({
   prefix: "rl:transfer:download",
 });
 
+// Transfer: confirm (device, per device:transfer). Caps the /confirm-loop
+// abuse window — a stolen device token cannot drive attempt_count from 0
+// to MAX_TRANSFER_ATTEMPTS in tight succession on a single transfer.
+export const transferConfirmLimiter = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(5, "1m"),
+  prefix: "rl:transfer:confirm",
+});
+
+// Transfer: retry (browser, per user). Mirrors initiate's posture so a
+// failed-row reset cannot be looped from the UI or a script.
+export const transferRetryLimiter = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(5, "1m"),
+  prefix: "rl:transfer:retry",
+});
+
 // /api/realtime-token — two limiters layered for defense in depth.
 // Per-device: 1 mint / 60 s. Bounds firmware-bug reconnect storms.
 // Per-user: 30 mints / 1 h. Bounds re-pair-loop bypass (a logged-in user

@@ -6,6 +6,9 @@
     status: "pending" | "downloaded" | "expired" | "failed";
     uploadedAt: string;
     downloadedAt: string | null;
+    attemptCount: number;
+    lastError: string | null;
+    lastAttemptAt: string | null;
   }
 
   interface UploadState {
@@ -22,8 +25,10 @@
   let uploads = $state<UploadState[]>([]);
   let dragOver = $state(false);
   let cancellingIds = $state<Set<string>>(new Set());
-
+  let retryingIds = $state<Set<string>>(new Set());
+  let retryErrors = $state<Map<string, string>>(new Map());
   let now = $state(Date.now());
+
   $effect(() => {
     const id = setInterval(() => {
       now = Date.now();
@@ -32,12 +37,22 @@
   });
 
   const PENDING_TTL_MS = 48 * 3600 * 1000;
+  const RETRY_ERROR_TTL_MS = 5000;
+  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+  const MAX_TRANSFER_ATTEMPTS = 10;
+
   function hoursRemaining(uploadedAt: string): number {
     const expiresAt = new Date(uploadedAt).getTime() + PENDING_TTL_MS;
     return Math.max(0, Math.floor((expiresAt - now) / 3600000));
   }
 
-  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+  function setRetryError(id: string, message: string) {
+    retryErrors = new Map(retryErrors).set(id, message);
+    setTimeout(() => {
+      const next = new Map(retryErrors);
+      if (next.delete(id)) retryErrors = next;
+    }, RETRY_ERROR_TTL_MS);
+  }
 
   function uploadToSignedUrl(
     url: string,
@@ -197,6 +212,30 @@
       const next = new Set(cancellingIds);
       next.delete(transferId);
       cancellingIds = next;
+    }
+  }
+
+  async function handleRetry(transferId: string) {
+    if (retryingIds.has(transferId)) return;
+    retryingIds = new Set(retryingIds).add(transferId);
+    try {
+      const res = await fetchWithSafariRetry(
+        `/api/transfer/${transferId}/retry`,
+        { method: "POST" },
+      );
+      if (res.ok) {
+        await refreshTransfers();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setRetryError(transferId, body.message || "Failed to retry");
+        if (res.status === 409) await refreshTransfers();
+      }
+    } catch {
+      setRetryError(transferId, "Network error — try again");
+    } finally {
+      const next = new Set(retryingIds);
+      next.delete(transferId);
+      retryingIds = next;
     }
   }
 
@@ -392,6 +431,26 @@
                 {cancellingIds.has(transfer.id) ? "Removing..." : "Remove"}
               </button>
             {/if}
+            {#if transfer.status === "failed"}
+              {#if transfer.lastError}
+                <p class="error-reason">{transfer.lastError}</p>
+              {/if}
+              {#if retryErrors.has(transfer.id)}
+                <p class="retry-error">{retryErrors.get(transfer.id)}</p>
+              {/if}
+              <button
+                class="btn-small btn-retry"
+                disabled={retryingIds.has(transfer.id)}
+                onclick={() => handleRetry(transfer.id)}
+              >
+                {retryingIds.has(transfer.id) ? "Retrying..." : "Retry"}
+              </button>
+            {/if}
+            {#if transfer.status === "pending" && transfer.attemptCount > 0}
+              <p class="attempt-meta">
+                Attempt {transfer.attemptCount} of {MAX_TRANSFER_ATTEMPTS}
+              </p>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -571,5 +630,34 @@
   .countdown.critical {
     color: #b91c1c;
     font-weight: 600;
+  }
+
+  .error-reason {
+    margin-top: 0.4rem;
+    font-size: 0.85rem;
+    color: #7f1d1d;
+  }
+
+  .retry-error {
+    margin-top: 0.4rem;
+    font-size: 0.8rem;
+    color: #b91c1c;
+    font-style: italic;
+  }
+
+  .btn-retry {
+    margin-top: 0.5rem;
+    color: #991b1b;
+    border-color: #fca5a5;
+  }
+
+  .btn-retry:hover {
+    background: #fef2f2;
+  }
+
+  .attempt-meta {
+    margin-top: 0.35rem;
+    font-size: 0.75rem;
+    color: #9ca3af;
   }
 </style>

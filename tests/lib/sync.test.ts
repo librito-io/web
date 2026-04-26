@@ -973,4 +973,57 @@ describe("processSync", () => {
 
     warnSpy.mockRestore();
   });
+
+  it("populates both deletedHighlights and deletedNotes for a highlight+note pair tombstoned together", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "highlights.select": {
+        data: [
+          {
+            chapter_index: 4,
+            start_word: 100,
+            end_word: 150,
+            books: { book_hash: "book-x" },
+          },
+        ],
+        error: null,
+      },
+      "notes.select.deleted": {
+        data: [
+          {
+            updated_at: "2026-04-26T12:00:00Z",
+            highlights: {
+              chapter_index: 4,
+              start_word: 100,
+              end_word: 150,
+              books: { book_hash: "book-x" },
+            },
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [],
+    });
+
+    expect(result.deletedHighlights).toEqual([
+      {
+        bookHash: "book-x",
+        chapter: 4,
+        startWord: 100,
+        endWord: 150,
+      },
+    ]);
+    expect(result.deletedNotes).toEqual([
+      {
+        bookHash: "book-x",
+        chapter: 4,
+        startWord: 100,
+        endWord: 150,
+      },
+    ]);
+  });
 });

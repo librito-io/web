@@ -51,3 +51,12 @@ export const transferDownloadLimiter = new Ratelimit({
   limiter: Ratelimit.slidingWindow(1, "10s"),
   prefix: "rl:transfer:download",
 });
+
+// /api/realtime-token — 1 mint per 60 s per device. Generous: TTL is 24 h, so
+// a healthy device hits this once per day, not once per minute. Cap exists
+// only to bound a runaway-reconnect storm (firmware bug retrying every loop).
+export const realtimeTokenLimiter = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(1, "60s"),
+  prefix: "rl:realtime:token",
+});

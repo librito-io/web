@@ -66,9 +66,10 @@
   async function removeNote(highlightId: string): Promise<void> {
     const { error } = await supabase
       .from("notes")
-      .delete()
+      .update({ deleted_at: new Date().toISOString() })
       .eq("highlight_id", highlightId)
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .is("deleted_at", null);
     if (error) throw error;
     noteOverride = { text: null, updatedAt: null };
   }

@@ -8,6 +8,14 @@ vi.mock("$env/static/private", () => ({
   SUPABASE_JWT_SECRET: TEST_JWT_SECRET,
 }));
 
+// Pin a prod-shaped Supabase URL so realtimeUrl assertions don't depend on
+// whatever .env provides (local dev has http://127.0.0.1:54321 → ws://, not
+// wss://).
+vi.mock("$env/static/public", () => ({
+  PUBLIC_SUPABASE_URL: "https://test-proj.supabase.co",
+  PUBLIC_SUPABASE_ANON_KEY: "test-anon-key-not-a-real-jwt",
+}));
+
 const authMock = vi.fn();
 vi.mock("$lib/server/auth", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -148,9 +156,23 @@ describe("POST /api/realtime-token (WS-RT)", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { token: string; expiresIn: number };
+    const body = (await res.json()) as {
+      token: string;
+      expiresIn: number;
+      realtimeUrl: string;
+      anonKey: string;
+    };
     expect(body.expiresIn).toBe(86400);
     expect(typeof body.token).toBe("string");
+
+    expect(typeof body.realtimeUrl).toBe("string");
+    expect(body.realtimeUrl.length).toBeGreaterThan(0);
+    expect(body.realtimeUrl.startsWith("wss://")).toBe(true);
+    expect(body.realtimeUrl.endsWith("/realtime/v1/websocket")).toBe(true);
+    expect(typeof body.anonKey).toBe("string");
+    expect(body.anonKey.length).toBeGreaterThan(0);
+    // anonKey should not equal the realtime URL (catches arg-order swap).
+    expect(body.anonKey).not.toBe(body.realtimeUrl);
 
     const { payload } = await jwtVerify(
       body.token,

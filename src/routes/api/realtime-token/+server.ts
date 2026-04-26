@@ -6,7 +6,10 @@ import {
   realtimeTokenLimiter,
   realtimeTokenUserLimiter,
 } from "$lib/server/ratelimit";
-import { mintRealtimeToken } from "$lib/server/realtime";
+import {
+  mintRealtimeToken,
+  getRealtimeConnectionInfo,
+} from "$lib/server/realtime";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
 export const POST: RequestHandler = async ({ request }) => {
@@ -49,7 +52,8 @@ export const POST: RequestHandler = async ({ request }) => {
       expiresIn,
     });
 
-    return jsonSuccess({ token, expiresIn });
+    const { realtimeUrl, anonKey } = getRealtimeConnectionInfo();
+    return jsonSuccess({ token, expiresIn, realtimeUrl, anonKey });
   } catch (err) {
     console.error("realtime.token_mint_failed", {
       userId: device.userId,

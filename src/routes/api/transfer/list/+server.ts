@@ -10,7 +10,9 @@ export const GET: RequestHandler = async ({ locals: { safeGetSession } }) => {
 
   const { data: transfers, error } = await supabase
     .from("book_transfers")
-    .select("id, filename, file_size, status, uploaded_at, downloaded_at")
+    .select(
+      "id, filename, file_size, status, uploaded_at, downloaded_at, attempt_count, last_error, last_attempt_at",
+    )
     .eq("user_id", user.id)
     .order("uploaded_at", { ascending: false });
 
@@ -26,6 +28,9 @@ export const GET: RequestHandler = async ({ locals: { safeGetSession } }) => {
       status: t.status,
       uploadedAt: t.uploaded_at,
       downloadedAt: t.downloaded_at,
+      attemptCount: t.attempt_count,
+      lastError: t.last_error,
+      lastAttemptAt: t.last_attempt_at,
     })),
   });
 };

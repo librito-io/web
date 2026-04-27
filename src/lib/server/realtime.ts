@@ -1,10 +1,23 @@
-import { SignJWT, importPKCS8 } from "jose";
+import { SignJWT, importJWK } from "jose";
 import {
   PUBLIC_SUPABASE_URL,
   PUBLIC_SUPABASE_ANON_KEY,
 } from "$env/static/public";
 
 export const REALTIME_TOKEN_TTL_SECONDS = 86400;
+
+export type RealtimeSigningJwk = {
+  kty: "EC";
+  kid: string;
+  alg: "ES256";
+  crv: "P-256";
+  d: string;
+  x: string;
+  y: string;
+  use?: string;
+  key_ops?: string[];
+  ext?: boolean;
+};
 
 /**
  * Returns the Phoenix Channels WebSocket URL and Supabase anon key the
@@ -25,48 +38,90 @@ export function getRealtimeConnectionInfo(): {
   return { realtimeUrl, anonKey: PUBLIC_SUPABASE_ANON_KEY };
 }
 
-const PEM_HEADER = "-----BEGIN PRIVATE KEY-----";
+// Module-scope cache: once we've confirmed our kid is in the project's
+// JWKS, don't refetch on every mint. Caching only the success branch lets
+// us recover automatically after a rotation propagates.
+let jwksKidConfirmed: string | null = null;
+
+async function checkKidInJwks(kid: string, supabaseUrl: string): Promise<void> {
+  if (jwksKidConfirmed === kid) return;
+  try {
+    const res = await fetch(`${supabaseUrl}/auth/v1/.well-known/jwks.json`);
+    if (!res.ok) {
+      console.warn("realtime.jwks_check_failed", {
+        status: res.status,
+        kid,
+      });
+      return;
+    }
+    const body = (await res.json()) as { keys?: Array<{ kid: string }> };
+    const keys = body.keys ?? [];
+    if (keys.some((k) => k.kid === kid)) {
+      jwksKidConfirmed = kid;
+    } else {
+      console.warn("realtime.kid_not_in_jwks", {
+        kid,
+        knownKids: keys.map((k) => k.kid),
+      });
+    }
+  } catch (err) {
+    console.warn("realtime.jwks_check_failed", { error: String(err), kid });
+  }
+}
 
 /**
  * Mint an ES256 JWT for the device to authenticate Phoenix Channels
- * subscriptions. We are a third-party JWT issuer registered with Supabase
- * (Auth → Third-party Auth, JWKS at /.well-known/jwks.json). Realtime's
- * verifier picks our public key by `kid` and validates ES256.
+ * subscriptions. Signed with our Supabase-imported standby signing key —
+ * Supabase publishes the public side at <project>.supabase.co/auth/v1/.well-known/jwks.json,
+ * Realtime fetches that JWKS and verifies our token's kid against it.
  *
  * Token is strictly weaker than the device Bearer it was minted from:
  * read-only, RLS-narrowed to one user, no mutation surface. Bearer
  * revocation propagates to /api/sync immediately; outstanding Realtime
  * JWTs remain valid until `exp` (≤24 h). See spec §3 + §13 risk #4.
  *
- * Key material is injected (not read from `$env/static/private`) so
+ * Key material is injected (not read from `$env/dynamic/private`) so
  * vitest can exercise this function without mocking $env.
+ *
+ * Realtime ignores `iss` (probed Stage 1 V2). We still set it to the
+ * Supabase auth-v1 URL for forward compatibility — costs nothing.
  */
 export async function mintRealtimeToken(opts: {
   userId: string;
   deviceId: string;
-  privateKeyPem: string;
-  kid: string;
-  issuer: string;
+  privateJwk: RealtimeSigningJwk;
+  supabaseUrl: string;
 }): Promise<{ token: string; expiresIn: number }> {
-  if (!opts.privateKeyPem.includes(PEM_HEADER)) {
+  if (!opts.privateJwk.d) {
     throw new Error(
-      "LIBRITO_JWT_PRIVATE_KEY_PEM is not a PKCS8 PEM (missing BEGIN PRIVATE KEY header)",
+      "LIBRITO_JWT_PRIVATE_KEY_JWK is missing the `d` private component",
     );
   }
-  const key = await importPKCS8(opts.privateKeyPem, "ES256");
+
+  // Strip key_ops so importJWK doesn't reject a verify-only standby JWK.
+  // The on-disk dev key has key_ops=["verify"] (gotrue's standby contract),
+  // but jose insists on a sign-capable key for a private import.
+  const { key_ops, ...jwkForImport } = opts.privateJwk;
+  const key = await importJWK(jwkForImport, "ES256");
   const nowSec = Math.floor(Date.now() / 1000);
+  const issuer = `${opts.supabaseUrl}/auth/v1`;
 
   const token = await new SignJWT({
     role: "authenticated",
     device_id: opts.deviceId,
   })
-    .setProtectedHeader({ alg: "ES256", typ: "JWT", kid: opts.kid })
-    .setIssuer(opts.issuer)
+    .setProtectedHeader({ alg: "ES256", typ: "JWT", kid: opts.privateJwk.kid })
+    .setIssuer(issuer)
     .setSubject(opts.userId)
     .setAudience("authenticated")
     .setIssuedAt(nowSec)
     .setExpirationTime(nowSec + REALTIME_TOKEN_TTL_SECONDS)
     .sign(key);
+
+  // Fire-and-forget JWKS sanity check. Warns if our kid isn't published —
+  // catches misconfig (wrong key in env) or rotation propagation lag.
+  // Doesn't block the mint.
+  void checkKidInJwks(opts.privateJwk.kid, opts.supabaseUrl);
 
   return { token, expiresIn: REALTIME_TOKEN_TTL_SECONDS };
 }

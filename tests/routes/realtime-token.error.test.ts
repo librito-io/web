@@ -7,22 +7,17 @@ import { createMockSupabase } from "../helpers";
 // (rather than mid-suite vi.doMock) is the cleanest module-cache isolation
 // available under vitest 3 (no isolateModulesAsync).
 
-const TEST_PEM = `-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgyN0xVvKw1GY7IOvW
-onn5PQ1S8EupPoRY93+/trVs8kihRANCAATAEPCWCqGfnZLx/pq1WAOw5F/5DRWu
-3s7NNUUGimo6aalkpVIseeUiI3ltvp6arS35IpDtrYlveIzJtN28ygk8
------END PRIVATE KEY-----
-`;
-const TEST_JWK_STR =
-  '{"kty":"EC","x":"wBDwlgqhn52S8f6atVgDsORf-Q0Vrt7OzTVFBopqOmk","y":"qWSlUix55SIjeW2-npqtLfkikO2tiW94jMm03bzKCTw","crv":"P-256","kid":"test-kid-fixture","use":"sig","alg":"ES256"}';
+import { DEV_STANDBY_JWK_STR } from "../fixtures/dev-jwk";
 
 vi.mock("$env/dynamic/private", () => ({
   env: {
-    LIBRITO_JWT_PRIVATE_KEY_PEM: TEST_PEM,
-    LIBRITO_JWT_PUBLIC_KEY_JWK: TEST_JWK_STR,
-    LIBRITO_JWT_KID: "test-kid-fixture",
-    LIBRITO_JWT_ISSUER: "https://test.librito.io",
+    LIBRITO_JWT_PRIVATE_KEY_JWK: DEV_STANDBY_JWK_STR,
   },
+}));
+
+vi.mock("$env/static/public", () => ({
+  PUBLIC_SUPABASE_URL: "https://test-proj.supabase.co",
+  PUBLIC_SUPABASE_ANON_KEY: "test-anon-key-not-a-real-jwt",
 }));
 
 const authMock = vi.fn();

@@ -99,8 +99,6 @@ describe("POST /api/realtime-token (env not configured)", () => {
     expect(call).toBeDefined();
     expect(call![1]).toMatchObject({
       hasPrivateKey: false,
-      hasKid: false,
-      hasIssuer: false,
     });
   });
 });

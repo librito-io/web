@@ -1,28 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
-// This file isolates the realtime-token mint-failure path. It mocks
-// $lib/server/realtime so mintRealtimeToken throws, then asserts the route
-// handler maps that to a 500 + structured error log. Living in its own file
-// (rather than mid-suite vi.doMock) is the cleanest module-cache isolation
-// available under vitest 3 (no isolateModulesAsync).
-
-const TEST_PEM = `-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgyN0xVvKw1GY7IOvW
-onn5PQ1S8EupPoRY93+/trVs8kihRANCAATAEPCWCqGfnZLx/pq1WAOw5F/5DRWu
-3s7NNUUGimo6aalkpVIseeUiI3ltvp6arS35IpDtrYlveIzJtN28ygk8
------END PRIVATE KEY-----
-`;
-const TEST_JWK_STR =
-  '{"kty":"EC","x":"wBDwlgqhn52S8f6atVgDsORf-Q0Vrt7OzTVFBopqOmk","y":"qWSlUix55SIjeW2-npqtLfkikO2tiW94jMm03bzKCTw","crv":"P-256","kid":"test-kid-fixture","use":"sig","alg":"ES256"}';
+// Asserts the route returns 503 realtime_disabled when the JWT signing env
+// vars aren't configured — the self-host default before an operator
+// generates a keypair. Lives in its own file for module-cache isolation
+// (vi.mock hoists above imports; can't be reused across suites with
+// different env values).
 
 vi.mock("$env/dynamic/private", () => ({
   env: {
-    LIBRITO_JWT_PRIVATE_KEY_PEM: TEST_PEM,
-    LIBRITO_JWT_PUBLIC_KEY_JWK: TEST_JWK_STR,
-    LIBRITO_JWT_KID: "test-kid-fixture",
-    LIBRITO_JWT_ISSUER: "https://test.librito.io",
+    // All four LIBRITO_JWT_* deliberately absent.
   },
+}));
+
+vi.mock("$env/static/public", () => ({
+  PUBLIC_SUPABASE_URL: "https://test-proj.supabase.co",
+  PUBLIC_SUPABASE_ANON_KEY: "test-anon-key-not-a-real-jwt",
 }));
 
 const authMock = vi.fn();
@@ -43,13 +36,6 @@ vi.mock("$lib/server/ratelimit", () => ({
   },
 }));
 
-vi.mock("$lib/server/realtime", () => ({
-  mintRealtimeToken: vi.fn(async () => {
-    throw new Error("simulated jose failure");
-  }),
-  REALTIME_TOKEN_TTL_SECONDS: 86400,
-}));
-
 const supabase = createMockSupabase();
 vi.mock("$lib/server/supabase", () => ({
   createAdminClient: () => supabase,
@@ -66,7 +52,7 @@ function buildRequest(headers: Record<string, string> = {}) {
   } as unknown as Parameters<typeof POST>[0];
 }
 
-describe("POST /api/realtime-token (mint failure path)", () => {
+describe("POST /api/realtime-token (env not configured)", () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -84,7 +70,7 @@ describe("POST /api/realtime-token (mint failure path)", () => {
     errorSpy.mockRestore();
   });
 
-  it("500 server_error with realtime.token_mint_failed log when signing throws", async () => {
+  it("503 realtime_disabled when LIBRITO_JWT_* env vars are unset", async () => {
     authMock.mockResolvedValueOnce({
       device: {
         id: "22222222-2222-2222-2222-222222222222",
@@ -97,17 +83,24 @@ describe("POST /api/realtime-token (mint failure path)", () => {
     const res = await POST(
       buildRequest({ Authorization: "Bearer sk_device_xxx" }),
     );
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
     const body = await res.json();
-    expect(body.error).toBe("server_error");
+    expect(body.error).toBe("realtime_disabled");
+    expect(body.message).toMatch(/not configured/i);
+
+    // Bearer auth must still succeed before config is checked — confirms
+    // the disabled response is feature-scoped, not a fallback for any
+    // failure mode.
+    expect(authMock).toHaveBeenCalledOnce();
 
     const call = errorSpy.mock.calls.find(
-      (c) => c[0] === "realtime.token_mint_failed",
+      (c) => c[0] === "realtime.token_disabled",
     );
     expect(call).toBeDefined();
     expect(call![1]).toMatchObject({
-      userId: "11111111-1111-1111-1111-111111111111",
-      deviceId: "22222222-2222-2222-2222-222222222222",
+      hasPrivateKey: false,
+      hasKid: false,
+      hasIssuer: false,
     });
   });
 });

@@ -210,6 +210,10 @@ See `.env.example`. Required:
 - `SUPABASE_SERVICE_ROLE_KEY` — Service role key (server-side only, bypasses RLS)
 - `UPSTASH_REDIS_REST_URL` — Upstash Redis URL
 - `UPSTASH_REDIS_REST_TOKEN` — Upstash Redis token
+- `LIBRITO_JWT_PRIVATE_KEY_PEM` — ES256 PKCS8 PEM. Signs `/api/realtime-token` JWTs. Server-side only.
+- `LIBRITO_JWT_PUBLIC_KEY_JWK` — Single-line JWK JSON. Served at `/.well-known/jwks.json` for Supabase third-party JWT verification.
+- `LIBRITO_JWT_KID` — Key ID (UUID). Embedded in JWT header so the verifier picks the right JWK. Rotation runbook: see `docs/ws-rt-follow-ups.md`.
+- `LIBRITO_JWT_ISSUER` — `iss` claim and registered issuer URL. Per env: prod `https://librito.io`, preview `<vercel-preview-url>`, dev `http://localhost:5173`. Each issuer must be registered in Supabase Dashboard → Auth → Third-party Auth.
 
 ## Code Style
 

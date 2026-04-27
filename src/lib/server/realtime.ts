@@ -1,4 +1,4 @@
-import { SignJWT } from "jose";
+import { SignJWT, importPKCS8 } from "jose";
 import {
   PUBLIC_SUPABASE_URL,
   PUBLIC_SUPABASE_ANON_KEY,
@@ -25,48 +25,48 @@ export function getRealtimeConnectionInfo(): {
   return { realtimeUrl, anonKey: PUBLIC_SUPABASE_ANON_KEY };
 }
 
-// HS256 requires a key at least as long as the hash output (256 bits / 32 B)
-// to avoid weakening the signature. Catch a short SUPABASE_JWT_SECRET (env
-// typo, dev-mode placeholder) at first mint instead of silently producing
-// weak JWTs. See RFC 7518 §3.2.
-const MIN_JWT_SECRET_BYTES = 32;
+const PEM_HEADER = "-----BEGIN PRIVATE KEY-----";
 
 /**
- * Mint a Supabase JWT for the device to authenticate Phoenix Channels
- * subscriptions. The token is strictly weaker than the device Bearer it
- * was minted from: read-only, RLS-narrowed to one user, no mutation
- * surface. Bearer revocation propagates to /api/sync immediately;
- * outstanding Realtime JWTs remain valid until `exp` (≤24 h). See
- * spec §3 + §13 risk #4 for the trade-off.
+ * Mint an ES256 JWT for the device to authenticate Phoenix Channels
+ * subscriptions. We are a third-party JWT issuer registered with Supabase
+ * (Auth → Third-party Auth, JWKS at /.well-known/jwks.json). Realtime's
+ * verifier picks our public key by `kid` and validates ES256.
  *
- * Secret is injected (not read from `$env/static/private`) so vitest can
- * exercise this function without mocking $env. The route handler at
- * /api/realtime-token wires SUPABASE_JWT_SECRET in.
+ * Token is strictly weaker than the device Bearer it was minted from:
+ * read-only, RLS-narrowed to one user, no mutation surface. Bearer
+ * revocation propagates to /api/sync immediately; outstanding Realtime
+ * JWTs remain valid until `exp` (≤24 h). See spec §3 + §13 risk #4.
+ *
+ * Key material is injected (not read from `$env/static/private`) so
+ * vitest can exercise this function without mocking $env.
  */
 export async function mintRealtimeToken(opts: {
   userId: string;
   deviceId: string;
-  jwtSecret: string;
+  privateKeyPem: string;
+  kid: string;
+  issuer: string;
 }): Promise<{ token: string; expiresIn: number }> {
-  const secretBytes = new TextEncoder().encode(opts.jwtSecret);
-  if (secretBytes.length < MIN_JWT_SECRET_BYTES) {
+  if (!opts.privateKeyPem.includes(PEM_HEADER)) {
     throw new Error(
-      `SUPABASE_JWT_SECRET is too short for HS256 (${secretBytes.length} B, need ≥ ${MIN_JWT_SECRET_BYTES} B)`,
+      "LIBRITO_JWT_PRIVATE_KEY_PEM is not a PKCS8 PEM (missing BEGIN PRIVATE KEY header)",
     );
   }
-  const secret = secretBytes;
+  const key = await importPKCS8(opts.privateKeyPem, "ES256");
   const nowSec = Math.floor(Date.now() / 1000);
 
   const token = await new SignJWT({
     role: "authenticated",
     device_id: opts.deviceId,
   })
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setProtectedHeader({ alg: "ES256", typ: "JWT", kid: opts.kid })
+    .setIssuer(opts.issuer)
     .setSubject(opts.userId)
     .setAudience("authenticated")
     .setIssuedAt(nowSec)
     .setExpirationTime(nowSec + REALTIME_TOKEN_TTL_SECONDS)
-    .sign(secret);
+    .sign(key);
 
   return { token, expiresIn: REALTIME_TOKEN_TTL_SECONDS };
 }

@@ -1,5 +1,5 @@
 import type { RequestHandler } from "./$types";
-import { SUPABASE_JWT_SECRET } from "$env/static/private";
+import { env } from "$env/dynamic/private";
 import { createAdminClient } from "$lib/server/supabase";
 import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import {
@@ -22,6 +22,25 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const { device } = authResult;
 
+  // Read JWT signing config at request time. Dynamic env (vs static) lets
+  // self-hosters deploy without these set; the route fails loudly with 503
+  // instead of breaking the build. Required to mint Realtime tokens.
+  const privateKeyPem = env.LIBRITO_JWT_PRIVATE_KEY_PEM;
+  const kid = env.LIBRITO_JWT_KID;
+  const issuer = env.LIBRITO_JWT_ISSUER;
+  if (!privateKeyPem || !kid || !issuer) {
+    console.error("realtime.token_disabled", {
+      hasPrivateKey: Boolean(privateKeyPem),
+      hasKid: Boolean(kid),
+      hasIssuer: Boolean(issuer),
+    });
+    return jsonError(
+      503,
+      "realtime_disabled",
+      "Realtime token mint is not configured on this deployment",
+    );
+  }
+
   // Layered rate limit: per-device bounds reconnect storms, per-user bounds
   // re-pair-loop bypass (new device.id each pair sidesteps the device cap).
   const [perDevice, perUser] = await Promise.all([
@@ -43,7 +62,9 @@ export const POST: RequestHandler = async ({ request }) => {
     const { token, expiresIn } = await mintRealtimeToken({
       userId: device.userId,
       deviceId: device.id,
-      jwtSecret: SUPABASE_JWT_SECRET,
+      privateKeyPem,
+      kid,
+      issuer,
     });
 
     console.info("realtime.token_issued", {

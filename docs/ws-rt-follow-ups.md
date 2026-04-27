@@ -55,19 +55,40 @@ Branch context:
 
 ## 4. Realtime JWT revocation policy
 
-**Where:** `src/lib/server/realtime.ts:5-15` (documented trade-off)
+**Where:** `src/lib/server/realtime.ts` (documented trade-off)
 
-**Problem:** `mintRealtimeToken` issues a 24h HS256 JWT that Supabase Realtime evaluates statelessly. Bearer revocation (`devices.revoked_at`) propagates to `/api/sync` immediately but does not invalidate outstanding Realtime tokens. A compromised device gets up to 24h of read access to its user's `notes` and `book_transfers` Realtime stream after revocation.
+**Problem:** `mintRealtimeToken` issues a 24h ES256 JWT that Supabase Realtime evaluates statelessly. Bearer revocation (`devices.revoked_at`) propagates to `/api/sync` immediately but does not invalidate outstanding Realtime tokens. A compromised device gets up to 24h of read access to its user's `notes` and `book_transfers` Realtime stream after revocation.
 
 **Recommended fix (in priority order):**
 
 1. Drop TTL to 1h, expose a refresh endpoint (`POST /api/realtime-token/refresh` reusing the same auth+ratelimit). Caps revocation latency at 1h.
-2. Add a `kid` (key ID) header so `SUPABASE_JWT_SECRET` can be rotated to mass-revoke. Operationally heavy; only useful if a secret leaks.
+2. ~~Add a `kid` (key ID) header~~ — done as part of the asymmetric-JWT migration (`2026-04-27-jwt-asymmetric-migration` handover). Rotation runbook still TODO; see item 8.
 3. Maintain a `revoked_jti` set in Redis and front Realtime with a custom auth proxy. Architectural shift; abandons "use Supabase Realtime directly".
 
 **Scope:** Mostly `src/lib/server/realtime.ts` + new refresh route + firmware coordination (firmware needs to know to refresh).
 
 **Why deferred:** Threat model is single-user, read-only. Acceptable today. Re-evaluate when (a) multi-user devices ship, (b) a security audit forces it, or (c) a compromise scenario surfaces.
+
+---
+
+## 8. ES256 signing-key rotation runbook
+
+**Where:** `src/lib/server/realtime.ts`, `src/routes/.well-known/jwks.json/+server.ts`, env vars `LIBRITO_JWT_*`.
+
+**Problem:** Asymmetric JWT migration (2026-04-27) ships one keypair. No documented procedure to rotate `LIBRITO_JWT_PRIVATE_KEY_PEM` if it leaks or for routine hygiene. The JWKS endpoint serves a single key (`{ keys: [<jwk>] }`); a naïve swap would invalidate every outstanding 24h token mid-flight.
+
+**Recommended procedure (when needed):**
+
+1. Generate new ES256 keypair + new `kid` UUID.
+2. Update `LIBRITO_JWT_PUBLIC_KEY_JWK` env var to a JSON array containing **both** keys (old + new); update the JWKS route to serve `{ keys: [oldJwk, newJwk] }`. Deploy. Realtime now accepts tokens signed by either.
+3. Switch `LIBRITO_JWT_PRIVATE_KEY_PEM` + `LIBRITO_JWT_KID` to the new key. Deploy. New tokens are signed by the new key; old outstanding tokens still verify against the old public key in JWKS.
+4. After max-token-lifetime + clock-skew margin (>24h, suggest 48h), drop the old key from `LIBRITO_JWT_PUBLIC_KEY_JWK`. Deploy.
+
+**Scope:** Code change to JWKS endpoint to accept either single object or array; env var format docs; `docs/runbooks/jwt-rotation.md`.
+
+**Why deferred:** No rotation needed yet (key just minted). Document before first rotation; ideally codify as a script.
+
+**Trigger:** Suspected key leak, scheduled annual rotation, or staff turnover.
 
 ---
 

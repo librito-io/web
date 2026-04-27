@@ -7,10 +7,20 @@ import { createMockSupabase } from "../helpers";
 // (rather than mid-suite vi.doMock) is the cleanest module-cache isolation
 // available under vitest 3 (no isolateModulesAsync).
 
-const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-bytes-long-padding";
+const TEST_PEM = `-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgyN0xVvKw1GY7IOvW
+onn5PQ1S8EupPoRY93+/trVs8kihRANCAATAEPCWCqGfnZLx/pq1WAOw5F/5DRWu
+3s7NNUUGimo6aalkpVIseeUiI3ltvp6arS35IpDtrYlveIzJtN28ygk8
+-----END PRIVATE KEY-----
+`;
+const TEST_JWK_STR =
+  '{"kty":"EC","x":"wBDwlgqhn52S8f6atVgDsORf-Q0Vrt7OzTVFBopqOmk","y":"qWSlUix55SIjeW2-npqtLfkikO2tiW94jMm03bzKCTw","crv":"P-256","kid":"test-kid-fixture","use":"sig","alg":"ES256"}';
 
 vi.mock("$env/static/private", () => ({
-  SUPABASE_JWT_SECRET: TEST_JWT_SECRET,
+  LIBRITO_JWT_PRIVATE_KEY_PEM: TEST_PEM,
+  LIBRITO_JWT_PUBLIC_KEY_JWK: TEST_JWK_STR,
+  LIBRITO_JWT_KID: "test-kid-fixture",
+  LIBRITO_JWT_ISSUER: "https://test.librito.io",
 }));
 
 const authMock = vi.fn();

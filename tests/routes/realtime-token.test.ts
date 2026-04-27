@@ -1,11 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { jwtVerify } from "jose";
+import { jwtVerify, importJWK } from "jose";
 import { createMockSupabase } from "../helpers";
 
-const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-bytes-long-padding";
+// Static ES256 keypair fixture. vi.mock hoists above imports, so we can't
+// generate at runtime — embed once. The matching public JWK is asserted
+// below to verify signatures end-to-end.
+const TEST_PEM = `-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgyN0xVvKw1GY7IOvW
+onn5PQ1S8EupPoRY93+/trVs8kihRANCAATAEPCWCqGfnZLx/pq1WAOw5F/5DRWu
+3s7NNUUGimo6aalkpVIseeUiI3ltvp6arS35IpDtrYlveIzJtN28ygk8
+-----END PRIVATE KEY-----
+`;
+const TEST_JWK_STR =
+  '{"kty":"EC","x":"wBDwlgqhn52S8f6atVgDsORf-Q0Vrt7OzTVFBopqOmk","y":"qWSlUix55SIjeW2-npqtLfkikO2tiW94jMm03bzKCTw","crv":"P-256","kid":"test-kid-fixture","use":"sig","alg":"ES256"}';
+const TEST_KID = "test-kid-fixture";
+const TEST_ISSUER = "https://test.librito.io";
 
 vi.mock("$env/static/private", () => ({
-  SUPABASE_JWT_SECRET: TEST_JWT_SECRET,
+  LIBRITO_JWT_PRIVATE_KEY_PEM: TEST_PEM,
+  LIBRITO_JWT_PUBLIC_KEY_JWK: TEST_JWK_STR,
+  LIBRITO_JWT_KID: TEST_KID,
+  LIBRITO_JWT_ISSUER: TEST_ISSUER,
 }));
 
 // Pin a prod-shaped Supabase URL so realtimeUrl assertions don't depend on
@@ -50,7 +65,7 @@ function buildRequest(headers: Record<string, string> = {}) {
   } as unknown as Parameters<typeof POST>[0];
 }
 
-describe("POST /api/realtime-token (WS-RT)", () => {
+describe("POST /api/realtime-token (WS-RT, ES256)", () => {
   let infoSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -140,7 +155,7 @@ describe("POST /api/realtime-token (WS-RT)", () => {
     expect(body.error).toBe("rate_limited");
   });
 
-  it("200 happy path returns {token, expiresIn:86400} with valid JWT claims", async () => {
+  it("200 happy path returns {token, expiresIn:86400} with valid ES256 JWT claims", async () => {
     const userId = "11111111-1111-1111-1111-111111111111";
     const deviceId = "22222222-2222-2222-2222-222222222222";
     authMock.mockResolvedValueOnce({
@@ -174,11 +189,18 @@ describe("POST /api/realtime-token (WS-RT)", () => {
     // anonKey should not equal the realtime URL (catches arg-order swap).
     expect(body.anonKey).not.toBe(body.realtimeUrl);
 
-    const { payload } = await jwtVerify(
+    const publicKey = await importJWK(JSON.parse(TEST_JWK_STR), "ES256");
+    const { payload, protectedHeader } = await jwtVerify(
       body.token,
-      new TextEncoder().encode(TEST_JWT_SECRET),
-      { audience: "authenticated" },
+      publicKey,
+      {
+        audience: "authenticated",
+        issuer: TEST_ISSUER,
+      },
     );
+    expect(protectedHeader.alg).toBe("ES256");
+    expect(protectedHeader.kid).toBe(TEST_KID);
+    expect(payload.iss).toBe(TEST_ISSUER);
     expect(payload.sub).toBe(userId);
     expect(payload.role).toBe("authenticated");
     expect(payload.aud).toBe("authenticated");

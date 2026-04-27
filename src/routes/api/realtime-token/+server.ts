@@ -1,5 +1,9 @@
 import type { RequestHandler } from "./$types";
-import { SUPABASE_JWT_SECRET } from "$env/static/private";
+import {
+  LIBRITO_JWT_PRIVATE_KEY_PEM,
+  LIBRITO_JWT_KID,
+  LIBRITO_JWT_ISSUER,
+} from "$env/static/private";
 import { createAdminClient } from "$lib/server/supabase";
 import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import {
@@ -43,7 +47,9 @@ export const POST: RequestHandler = async ({ request }) => {
     const { token, expiresIn } = await mintRealtimeToken({
       userId: device.userId,
       deviceId: device.id,
-      jwtSecret: SUPABASE_JWT_SECRET,
+      privateKeyPem: LIBRITO_JWT_PRIVATE_KEY_PEM,
+      kid: LIBRITO_JWT_KID,
+      issuer: LIBRITO_JWT_ISSUER,
     });
 
     console.info("realtime.token_issued", {

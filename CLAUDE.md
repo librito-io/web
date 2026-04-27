@@ -170,8 +170,13 @@ Production runs on Vercel via `@sveltejs/adapter-vercel`. To self-host on Node.j
    npm run build
    node build/
    ```
+4. Provision a Realtime signing key in your own Supabase project:
+   ```bash
+   supabase gen signing-key --algorithm ES256
+   ```
+   In your project's Dashboard → Project Settings → JWT signing keys → "new standby key", paste the JWK. Set `LIBRITO_JWT_PRIVATE_KEY_JWK` in your env to the same JWK JSON.
 
-Env vars required regardless of host: see [Environment Variables](#environment-variables). Supabase, Upstash Redis, and the JWT secret are platform-agnostic; only the SvelteKit adapter is Vercel-specific.
+Env vars required regardless of host: see [Environment Variables](#environment-variables). Supabase, Upstash Redis, and the JWT signing key are platform-agnostic; only the SvelteKit adapter is Vercel-specific.
 
 ## PR & Commit Convention
 
@@ -273,10 +278,7 @@ See `.env.example`. Required:
 - `SUPABASE_SERVICE_ROLE_KEY` — Service role key (server-side only, bypasses RLS)
 - `UPSTASH_REDIS_REST_URL` — Upstash Redis URL
 - `UPSTASH_REDIS_REST_TOKEN` — Upstash Redis token
-- `LIBRITO_JWT_PRIVATE_KEY_PEM` — ES256 PKCS8 PEM. Signs `/api/realtime-token` JWTs. Server-side only.
-- `LIBRITO_JWT_PUBLIC_KEY_JWK` — Single-line JWK JSON. Served at `/.well-known/jwks.json` for Supabase third-party JWT verification.
-- `LIBRITO_JWT_KID` — Key ID (UUID). Embedded in JWT header so the verifier picks the right JWK. Rotation runbook: see `docs/ws-rt-follow-ups.md`.
-- `LIBRITO_JWT_ISSUER` — `iss` claim and registered issuer URL. Per env: prod `https://librito.io`, preview `<vercel-preview-url>`, dev `http://localhost:5173`. Each issuer must be registered in Supabase Dashboard → Auth → Third-party Auth.
+- `LIBRITO_JWT_PRIVATE_KEY_JWK` — Full JWK JSON (single line, includes `d`) of the Supabase standby signing key. Server-side only. Signs `/api/realtime-token` ES256 tokens; Realtime verifies via Supabase's project JWKS where the public side is published. Rotation runbook: `docs/ws-rt-follow-ups.md` item 8.
 
 ## Code Style
 

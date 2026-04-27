@@ -16,11 +16,13 @@ const TEST_JWK_STR =
 const TEST_KID = "test-kid-fixture";
 const TEST_ISSUER = "https://test.librito.io";
 
-vi.mock("$env/static/private", () => ({
-  LIBRITO_JWT_PRIVATE_KEY_PEM: TEST_PEM,
-  LIBRITO_JWT_PUBLIC_KEY_JWK: TEST_JWK_STR,
-  LIBRITO_JWT_KID: TEST_KID,
-  LIBRITO_JWT_ISSUER: TEST_ISSUER,
+vi.mock("$env/dynamic/private", () => ({
+  env: {
+    LIBRITO_JWT_PRIVATE_KEY_PEM: TEST_PEM,
+    LIBRITO_JWT_PUBLIC_KEY_JWK: TEST_JWK_STR,
+    LIBRITO_JWT_KID: TEST_KID,
+    LIBRITO_JWT_ISSUER: TEST_ISSUER,
+  },
 }));
 
 // Pin a prod-shaped Supabase URL so realtimeUrl assertions don't depend on

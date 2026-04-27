@@ -3,8 +3,8 @@ import { describe, it, expect, vi } from "vitest";
 const TEST_JWK_STR =
   '{"kty":"EC","x":"wBDwlgqhn52S8f6atVgDsORf-Q0Vrt7OzTVFBopqOmk","y":"qWSlUix55SIjeW2-npqtLfkikO2tiW94jMm03bzKCTw","crv":"P-256","kid":"test-kid-fixture","use":"sig","alg":"ES256"}';
 
-vi.mock("$env/static/private", () => ({
-  LIBRITO_JWT_PUBLIC_KEY_JWK: TEST_JWK_STR,
+vi.mock("$env/dynamic/private", () => ({
+  env: { LIBRITO_JWT_PUBLIC_KEY_JWK: TEST_JWK_STR },
 }));
 
 const { GET } = await import("../../src/routes/.well-known/jwks.json/+server");
@@ -40,14 +40,27 @@ describe("GET /.well-known/jwks.json", () => {
 describe("GET /.well-known/jwks.json — misconfiguration", () => {
   it("500 server_error when LIBRITO_JWT_PUBLIC_KEY_JWK is not valid JSON", async () => {
     vi.resetModules();
-    vi.doMock("$env/static/private", () => ({
-      LIBRITO_JWT_PUBLIC_KEY_JWK: "not-json{",
+    vi.doMock("$env/dynamic/private", () => ({
+      env: { LIBRITO_JWT_PUBLIC_KEY_JWK: "not-json{" },
     }));
     const mod = await import("../../src/routes/.well-known/jwks.json/+server");
     const res = await mod.GET(buildEvent());
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe("server_error");
-    vi.doUnmock("$env/static/private");
+    vi.doUnmock("$env/dynamic/private");
+  });
+
+  it("503 realtime_disabled when LIBRITO_JWT_PUBLIC_KEY_JWK is unset (self-host default)", async () => {
+    vi.resetModules();
+    vi.doMock("$env/dynamic/private", () => ({
+      env: {},
+    }));
+    const mod = await import("../../src/routes/.well-known/jwks.json/+server");
+    const res = await mod.GET(buildEvent());
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe("realtime_disabled");
+    vi.doUnmock("$env/dynamic/private");
   });
 });

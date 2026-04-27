@@ -1,5 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { env } from "$env/dynamic/private";
+import { PUBLIC_SUPABASE_URL } from "$env/static/public";
 import { createAdminClient } from "$lib/server/supabase";
 import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import {
@@ -9,6 +10,7 @@ import {
 import {
   mintRealtimeToken,
   getRealtimeConnectionInfo,
+  type RealtimeSigningJwk,
 } from "$lib/server/realtime";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
@@ -22,18 +24,12 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const { device } = authResult;
 
-  // Read JWT signing config at request time. Dynamic env (vs static) lets
-  // self-hosters deploy without these set; the route fails loudly with 503
-  // instead of breaking the build. Required to mint Realtime tokens.
-  const privateKeyPem = env.LIBRITO_JWT_PRIVATE_KEY_PEM;
-  const kid = env.LIBRITO_JWT_KID;
-  const issuer = env.LIBRITO_JWT_ISSUER;
-  if (!privateKeyPem || !kid || !issuer) {
-    console.error("realtime.token_disabled", {
-      hasPrivateKey: Boolean(privateKeyPem),
-      hasKid: Boolean(kid),
-      hasIssuer: Boolean(issuer),
-    });
+  // Single env var: full JWK JSON of the Supabase standby signing key.
+  // Dynamic env (vs static) lets self-hosters deploy without it set; the
+  // route returns 503 instead of breaking the build.
+  const rawJwk = env.LIBRITO_JWT_PRIVATE_KEY_JWK;
+  if (!rawJwk) {
+    console.error("realtime.token_disabled", { hasPrivateKey: false });
     return jsonError(
       503,
       "realtime_disabled",
@@ -41,8 +37,14 @@ export const POST: RequestHandler = async ({ request }) => {
     );
   }
 
-  // Layered rate limit: per-device bounds reconnect storms, per-user bounds
-  // re-pair-loop bypass (new device.id each pair sidesteps the device cap).
+  let privateJwk: RealtimeSigningJwk;
+  try {
+    privateJwk = JSON.parse(rawJwk) as RealtimeSigningJwk;
+  } catch {
+    console.error("realtime.jwk_parse_failed");
+    return jsonError(500, "server_error", "Failed to mint Realtime token");
+  }
+
   const [perDevice, perUser] = await Promise.all([
     realtimeTokenLimiter.limit(device.id),
     realtimeTokenUserLimiter.limit(device.userId),
@@ -62,9 +64,8 @@ export const POST: RequestHandler = async ({ request }) => {
     const { token, expiresIn } = await mintRealtimeToken({
       userId: device.userId,
       deviceId: device.id,
-      privateKeyPem,
-      kid,
-      issuer,
+      privateJwk,
+      supabaseUrl: PUBLIC_SUPABASE_URL,
     });
 
     console.info("realtime.token_issued", {

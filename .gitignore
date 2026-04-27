@@ -14,3 +14,4 @@ docs/superpowers/
 .worktrees/
 supabase/.temp/
 supabase/.branches/
+supabase/signing_keys.json

@@ -73,20 +73,26 @@ Branch context:
 
 ## 8. ES256 signing-key rotation runbook
 
-**Where:** `src/lib/server/realtime.ts`, `src/routes/.well-known/jwks.json/+server.ts`, env vars `LIBRITO_JWT_*`.
+**Where:** `src/lib/server/realtime.ts`, env var `LIBRITO_JWT_PRIVATE_KEY_JWK`, Supabase Dashboard → Project Settings → JWT signing keys.
 
-**Problem:** Asymmetric JWT migration (2026-04-27) ships one keypair. No documented procedure to rotate `LIBRITO_JWT_PRIVATE_KEY_PEM` if it leaks or for routine hygiene. The JWKS endpoint serves a single key (`{ keys: [<jwk>] }`); a naïve swap would invalidate every outstanding 24h token mid-flight.
+**Problem:** Standby-key migration (2026-04-27) ships one keypair imported as a Supabase standby key. No documented procedure to rotate `LIBRITO_JWT_PRIVATE_KEY_JWK` if it leaks or for routine hygiene.
 
 **Recommended procedure (when needed):**
 
-1. Generate new ES256 keypair + new `kid` UUID.
-2. Update `LIBRITO_JWT_PUBLIC_KEY_JWK` env var to a JSON array containing **both** keys (old + new); update the JWKS route to serve `{ keys: [oldJwk, newJwk] }`. Deploy. Realtime now accepts tokens signed by either.
-3. Switch `LIBRITO_JWT_PRIVATE_KEY_PEM` + `LIBRITO_JWT_KID` to the new key. Deploy. New tokens are signed by the new key; old outstanding tokens still verify against the old public key in JWKS.
-4. After max-token-lifetime + clock-skew margin (>24h, suggest 48h), drop the old key from `LIBRITO_JWT_PUBLIC_KEY_JWK`. Deploy.
+1. Generate a fresh ES256 keypair:
+   ```bash
+   supabase gen signing-key --algorithm ES256
+   ```
+   Save the JWK privately (1Password). Note the new `kid`.
+2. Supabase Dashboard → Project Settings → JWT signing keys → "new standby key" → import the new JWK as a second standby. Both old and new standby kids are now in the project's JWKS.
+3. Wait one Realtime-cache window (≥20 minutes per Supabase docs: 5-min throttle + 10-min edge cache + ~10-min client cache).
+4. Set `LIBRITO_JWT_PRIVATE_KEY_JWK` in Vercel Production env to the **new** JWK. Trigger a redeploy. New mints sign with the new kid; in-flight tokens minted with the old kid still verify against the still-published old standby.
+5. Wait one access-token TTL (`REALTIME_TOKEN_TTL_SECONDS = 24h`) for in-flight tokens to expire.
+6. In the Supabase Dashboard, move the old standby key Standby → Revoked → delete. JWKS now publishes only the new kid.
 
-**Scope:** Code change to JWKS endpoint to accept either single object or array; env var format docs; `docs/runbooks/jwt-rotation.md`.
+**Rollback:** If step 4 introduces a regression, set `LIBRITO_JWT_PRIVATE_KEY_JWK` back to the old JWK and redeploy. Both kids are still in JWKS until step 6 — round-trip is free.
 
-**Why deferred:** No rotation needed yet (key just minted). Document before first rotation; ideally codify as a script.
+**Scope:** No code changes (the runbook drives env + dashboard only). Codify as a one-shot script in `scripts/rotate-realtime-key.sh` if rotations become routine.
 
 **Trigger:** Suspected key leak, scheduled annual rotation, or staff turnover.
 

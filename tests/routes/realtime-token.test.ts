@@ -1,35 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { MockInstance } from "vitest";
 import { jwtVerify, importJWK } from "jose";
 import { createMockSupabase } from "../helpers";
+import {
+  DEV_STANDBY_JWK,
+  DEV_STANDBY_JWK_STR,
+  DEV_KID,
+} from "../fixtures/dev-jwk";
 
-// Static ES256 keypair fixture. vi.mock hoists above imports, so we can't
-// generate at runtime — embed once. The matching public JWK is asserted
-// below to verify signatures end-to-end.
-const TEST_PEM = `-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgyN0xVvKw1GY7IOvW
-onn5PQ1S8EupPoRY93+/trVs8kihRANCAATAEPCWCqGfnZLx/pq1WAOw5F/5DRWu
-3s7NNUUGimo6aalkpVIseeUiI3ltvp6arS35IpDtrYlveIzJtN28ygk8
------END PRIVATE KEY-----
-`;
-const TEST_JWK_STR =
-  '{"kty":"EC","x":"wBDwlgqhn52S8f6atVgDsORf-Q0Vrt7OzTVFBopqOmk","y":"qWSlUix55SIjeW2-npqtLfkikO2tiW94jMm03bzKCTw","crv":"P-256","kid":"test-kid-fixture","use":"sig","alg":"ES256"}';
-const TEST_KID = "test-kid-fixture";
-const TEST_ISSUER = "https://test.librito.io";
+const TEST_SUPABASE_URL = "https://test-proj.supabase.co";
 
 vi.mock("$env/dynamic/private", () => ({
   env: {
-    LIBRITO_JWT_PRIVATE_KEY_PEM: TEST_PEM,
-    LIBRITO_JWT_PUBLIC_KEY_JWK: TEST_JWK_STR,
-    LIBRITO_JWT_KID: TEST_KID,
-    LIBRITO_JWT_ISSUER: TEST_ISSUER,
+    LIBRITO_JWT_PRIVATE_KEY_JWK: DEV_STANDBY_JWK_STR,
   },
 }));
 
-// Pin a prod-shaped Supabase URL so realtimeUrl assertions don't depend on
-// whatever .env provides (local dev has http://127.0.0.1:54321 → ws://, not
-// wss://).
 vi.mock("$env/static/public", () => ({
-  PUBLIC_SUPABASE_URL: "https://test-proj.supabase.co",
+  PUBLIC_SUPABASE_URL: TEST_SUPABASE_URL,
   PUBLIC_SUPABASE_ANON_KEY: "test-anon-key-not-a-real-jwt",
 }));
 
@@ -67,16 +55,16 @@ function buildRequest(headers: Record<string, string> = {}) {
   } as unknown as Parameters<typeof POST>[0];
 }
 
-describe("POST /api/realtime-token (WS-RT, ES256)", () => {
+describe("POST /api/realtime-token (standby-key ES256)", () => {
   let infoSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     authMock.mockReset();
     limitMock.mockReset();
     userLimitMock.mockReset();
-    // Default both limiters to allow; tests that exercise denial override
-    // with mockResolvedValueOnce so the rest of the suite stays terse.
     limitMock.mockResolvedValue({ success: true, reset: Date.now() + 60_000 });
     userLimitMock.mockResolvedValue({
       success: true,
@@ -85,10 +73,21 @@ describe("POST /api/realtime-token (WS-RT, ES256)", () => {
     supabase._results.clear();
     infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Fire-and-forget JWKS check inside mintRealtimeToken — stub global
+    // fetch so the test environment doesn't hit the network.
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ keys: [{ kid: DEV_KID }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
   });
   afterEach(() => {
     infoSpy.mockRestore();
     errorSpy.mockRestore();
+    warnSpy.mockRestore();
+    fetchSpy.mockRestore();
   });
 
   it("401 missing_token when Authorization header absent", async () => {
@@ -142,8 +141,6 @@ describe("POST /api/realtime-token (WS-RT, ES256)", () => {
     authMock.mockResolvedValueOnce({
       device: { id: "d-fresh", userId: "u-1", hardwareId: "hw", name: "n" },
     });
-    // Per-device cap clears (fresh device.id), per-user cap denies — the
-    // re-pair-loop bypass scenario the user limiter exists to catch.
     userLimitMock.mockResolvedValueOnce({
       success: false,
       reset: Date.now() + 600_000,
@@ -181,28 +178,24 @@ describe("POST /api/realtime-token (WS-RT, ES256)", () => {
     };
     expect(body.expiresIn).toBe(86400);
     expect(typeof body.token).toBe("string");
-
-    expect(typeof body.realtimeUrl).toBe("string");
-    expect(body.realtimeUrl.length).toBeGreaterThan(0);
     expect(body.realtimeUrl.startsWith("wss://")).toBe(true);
     expect(body.realtimeUrl.endsWith("/realtime/v1/websocket")).toBe(true);
     expect(typeof body.anonKey).toBe("string");
     expect(body.anonKey.length).toBeGreaterThan(0);
-    // anonKey should not equal the realtime URL (catches arg-order swap).
     expect(body.anonKey).not.toBe(body.realtimeUrl);
 
-    const publicKey = await importJWK(JSON.parse(TEST_JWK_STR), "ES256");
+    const { d, key_ops, ...publicJwk } = DEV_STANDBY_JWK;
+    const publicKey = await importJWK(publicJwk, "ES256");
     const { payload, protectedHeader } = await jwtVerify(
       body.token,
       publicKey,
       {
         audience: "authenticated",
-        issuer: TEST_ISSUER,
       },
     );
     expect(protectedHeader.alg).toBe("ES256");
-    expect(protectedHeader.kid).toBe(TEST_KID);
-    expect(payload.iss).toBe(TEST_ISSUER);
+    expect(protectedHeader.kid).toBe(DEV_KID);
+    expect(payload.iss).toBe(`${TEST_SUPABASE_URL}/auth/v1`);
     expect(payload.sub).toBe(userId);
     expect(payload.role).toBe("authenticated");
     expect(payload.aud).toBe("authenticated");
@@ -233,9 +226,4 @@ describe("POST /api/realtime-token (WS-RT, ES256)", () => {
       expiresIn: 86400,
     });
   });
-
-  // The 500 server_error path is exercised in realtime-token.error.test.ts.
-  // Splitting into its own file gives true module-cache isolation under any
-  // test order: vitest 3 has no isolateModulesAsync, so file boundaries are
-  // the cleanest seam to mock $lib/server/realtime without leakage.
 });

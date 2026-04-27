@@ -15,7 +15,7 @@ export type RealtimeSigningJwk = {
   x: string;
   y: string;
   use?: string;
-  key_ops?: string[];
+  key_ops?: readonly string[];
   ext?: boolean;
 };
 

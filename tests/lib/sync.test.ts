@@ -57,7 +57,7 @@ describe("validateSyncPayload", () => {
     expect(result).toEqual({ error: expect.stringContaining("bookHash") });
   });
 
-  it("rejects highlight with endWord <= startWord", () => {
+  it("rejects highlight with endWord < startWord", () => {
     const result = validateSyncPayload({
       lastSyncedAt: 0,
       books: [
@@ -70,6 +70,35 @@ describe("validateSyncPayload", () => {
       ],
     });
     expect(result).toEqual({ error: expect.stringContaining("endWord") });
+  });
+
+  it("accepts single-word highlight (endWord == startWord)", () => {
+    const result = validateSyncPayload({
+      lastSyncedAt: 0,
+      books: [
+        {
+          bookHash: "abcd1234",
+          highlights: [
+            { chapter: 0, startWord: 42, endWord: 42, text: "single" },
+          ],
+        },
+      ],
+    });
+    expect("payload" in result).toBe(true);
+  });
+
+  it("accepts single-word deleted highlight (endWord == startWord)", () => {
+    const result = validateSyncPayload({
+      lastSyncedAt: 0,
+      books: [
+        {
+          bookHash: "abcd1234",
+          highlights: [],
+          deletedHighlights: [{ chapter: 0, startWord: 7, endWord: 7 }],
+        },
+      ],
+    });
+    expect("payload" in result).toBe(true);
   });
 
   it("rejects highlight with empty text", () => {

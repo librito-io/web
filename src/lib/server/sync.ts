@@ -194,10 +194,10 @@ export function validateSyncPayload(
       if (
         typeof hl.endWord !== "number" ||
         !Number.isInteger(hl.endWord) ||
-        hl.endWord <= (hl.startWord as number) ||
+        hl.endWord < (hl.startWord as number) ||
         hl.endWord > 2_147_483_647
       ) {
-        return { error: "Highlight endWord must be greater than startWord" };
+        return { error: "Highlight endWord must not be less than startWord" };
       }
       if (
         typeof hl.text !== "string" ||
@@ -291,11 +291,11 @@ export function validateSyncPayload(
         if (
           typeof dl.endWord !== "number" ||
           !Number.isInteger(dl.endWord) ||
-          dl.endWord <= (dl.startWord as number) ||
+          dl.endWord < (dl.startWord as number) ||
           dl.endWord > 2_147_483_647
         ) {
           return {
-            error: "Deleted highlight endWord must be greater than startWord",
+            error: "Deleted highlight endWord must not be less than startWord",
           };
         }
       }

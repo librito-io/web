@@ -9,6 +9,7 @@ type Redis = {
     opts?: SetCommandOptions,
   ) => Promise<unknown>;
   get: (key: string) => Promise<string | null>;
+  del: (key: string) => Promise<unknown>;
 };
 
 type PairingResult = { code: string; pairingId: string; expiresIn: number };
@@ -94,14 +95,19 @@ export async function checkPairingStatus(
   return { paired: true, token, userEmail };
 }
 
+// Post-condition guarantee: every non-success exit leaves
+// pairing_codes.claimed=false and either no Redis token or a self-expiring
+// orphan (claimed=false blocks checkPairingStatus from returning it). The
+// token in Redis on success matches devices.api_token_hash, even under
+// concurrent claims — only the conditional-UPDATE winner writes Redis.
 export async function claimPairingCode(
   supabase: SupabaseClient,
   redis: Redis,
   userId: string,
   code: string,
 ): Promise<ClaimResult> {
-  // Look up code (include claimed codes so we can make the idempotent path work
-  // and still reject replay from another account).
+  // 1. Look up code (include claimed codes so the idempotent-replay path works
+  // and replay from another account is still rejected).
   const { data: pairingCode, error: lookupError } = await supabase
     .from("pairing_codes")
     .select("id, hardware_id, claimed, expires_at, user_id")
@@ -112,37 +118,23 @@ export async function claimPairingCode(
   if (new Date(pairingCode.expires_at) < new Date())
     return { error: "code_expired" };
 
-  // Idempotent replay — same user claiming the same code. Safari's stale
+  // 2. Idempotent replay — same user claiming the same code. Safari's stale
   // keep-alive sockets can drop the first response mid-flight; the browser
   // retries and previously got "already_claimed" with no way to recover.
-  // Return the same shape as the original success so the UI finishes cleanly.
   if (pairingCode.claimed) {
     return replayClaim(supabase, userId, pairingCode);
   }
 
-  // Generate device token
+  // 3. Generate device token + hash.
   const token = generateDeviceToken();
   const tokenHash = hashToken(token);
 
-  // 1. Write Redis BEFORE flipping claimed=true. If Redis fails the code
-  // stays unclaimed and the user can retry. Reverse order would consume
-  // the code on Redis failure and brick pairing with no recovery path.
-  try {
-    await redis.set(`pair:token:${pairingCode.id}`, token, {
-      ex: PAIR_REDIS_TTL_SEC,
-    });
-  } catch (err) {
-    console.error("pairing.redis_token_write_failed", {
-      pairingId: pairingCode.id,
-      error: String(err),
-    });
-    return { error: "server_error" };
-  }
-
-  // 2. Atomic claim transition — UPDATE only matches when claimed=false.
-  // Concurrent claims for the same code serialize at the row lock; only one
-  // racer transitions and gets the RETURNING row. Losers fall to the replay
-  // path: same user → idempotent success; different user → already_claimed.
+  // 4. Atomic claim transition — UPDATE only matches when claimed=false.
+  // Concurrent claims serialize at the row lock; only one racer transitions
+  // and gets the RETURNING row. Losers fall to the replay path. This MUST
+  // run before the Redis write, otherwise concurrent racers clobber each
+  // other's Redis tokens and the device fetches a token whose hash isn't in
+  // the devices row.
   const { data: claimRow, error: claimError } = await supabase
     .from("pairing_codes")
     .update({ claimed: true, user_id: userId })
@@ -163,7 +155,24 @@ export async function claimPairingCode(
     return replayClaim(supabase, userId, pairingCode);
   }
 
-  // 3. Provision device (gated on claim transition).
+  // 5. Write Redis after winning the claim. If Redis fails, roll back the
+  // claim flag so the user can retry without manual recovery.
+  try {
+    await redis.set(`pair:token:${pairingCode.id}`, token, {
+      ex: PAIR_REDIS_TTL_SEC,
+    });
+  } catch (err) {
+    console.error("pairing.redis_token_write_failed", {
+      pairingId: pairingCode.id,
+      error: String(err),
+    });
+    await rollbackClaim(supabase, pairingCode.id);
+    return { error: "server_error" };
+  }
+
+  // 6. Provision device. On failure, roll back the claim and best-effort
+  // delete the orphaned Redis token (claimed=false already blocks the device
+  // from reaching it via status poll, so cleanup is tidiness, not safety).
   const { data: existing } = await supabase
     .from("devices")
     .select("id, name")
@@ -186,6 +195,7 @@ export async function claimPairingCode(
 
     if (updateError) {
       await rollbackClaim(supabase, pairingCode.id);
+      await cleanupRedisToken(redis, pairingCode.id);
       return { error: "server_error" };
     }
     deviceId = existing.id;
@@ -203,6 +213,7 @@ export async function claimPairingCode(
 
     if (insertError || !device) {
       await rollbackClaim(supabase, pairingCode.id);
+      await cleanupRedisToken(redis, pairingCode.id);
       return { error: "server_error" };
     }
     deviceId = device.id;
@@ -210,6 +221,20 @@ export async function claimPairingCode(
   }
 
   return { deviceId, deviceName };
+}
+
+async function cleanupRedisToken(
+  redis: Redis,
+  pairingId: string,
+): Promise<void> {
+  try {
+    await redis.del(`pair:token:${pairingId}`);
+  } catch (err) {
+    console.error("pairing.redis_token_cleanup_failed", {
+      pairingId,
+      error: String(err),
+    });
+  }
 }
 
 async function replayClaim(

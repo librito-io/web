@@ -362,7 +362,9 @@ export async function processSync(
         styles: h.styles ?? null,
         paragraph_breaks: h.paragraphBreaks ?? null,
         device_timestamp_raw: h.timestamp ?? null,
-        deleted_at: null,
+        // deleted_at intentionally omitted — server owns this column.
+        // Including it would resurrect server-side soft-deletes when a
+        // not-yet-synced device sends back the same highlight.
       }));
     });
 

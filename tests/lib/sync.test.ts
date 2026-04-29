@@ -1003,6 +1003,88 @@ describe("processSync", () => {
     warnSpy.mockRestore();
   });
 
+  it("omits deleted_at from highlight upsert payload (server owns soft-delete)", async () => {
+    // Regression guard for audit issue B1: when a not-yet-synced device
+    // sends back a highlight that another device has already soft-deleted,
+    // the upsert payload must not include deleted_at — Supabase upsert
+    // (verified live against local Supabase 2026-04-29) preserves columns
+    // omitted from the payload on conflict, leaving the server-side
+    // tombstone intact. Including `deleted_at: null` would resurrect it.
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "books.upsert": {
+        data: [{ id: "book-uuid-1", book_hash: "abcd1234" }],
+        error: null,
+      },
+    });
+
+    await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 0,
+      books: [
+        {
+          bookHash: "abcd1234",
+          highlights: [
+            { chapter: 3, startWord: 100, endWord: 150, text: "resurrect me" },
+          ],
+        },
+      ],
+    });
+
+    const hlUpsert = supabase._upsertCalls.find(
+      (c) => c.table === "highlights",
+    );
+    expect(hlUpsert).toBeDefined();
+    const rows = hlUpsert!.rows as Array<Record<string, unknown>>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toHaveProperty("deleted_at");
+  });
+
+  it("still emits deletedHighlights[] when the device's payload contains the same tombstoned highlight", async () => {
+    // Test B for audit issue B1: after the upsert (now a no-op on the
+    // deleted_at column), the read-phase deletedHighlights query must
+    // still surface the soft-deleted row so the device that sent the
+    // resurrection-attempt payload learns about the deletion next sync.
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "books.upsert": {
+        data: [{ id: "book-uuid-1", book_hash: "abcd1234" }],
+        error: null,
+      },
+      "highlights.select": {
+        data: [
+          {
+            chapter_index: 3,
+            start_word: 100,
+            end_word: 150,
+            books: { book_hash: "abcd1234" },
+          },
+        ],
+        error: null,
+      },
+    });
+
+    const result = await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 1000,
+      books: [
+        {
+          bookHash: "abcd1234",
+          highlights: [
+            { chapter: 3, startWord: 100, endWord: 150, text: "resurrect me" },
+          ],
+        },
+      ],
+    });
+
+    expect(result.deletedHighlights).toEqual([
+      {
+        bookHash: "abcd1234",
+        chapter: 3,
+        startWord: 100,
+        endWord: 150,
+      },
+    ]);
+  });
+
   it("populates both deletedHighlights and deletedNotes for a highlight+note pair tombstoned together", async () => {
     const supabase = createMockSupabase();
     setupSyncMocks(supabase, {

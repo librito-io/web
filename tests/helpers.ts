@@ -11,6 +11,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export function createMockSupabase() {
   const results = new Map<string, { data: unknown; error: unknown }>();
   const storageResults = new Map<string, { data: unknown; error: unknown }>();
+  // Records every `.from(table).upsert(rows, opts)` invocation so tests can
+  // assert payload shape (e.g. that a column is intentionally omitted).
+  const upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }> =
+    [];
 
   function makeChain(table: string, operation: string, keySuffix = "") {
     const key = `${table}.${operation}${keySuffix}`;
@@ -146,7 +150,10 @@ export function createMockSupabase() {
         return selectChain(table, args);
       },
       update: (..._args: unknown[]) => makeChain(table, "update"),
-      upsert: (..._args: unknown[]) => makeChain(table, "upsert"),
+      upsert: (...args: unknown[]) => {
+        upsertCalls.push({ table, rows: args[0], opts: args[1] });
+        return makeChain(table, "upsert");
+      },
       delete: (..._args: unknown[]) => makeChain(table, "delete"),
     }),
     storage: { from: storageBucket },
@@ -154,12 +161,14 @@ export function createMockSupabase() {
     _results: results,
     _storage: storageResults,
     _storageSpy: storageSpy,
+    _upsertCalls: upsertCalls,
   };
 
   return client as unknown as SupabaseClient & {
     _results: Map<string, { data: unknown; error: unknown }>;
     _storage: Map<string, { data: unknown; error: unknown }>;
     _storageSpy: typeof storageSpy;
+    _upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }>;
   };
 }
 

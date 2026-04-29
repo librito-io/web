@@ -117,34 +117,64 @@ export async function claimPairingCode(
   // retries and previously got "already_claimed" with no way to recover.
   // Return the same shape as the original success so the UI finishes cleanly.
   if (pairingCode.claimed) {
-    if (pairingCode.user_id !== userId) return { error: "already_claimed" };
-    const { data: device } = await supabase
-      .from("devices")
-      .select("id, name")
-      .eq("user_id", userId)
-      .eq("hardware_id", pairingCode.hardware_id)
-      .maybeSingle();
-    if (!device) return { error: "already_claimed" };
-    return { deviceId: device.id, deviceName: device.name };
+    return replayClaim(supabase, userId, pairingCode);
   }
 
   // Generate device token
   const token = generateDeviceToken();
   const tokenHash = hashToken(token);
 
-  // Check for existing device (re-pairing case)
+  // 1. Write Redis BEFORE flipping claimed=true. If Redis fails the code
+  // stays unclaimed and the user can retry. Reverse order would consume
+  // the code on Redis failure and brick pairing with no recovery path.
+  try {
+    await redis.set(`pair:token:${pairingCode.id}`, token, {
+      ex: PAIR_REDIS_TTL_SEC,
+    });
+  } catch (err) {
+    console.error("pairing.redis_token_write_failed", {
+      pairingId: pairingCode.id,
+      error: String(err),
+    });
+    return { error: "server_error" };
+  }
+
+  // 2. Atomic claim transition — UPDATE only matches when claimed=false.
+  // Concurrent claims for the same code serialize at the row lock; only one
+  // racer transitions and gets the RETURNING row. Losers fall to the replay
+  // path: same user → idempotent success; different user → already_claimed.
+  const { data: claimRow, error: claimError } = await supabase
+    .from("pairing_codes")
+    .update({ claimed: true, user_id: userId })
+    .eq("id", pairingCode.id)
+    .eq("claimed", false)
+    .select("id")
+    .maybeSingle();
+
+  if (claimError) return { error: "server_error" };
+  if (!claimRow) {
+    const { data: winner } = await supabase
+      .from("pairing_codes")
+      .select("user_id")
+      .eq("id", pairingCode.id)
+      .single();
+    if (!winner || winner.user_id !== userId)
+      return { error: "already_claimed" };
+    return replayClaim(supabase, userId, pairingCode);
+  }
+
+  // 3. Provision device (gated on claim transition).
   const { data: existing } = await supabase
     .from("devices")
     .select("id, name")
     .eq("user_id", userId)
     .eq("hardware_id", pairingCode.hardware_id)
-    .single();
+    .maybeSingle();
 
   let deviceId: string;
   let deviceName: string;
 
   if (existing) {
-    // Re-pair: update existing device
     const { error: updateError } = await supabase
       .from("devices")
       .update({
@@ -154,11 +184,13 @@ export async function claimPairingCode(
       })
       .eq("id", existing.id);
 
-    if (updateError) return { error: "server_error" };
+    if (updateError) {
+      await rollbackClaim(supabase, pairingCode.id);
+      return { error: "server_error" };
+    }
     deviceId = existing.id;
     deviceName = existing.name;
   } else {
-    // New device
     const { data: device, error: insertError } = await supabase
       .from("devices")
       .insert({
@@ -169,23 +201,45 @@ export async function claimPairingCode(
       .select("id, name")
       .single();
 
-    if (insertError || !device) return { error: "server_error" };
+    if (insertError || !device) {
+      await rollbackClaim(supabase, pairingCode.id);
+      return { error: "server_error" };
+    }
     deviceId = device.id;
     deviceName = device.name;
   }
 
-  // Mark code as claimed
-  const { error: markError } = await supabase
-    .from("pairing_codes")
-    .update({ claimed: true, user_id: userId })
-    .eq("id", pairingCode.id);
-
-  if (markError) return { error: "server_error" };
-
-  // Store plaintext token in Redis for device to pick up on next poll
-  await redis.set(`pair:token:${pairingCode.id}`, token, {
-    ex: PAIR_REDIS_TTL_SEC,
-  });
-
   return { deviceId, deviceName };
+}
+
+async function replayClaim(
+  supabase: SupabaseClient,
+  userId: string,
+  pairingCode: { user_id: string | null; hardware_id: string },
+): Promise<ClaimResult> {
+  if (pairingCode.user_id !== userId) return { error: "already_claimed" };
+  const { data: device } = await supabase
+    .from("devices")
+    .select("id, name")
+    .eq("user_id", userId)
+    .eq("hardware_id", pairingCode.hardware_id)
+    .maybeSingle();
+  if (!device) return { error: "already_claimed" };
+  return { deviceId: device.id, deviceName: device.name };
+}
+
+async function rollbackClaim(
+  supabase: SupabaseClient,
+  pairingId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("pairing_codes")
+    .update({ claimed: false, user_id: null })
+    .eq("id", pairingId);
+  if (error) {
+    console.error("pairing.claim_rollback_failed", {
+      pairingId,
+      error: error.message,
+    });
+  }
 }

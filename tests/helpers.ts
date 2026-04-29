@@ -15,6 +15,9 @@ export function createMockSupabase() {
   // assert payload shape (e.g. that a column is intentionally omitted).
   const upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }> =
     [];
+  // Records every `.from(table).update(payload)` call in invocation order so
+  // tests can assert call ordering (e.g. Redis-before-claim) and rollback.
+  const updateCalls: Array<{ table: string; payload: unknown }> = [];
 
   function makeChain(table: string, operation: string, keySuffix = "") {
     const key = `${table}.${operation}${keySuffix}`;
@@ -149,7 +152,10 @@ export function createMockSupabase() {
         }
         return selectChain(table, args);
       },
-      update: (..._args: unknown[]) => makeChain(table, "update"),
+      update: (...args: unknown[]) => {
+        updateCalls.push({ table, payload: args[0] });
+        return makeChain(table, "update");
+      },
       upsert: (...args: unknown[]) => {
         upsertCalls.push({ table, rows: args[0], opts: args[1] });
         return makeChain(table, "upsert");
@@ -162,6 +168,7 @@ export function createMockSupabase() {
     _storage: storageResults,
     _storageSpy: storageSpy,
     _upsertCalls: upsertCalls,
+    _updateCalls: updateCalls,
   };
 
   return client as unknown as SupabaseClient & {
@@ -169,6 +176,7 @@ export function createMockSupabase() {
     _storage: Map<string, { data: unknown; error: unknown }>;
     _storageSpy: typeof storageSpy;
     _upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }>;
+    _updateCalls: Array<{ table: string; payload: unknown }>;
   };
 }
 

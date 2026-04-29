@@ -23,7 +23,7 @@ BEGIN
 
   -- Device
   INSERT INTO devices (user_id, hardware_id, name, api_token_hash, last_synced_at)
-  VALUES (v_user_id, 'seed-device-001', 'Dev Reader', '0000000000000000000000000000000000000000000000000000000000000000', now())
+  VALUES (v_user_id, 'seed-device-001', 'Dev Reader', 'SEED-NOT-A-REAL-HASH-DO-NOT-REPLACE-WITH-REAL-HEX', now())
   RETURNING id INTO v_device_id;
 
   -- Book 1

@@ -13,6 +13,8 @@ The device never talks to Supabase directly. All device communication goes throu
 
 Design spec and implementation plans live in the reader repo at `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 
+Completed audit artefacts (closed working plans worth preserving in version control) live under `docs/audits/<date>-<topic>.md` — e.g. `docs/audits/2026-04-29-supabase-rls-and-migrations.md`.
+
 ## Tech Stack
 
 | Layer          | Technology            | Notes                                                                  |

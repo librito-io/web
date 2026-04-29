@@ -125,7 +125,22 @@ One-time bootstrap on each dev machine:
    signing_keys_path = "./signing_keys.json"
    ```
 
-   This is a per-dev local modification — do NOT commit.
+   This is a per-dev local modification — do NOT commit. The committed form keeps the line commented to match the upstream Supabase CLI template default; CI, fresh clones, and self-hosters need it that way so `supabase start` doesn't error on a missing key file. The Supabase CLI does not support `env(...)` substitution for `signing_keys_path` ([`pkg/config/auth.go:163`](https://github.com/supabase/cli/blob/v2.90.0/pkg/config/auth.go#L163) declares it as a plain `string`, not the `Secret` wrapper type), so there is no committed form that works for everyone — the line must stay commented in version control.
+
+   To prevent the local edit from following you into accidental commits, mark the file as locally modified:
+
+   ```bash
+   git update-index --skip-worktree supabase/config.toml
+   ```
+
+   Undo when you need to pull a real upstream change to this file:
+
+   ```bash
+   git update-index --no-skip-worktree supabase/config.toml
+   git pull
+   # re-apply the uncomment, then re-skip:
+   git update-index --skip-worktree supabase/config.toml
+   ```
 
 4. Set `LIBRITO_JWT_PRIVATE_KEY_JWK` in your `.env` to the **standby** key's full JWK as a single-line JSON string (include the `d` field — the minter signs with it).
 

@@ -1,0 +1,34 @@
+name: migration-smoke
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/seed.sql"
+      - "supabase/config.toml"
+  push:
+    branches:
+      - main
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/seed.sql"
+      - "supabase/config.toml"
+
+jobs:
+  db-reset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          # Pinned to match the local + production push-context CLI version.
+          # Bumping requires a coordinated bump of every contributor's local CLI
+          # so the parser behaviour stays uniform across local / CI / prod.
+          version: 2.90.0
+
+      - run: supabase start
+      - run: supabase db reset --local
+      - if: always()
+        run: supabase stop

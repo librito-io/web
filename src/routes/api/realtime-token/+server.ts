@@ -6,6 +6,7 @@ import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import {
   realtimeTokenLimiter,
   realtimeTokenUserLimiter,
+  safeLimit,
 } from "$lib/server/ratelimit";
 import {
   mintRealtimeToken,
@@ -46,8 +47,8 @@ export const POST: RequestHandler = async ({ request }) => {
   }
 
   const [perDevice, perUser] = await Promise.all([
-    realtimeTokenLimiter.limit(device.id),
-    realtimeTokenUserLimiter.limit(device.userId),
+    safeLimit(realtimeTokenLimiter, device.id, "realtime:token"),
+    safeLimit(realtimeTokenUserLimiter, device.userId, "realtime:token:user"),
   ]);
   if (!perDevice.success || !perUser.success) {
     const reset = Math.max(perDevice.reset, perUser.reset);

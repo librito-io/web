@@ -15,6 +15,12 @@ vi.mock("$lib/server/ratelimit", () => ({
   transferRetryLimiter: {
     limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
   },
+  safeLimit: async (
+    limiter: {
+      limit: (k: string) => Promise<{ success: boolean; reset: number }>;
+    },
+    key: string,
+  ) => limiter.limit(key),
 }));
 
 const supabase = createMockSupabase();

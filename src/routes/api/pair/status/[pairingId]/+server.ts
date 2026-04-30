@@ -1,13 +1,17 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { redis, pairStatusLimiter } from "$lib/server/ratelimit";
+import { redis, pairStatusLimiter, safeLimit } from "$lib/server/ratelimit";
 import { checkPairingStatus } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
 export const GET: RequestHandler = async ({ params, getClientAddress }) => {
   // Rate limit by IP
   const ip = getClientAddress();
-  const { success, reset } = await pairStatusLimiter.limit(ip);
+  const { success, reset } = await safeLimit(
+    pairStatusLimiter,
+    ip,
+    "pair:status",
+  );
   if (!success) {
     const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
     return jsonError(429, "rate_limited", "Too many requests", retryAfter);

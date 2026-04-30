@@ -36,6 +36,18 @@ vi.mock("$lib/server/ratelimit", () => ({
   realtimeTokenUserLimiter: {
     limit: (...args: unknown[]) => userLimitMock(...args),
   },
+  safeLimit: async (
+    limiter: {
+      limit: (k: string) => Promise<{ success: boolean; reset: number }>;
+    },
+    key: string,
+  ) => {
+    try {
+      return await limiter.limit(key);
+    } catch {
+      return { success: true, reset: 0 };
+    }
+  },
 }));
 
 vi.mock("$lib/server/realtime", () => ({

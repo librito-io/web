@@ -37,6 +37,21 @@ vi.mock("$lib/server/ratelimit", () => ({
   realtimeTokenUserLimiter: {
     limit: (...args: unknown[]) => userLimitMock(...args),
   },
+  // Pass-through wrapper. The route now calls safeLimit(limiter, key, label);
+  // funnel back to the existing limit-mock spies so per-test denials still
+  // assert correctly. Catch surfaces fail-open semantics for any throw cases.
+  safeLimit: async (
+    limiter: {
+      limit: (k: string) => Promise<{ success: boolean; reset: number }>;
+    },
+    key: string,
+  ) => {
+    try {
+      return await limiter.limit(key);
+    } catch {
+      return { success: true, reset: 0 };
+    }
+  },
 }));
 
 const supabase = createMockSupabase();

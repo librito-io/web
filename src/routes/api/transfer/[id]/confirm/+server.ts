@@ -1,7 +1,7 @@
 import type { RequestHandler } from "./$types";
 import { authenticateDevice } from "$lib/server/auth";
 import { createAdminClient } from "$lib/server/supabase";
-import { transferConfirmLimiter } from "$lib/server/ratelimit";
+import { transferConfirmLimiter, safeLimit } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { recordConfirmFailure } from "$lib/server/transfer";
 
@@ -16,8 +16,10 @@ export const POST: RequestHandler = async ({ request, params }) => {
   const { device } = authResult;
   const transferId = params.id;
 
-  const { success, reset } = await transferConfirmLimiter.limit(
+  const { success, reset } = await safeLimit(
+    transferConfirmLimiter,
     `${device.id}:${transferId}`,
+    "transfer:confirm",
   );
   if (!success) {
     const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));

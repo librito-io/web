@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { pairRequestLimiter } from "$lib/server/ratelimit";
+import { pairRequestLimiter, safeLimit } from "$lib/server/ratelimit";
 import { requestPairingCode } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
@@ -10,7 +10,11 @@ const UUID_RE =
 export const POST: RequestHandler = async ({ request, getClientAddress }) => {
   // Rate limit by IP
   const ip = getClientAddress();
-  const { success, reset } = await pairRequestLimiter.limit(ip);
+  const { success, reset } = await safeLimit(
+    pairRequestLimiter,
+    ip,
+    "pair:request",
+  );
   if (!success) {
     const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
     return jsonError(429, "rate_limited", "Too many requests", retryAfter);

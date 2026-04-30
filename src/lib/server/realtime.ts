@@ -48,10 +48,10 @@ async function checkKidInJwks(kid: string, supabaseUrl: string): Promise<void> {
   try {
     const res = await fetch(`${supabaseUrl}/auth/v1/.well-known/jwks.json`);
     if (!res.ok) {
-      console.warn("realtime.jwks_check_failed", {
-        status: res.status,
-        kid,
-      });
+      // Distinct from `realtime.jwks_fetch_threw` (catch branch) and
+      // `realtime.kid_not_in_jwks` (fetch ok but kid absent) so dashboards
+      // can split "upstream JWKS endpoint sad" from "key is rotated out".
+      console.warn("realtime.jwks_fetch_non_ok", { status: res.status, kid });
       return;
     }
     const body = (await res.json()) as { keys?: Array<{ kid: string }> };
@@ -65,7 +65,7 @@ async function checkKidInJwks(kid: string, supabaseUrl: string): Promise<void> {
       });
     }
   } catch (err) {
-    console.warn("realtime.jwks_check_failed", { error: String(err), kid });
+    console.warn("realtime.jwks_fetch_threw", { error: String(err), kid });
   }
 }
 

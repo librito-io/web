@@ -29,37 +29,39 @@ type ClaimResult =
         | "server_error";
     };
 
-// Pairing codes expire after 5 minutes; align Redis TTL so the token lives
-// exactly as long as the code that produced it.
-const PAIR_REDIS_TTL_SEC = 300;
+// Single source of truth for pairing-code lifetime: drives Postgres
+// `expires_at`, Redis token TTL, and the `expiresIn` response field.
+const PAIRING_CODE_TTL_SEC = 300;
 
 export async function requestPairingCode(
   supabase: SupabaseClient,
   hardwareId: string,
-  _retried = false,
 ): Promise<PairingResult> {
-  const code = generatePairingCode();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+  // Re-roll once on PG unique violation (random code collision with a still-live row).
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const code = generatePairingCode();
+    const expiresAt = new Date(Date.now() + PAIRING_CODE_TTL_SEC * 1000);
 
-  const { data, error } = await supabase
-    .from("pairing_codes")
-    .insert({
-      code,
-      hardware_id: hardwareId,
-      expires_at: expiresAt.toISOString(),
-    })
-    .select("id")
-    .single();
+    const { data, error } = await supabase
+      .from("pairing_codes")
+      .insert({
+        code,
+        hardware_id: hardwareId,
+        expires_at: expiresAt.toISOString(),
+      })
+      .select("id")
+      .single();
 
-  if (error) {
-    // Unique constraint violation = code collision (retry once)
-    if (error.code === "23505" && !_retried) {
-      return requestPairingCode(supabase, hardwareId, true);
+    if (!error) {
+      return { code, pairingId: data.id, expiresIn: PAIRING_CODE_TTL_SEC };
     }
-    throw new Error(`Failed to create pairing code: ${error.message}`);
+    if (error.code !== "23505") {
+      throw new Error(`Failed to create pairing code: ${error.message}`);
+    }
   }
-
-  return { code, pairingId: data.id, expiresIn: 300 };
+  throw new Error(
+    "Failed to create pairing code: unique-collision retry exhausted",
+  );
 }
 
 export async function checkPairingStatus(
@@ -193,7 +195,7 @@ export async function claimPairingCode(
   if (row.won) {
     try {
       await redis.set(`pair:token:${pairingCode.id}`, token, {
-        ex: PAIR_REDIS_TTL_SEC,
+        ex: PAIRING_CODE_TTL_SEC,
       });
     } catch (err) {
       console.error("pairing.redis_token_write_failed", {
@@ -216,7 +218,7 @@ export async function claimPairingCode(
       return { error: "server_error" };
     }
   } else {
-    // Replay path: the original winner wrote Redis up to PAIR_REDIS_TTL_SEC
+    // Replay path: the original winner wrote Redis up to PAIRING_CODE_TTL_SEC
     // ago. If that key has already expired or been evicted, the device-side
     // poller would loop on code_expired while we returned a deviceId — a
     // dishonest 200. Surface code_expired to the browser so the user

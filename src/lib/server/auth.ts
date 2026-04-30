@@ -37,6 +37,7 @@ export async function authenticateDevice(
   }
 
   const token = authHeader.slice(7);
+  // Skip SHA-256 + DB lookup on garbage tokens (credential-stuffing scans).
   if (!token.startsWith("sk_device_")) {
     return { error: "invalid_token" };
   }

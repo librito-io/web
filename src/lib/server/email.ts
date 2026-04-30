@@ -2,6 +2,14 @@ import { Resend } from "resend";
 import { RESEND_API_KEY } from "$env/static/private";
 import welcomeHtml from "../../../supabase/templates/welcome.html?raw";
 
+// One warn at module load; per-call would spam self-host logs.
+if (!RESEND_API_KEY) {
+  console.warn(
+    "email.resend_unconfigured: RESEND_API_KEY not set — welcome emails will be silently skipped. " +
+      "Set RESEND_API_KEY in env to enable.",
+  );
+}
+
 let resend: Resend | null = null;
 
 function getClient(): Resend | null {
@@ -19,10 +27,7 @@ export async function sendWelcomeEmail(
 ): Promise<void> {
   try {
     const client = getClient();
-    if (!client) {
-      console.log("RESEND_API_KEY not set — skipping welcome email");
-      return;
-    }
+    if (!client) return;
 
     const html = welcomeHtml.replace(/\{\{APP_URL\}\}/g, `${siteUrl}/app`);
 

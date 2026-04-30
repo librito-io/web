@@ -22,11 +22,12 @@
 --
 -- Service-role only.
 --
--- Statements (CREATE / REVOKE / GRANT / COMMENT) are kept inline here.
--- The per-statement split applied in migrations 01-02-03 was forced by a
--- Supabase CLI v2.90 parser quirk specific to claim_pairing_atomic's
--- larger plpgsql body shape. This function's smaller body parses cleanly
--- through the same CLI version, so combining is safe.
+-- The REVOKE+GRANT block is wrapped in a DO block so the four
+-- access-control statements appear as one statement to the Supabase CLI
+-- v2.90 prepared-statement parser. Without the wrapper, multi-statement
+-- access-control files trigger Postgres SQLSTATE 42601 ("cannot insert
+-- multiple commands into a prepared statement"). See the footer of
+-- 20260430000002_grant_claim_pairing_atomic.sql for the full context.
 
 CREATE OR REPLACE FUNCTION public.rollback_claim_pairing(
   p_pairing_id uuid,
@@ -47,13 +48,16 @@ BEGIN
 END;
 $$;
 
--- See migration 02 footer for the REVOKE-then-GRANT rationale.
-REVOKE ALL ON FUNCTION public.rollback_claim_pairing(uuid, uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.rollback_claim_pairing(uuid, uuid) FROM anon;
-REVOKE ALL ON FUNCTION public.rollback_claim_pairing(uuid, uuid) FROM authenticated;
-
-GRANT EXECUTE ON FUNCTION public.rollback_claim_pairing(uuid, uuid)
-  TO service_role;
+-- See migration 02 footer for the REVOKE-then-GRANT rationale and the
+-- DO-block parser workaround.
+DO $$
+BEGIN
+  REVOKE ALL ON FUNCTION public.rollback_claim_pairing(uuid, uuid) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION public.rollback_claim_pairing(uuid, uuid) FROM anon;
+  REVOKE ALL ON FUNCTION public.rollback_claim_pairing(uuid, uuid) FROM authenticated;
+  GRANT EXECUTE ON FUNCTION public.rollback_claim_pairing(uuid, uuid) TO service_role;
+END;
+$$;
 
 COMMENT ON FUNCTION public.rollback_claim_pairing IS
   'Rolls back claim_pairing_atomic on application-layer (Redis) failure. '

@@ -14,14 +14,18 @@ import {
 // into a Librito-wide 504 storm.
 //
 // Fail fast instead. Pairing-write fails closed via the existing
-// rollback_claim_pairing path (PR #40); pairing-read returns code_expired
-// and the device retries on the next 3 s poll; ratelimit consumers wrap
-// `.limit()` in `safeLimit` below so a Redis fail surfaces as fail-open
-// (allow the request) rather than 5xx. See audit issue P6.
+// rollback_claim_pairing path (PR #40); pairing-read catches the throw
+// and returns code_expired so the device retries on the next 3 s poll
+// (`checkPairingStatus` and `claimPairingCode` replay-path in
+// pairing.ts); ratelimit consumers wrap `.limit()` in `safeLimit` below
+// so a Redis fail surfaces as fail-open (allow the request) rather than
+// 5xx. See audit issue P6.
+const UPSTASH_RETRY_BUDGET = 0;
+
 export const redis = new Redis({
   url: UPSTASH_REDIS_REST_URL,
   token: UPSTASH_REDIS_REST_TOKEN,
-  retry: { retries: 0 },
+  retry: { retries: UPSTASH_RETRY_BUDGET },
 });
 
 /**

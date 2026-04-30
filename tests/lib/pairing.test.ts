@@ -51,6 +51,7 @@ describe("checkPairingStatus", () => {
       data: {
         claimed: false,
         expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_email: null,
       },
       error: null,
     });
@@ -83,11 +84,9 @@ describe("checkPairingStatus", () => {
   });
 
   it("returns paired: true with empty userEmail when user_email column is null", async () => {
-    // Defensive: claim_pairing_atomic always stamps user_email at claim
-    // time, so this state shouldn't occur in practice — but historical
-    // pre-denorm rows may exist if a user paired before the migration
-    // landed and their pairing_codes row never expired (5 min TTL means
-    // this is a non-event for production but the contract still holds).
+    // Read-side fallback for the unknown-email case (operator wired phone
+    // or OAuth-without-email-scope auth, or schema drift if claim ever
+    // fails to stamp). Single NULL → "" conversion site lives here.
     const supabase = createMockSupabase();
     const redis = createMockRedis();
     supabase._results.set("pairing_codes.select", {
@@ -172,6 +171,27 @@ function setupValidLookup(
   return pairingId;
 }
 
+// Helper: invoke claimPairingCode with canonical args, allowing per-test
+// overrides. Centralises the options-bag shape so signature additions touch
+// one place. Tests asserting wire-shape (the first one) keep their explicit
+// literals.
+function callClaim(
+  supabase: ReturnType<typeof createMockSupabase>,
+  redis: ReturnType<typeof createMockRedis>,
+  overrides: Partial<{
+    userId: string;
+    userEmail: string | null;
+    code: string;
+  }> = {},
+) {
+  return claimPairingCode(supabase, redis, {
+    userId: "user-uuid",
+    userEmail: "user@example.com",
+    code: "482901",
+    ...overrides,
+  });
+}
+
 describe("claimPairingCode", () => {
   it("delegates atomic claim to claim_pairing_atomic RPC; winner writes Redis", async () => {
     const supabase = createMockSupabase();
@@ -183,13 +203,13 @@ describe("claimPairingCode", () => {
       error: null,
     });
 
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    // Wire-shape test: keep explicit options-bag literal so a future
+    // signature change here is loud, not silent (callClaim helper hides args).
+    const result = await claimPairingCode(supabase, redis, {
+      userId: "user-uuid",
+      userEmail: "user@example.com",
+      code: "482901",
+    });
 
     expect(result).toEqual({
       deviceId: "device-uuid",
@@ -226,13 +246,7 @@ describe("claimPairingCode", () => {
       ex: 300,
     });
 
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    const result = await callClaim(supabase, redis);
 
     expect(result).toEqual({
       deviceId: "device-uuid",
@@ -261,13 +275,7 @@ describe("claimPairingCode", () => {
     });
     // Redis empty: pair:token:* was never written or has expired.
 
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    const result = await callClaim(supabase, redis);
 
     expect(result).toEqual({ error: "code_expired" });
     expect(redis.set).not.toHaveBeenCalled();
@@ -282,13 +290,7 @@ describe("claimPairingCode", () => {
       error: null,
     });
 
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    const result = await callClaim(supabase, redis);
 
     expect(result).toEqual({ error: "already_claimed" });
     expect(redis.set).not.toHaveBeenCalled();
@@ -303,13 +305,7 @@ describe("claimPairingCode", () => {
       error: null,
     });
 
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    const result = await callClaim(supabase, redis);
 
     expect(result).toEqual({ error: "already_claimed" });
   });
@@ -326,13 +322,7 @@ describe("claimPairingCode", () => {
     });
     const rpcSpy = vi.spyOn(supabase, "rpc");
 
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "111111",
-    );
+    const result = await callClaim(supabase, redis, { code: "111111" });
 
     expect(result).toEqual({ error: "code_expired" });
     expect(rpcSpy).not.toHaveBeenCalled();
@@ -346,13 +336,7 @@ describe("claimPairingCode", () => {
       error: null,
     });
 
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "999999",
-    );
+    const result = await callClaim(supabase, redis, { code: "999999" });
 
     expect(result).toEqual({ error: "invalid_code" });
   });
@@ -365,13 +349,7 @@ describe("claimPairingCode", () => {
       error: { code: "08006", message: "connection failure" },
     });
 
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    const result = await callClaim(supabase, redis);
 
     expect(result).toEqual({ error: "server_error" });
   });
@@ -385,13 +363,7 @@ describe("claimPairingCode", () => {
       error: { message: "connection failure" },
     });
 
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    const result = await callClaim(supabase, redis);
 
     expect(result).toEqual({ error: "server_error" });
     expect(redis.set).not.toHaveBeenCalled();
@@ -409,13 +381,7 @@ describe("claimPairingCode", () => {
       error: null,
     });
 
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    const result = await callClaim(supabase, redis);
 
     expect(result).toEqual({ error: "server_error" });
     expect(redis.set).not.toHaveBeenCalled();
@@ -432,13 +398,7 @@ describe("claimPairingCode", () => {
     redis.set.mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
     const rpcSpy = vi.spyOn(supabase, "rpc");
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    const result = await callClaim(supabase, redis);
 
     expect(result).toEqual({ error: "server_error" });
     // Two RPC calls: claim_pairing_atomic then rollback_claim_pairing.
@@ -468,13 +428,7 @@ describe("claimPairingCode", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const rpcSpy = vi.spyOn(supabase, "rpc");
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    const result = await callClaim(supabase, redis);
 
     expect(result).toEqual({ error: "server_error" });
     expect(rpcSpy).toHaveBeenCalledTimes(2);
@@ -504,13 +458,7 @@ describe("claimPairingCode", () => {
     });
     const rpcSpy = vi.spyOn(supabase, "rpc");
 
-    await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "user@example.com",
-      "482901",
-    );
+    await callClaim(supabase, redis);
 
     // Exactly one RPC call: claim_pairing_atomic. No rollback.
     expect(rpcSpy).toHaveBeenCalledTimes(1);

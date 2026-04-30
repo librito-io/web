@@ -82,9 +82,8 @@ export async function checkPairingStatus(
   const token = await redis.get(`pair:token:${pairingId}`);
   if (!token) return { error: "code_expired" };
 
-  // user_email is denormalised onto pairing_codes by claim_pairing_atomic
-  // (see migration 20260430000006). Replaces a per-poll
-  // auth.admin.getUserById gotrue round-trip.
+  // user_email denormalised onto pairing_codes — see migration 20260430000006.
+  // NULL → "" is the single conversion site for the unknown-email case.
   return { paired: true, token, userEmail: data.user_email ?? "" };
 }
 
@@ -126,12 +125,23 @@ function isAtomicClaimRow(value: unknown): value is AtomicClaimRow {
  *   5. Idempotent-replay callers (won=false) inherit the winner's Redis
  *      token; they do not write Redis themselves (avoids token clobber).
  */
+export type ClaimPairingArgs = {
+  userId: string;
+  /**
+   * The session user's email, or null when the auth provider did not return
+   * one (phone-only signup, OAuth without email scope). Stamped onto
+   * pairing_codes for the device-status poll; surfaces as empty string on
+   * read when null. Never trust a body-supplied value here — pass the
+   * server-validated session email only.
+   */
+  userEmail: string | null;
+  code: string;
+};
+
 export async function claimPairingCode(
   supabase: SupabaseClient,
   redis: Redis,
-  userId: string,
-  userEmail: string,
-  code: string,
+  { userId, userEmail, code }: ClaimPairingArgs,
 ): Promise<ClaimResult> {
   const { data: pairingCode, error: lookupError } = await supabase
     .from("pairing_codes")
@@ -147,10 +157,7 @@ export async function claimPairingCode(
   const token = generateDeviceToken();
   const tokenHash = hashToken(token);
 
-  // user_email is denormalised into pairing_codes for the device-status
-  // poll's benefit (see migration 20260430000006 / audit P4). The route
-  // handler reads it from safeGetSession() — no auth.admin.getUserById
-  // round-trip needed.
+  // p_user_email denormalised onto pairing_codes — see migration 20260430000006.
   const { data: rpcRows, error: rpcError } = await supabase.rpc(
     "claim_pairing_atomic",
     {

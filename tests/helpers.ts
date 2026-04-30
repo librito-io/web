@@ -135,10 +135,19 @@ export function createMockSupabase() {
     };
   }
 
-  async function rpc(name: string, _args?: unknown) {
+  // Records every `.rpc(name, args)` invocation so tests can assert payload
+  // shape and call count (e.g. "exactly one batched RPC call, not a per-row
+  // loop"). Mirrors the upsertCalls instrumentation above.
+  const rpcCalls: Array<{ name: string; args: unknown }> = [];
+  async function rpc(name: string, args?: unknown) {
+    rpcCalls.push({ name, args });
     const key = `rpc.${name}`;
     return results.get(key) ?? { data: null, error: null };
   }
+
+  // Records every `.from(table).update(...)` call so tests can assert that a
+  // refactor genuinely eliminated a per-row update loop in favour of an RPC.
+  const updateCalls: Array<{ table: string }> = [];
 
   const client = {
     from: (table: string) => ({
@@ -149,7 +158,10 @@ export function createMockSupabase() {
         }
         return selectChain(table, args);
       },
-      update: (..._args: unknown[]) => makeChain(table, "update"),
+      update: (..._args: unknown[]) => {
+        updateCalls.push({ table });
+        return makeChain(table, "update");
+      },
       upsert: (...args: unknown[]) => {
         upsertCalls.push({ table, rows: args[0], opts: args[1] });
         return makeChain(table, "upsert");
@@ -162,6 +174,8 @@ export function createMockSupabase() {
     _storage: storageResults,
     _storageSpy: storageSpy,
     _upsertCalls: upsertCalls,
+    _rpcCalls: rpcCalls,
+    _updateCalls: updateCalls,
   };
 
   return client as unknown as SupabaseClient & {
@@ -169,6 +183,8 @@ export function createMockSupabase() {
     _storage: Map<string, { data: unknown; error: unknown }>;
     _storageSpy: typeof storageSpy;
     _upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }>;
+    _rpcCalls: Array<{ name: string; args: unknown }>;
+    _updateCalls: Array<{ table: string }>;
   };
 }
 

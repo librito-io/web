@@ -74,6 +74,8 @@ supabase db reset       # Reset and re-apply all migrations
 supabase stop           # Stop local Supabase
 ```
 
+**Migration CI gate**: `.github/workflows/migration-smoke.yml` runs `supabase start && supabase db reset --local` on every PR (and `main` push) that touches `supabase/migrations/**`, `supabase/seed.sql`, or `supabase/config.toml`. The CLI is pinned to the version used for local dev and production `supabase db push` so parser-class regressions (cf. PR #41 — CLI v2.90 prepared-statement parser batches multi-statement migrations into one Parse message and trips Postgres SQLSTATE 42601) surface in CI rather than at production push time. If you edit a migration file mid-review, **re-run `supabase db reset --local` locally** before pushing — CI is the safety net, not the primary signal.
+
 ## Local dev setup — Realtime signing key
 
 Tests run on CI without any Supabase setup (the fixture in `tests/fixtures/dev-jwk.ts` is self-contained). But the **manual local Realtime smoke test** — minting a token from `/api/realtime-token` and joining a Phoenix channel against local Supabase — requires that local gotrue and our minter share a signing key.

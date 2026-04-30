@@ -5,6 +5,11 @@
 -- application-layer Redis write fails after a successful claim+device
 -- transaction. Resets the claim flag so the user can retry pairing.
 --
+-- This is a FORWARD migration that creates a helper function. The file
+-- name uses `_create_rollback_..._fn.sql` rather than `_rollback_...sql`
+-- to avoid the down-migration connotation that would mislead operators
+-- during incident response.
+--
 -- DELIBERATE ASYMMETRY: this function does NOT delete the device row.
 -- If the device row was inserted fresh by the failing claim, deletion
 -- would be correct; if it was a re-pair UPDATE (existing device whose
@@ -16,6 +21,12 @@
 -- successfully — full recovery.
 --
 -- Service-role only.
+--
+-- Statements (CREATE / REVOKE / GRANT / COMMENT) are kept inline here.
+-- The per-statement split applied in migrations 01-02-03 was forced by a
+-- Supabase CLI v2.90 parser quirk specific to claim_pairing_atomic's
+-- larger plpgsql body shape. This function's smaller body parses cleanly
+-- through the same CLI version, so combining is safe.
 
 CREATE OR REPLACE FUNCTION public.rollback_claim_pairing(
   p_pairing_id uuid,
@@ -35,6 +46,11 @@ BEGIN
      AND user_id = p_user_id;
 END;
 $$;
+
+-- See migration 02 footer for the REVOKE-then-GRANT rationale.
+REVOKE ALL ON FUNCTION public.rollback_claim_pairing(uuid, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.rollback_claim_pairing(uuid, uuid) FROM anon;
+REVOKE ALL ON FUNCTION public.rollback_claim_pairing(uuid, uuid) FROM authenticated;
 
 GRANT EXECUTE ON FUNCTION public.rollback_claim_pairing(uuid, uuid)
   TO service_role;

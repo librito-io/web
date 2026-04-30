@@ -186,10 +186,14 @@ describe("claimPairingCode", () => {
     // the device on next /api/sync).
     const supabase = createMockSupabase();
     const redis = createMockRedis();
-    setupValidLookup(supabase);
+    const pairingId = setupValidLookup(supabase);
     supabase._results.set("rpc.claim_pairing_atomic", {
       data: [{ device_id: "device-uuid", device_name: "Librito", won: false }],
       error: null,
+    });
+    // Original winner's token still alive in Redis — replay must succeed.
+    await redis.set(`pair:token:${pairingId}`, "sk_device_winner_token", {
+      ex: 300,
     });
 
     const result = await claimPairingCode(
@@ -203,6 +207,37 @@ describe("claimPairingCode", () => {
       deviceId: "device-uuid",
       deviceName: "Librito",
     });
+    // The replay-side mutation must not call redis.set; we only assert
+    // setup's pre-seed call here, no post-RPC writes.
+    expect(redis.set).toHaveBeenCalledTimes(1);
+    expect(redis.set).toHaveBeenCalledWith(
+      `pair:token:${pairingId}`,
+      "sk_device_winner_token",
+      { ex: 300 },
+    );
+  });
+
+  it("replay after Redis TTL expiry returns code_expired (no dishonest 200)", async () => {
+    // Replay path with the original winner's Redis token already evicted.
+    // Browser must NOT receive a deviceId while the device-side poller is
+    // stuck on code_expired; force the user back through a fresh claim.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [{ device_id: "device-uuid", device_name: "Librito", won: false }],
+      error: null,
+    });
+    // Redis empty: pair:token:* was never written or has expired.
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "code_expired" });
     expect(redis.set).not.toHaveBeenCalled();
   });
 
@@ -324,6 +359,29 @@ describe("claimPairingCode", () => {
     expect(redis.set).not.toHaveBeenCalled();
   });
 
+  it("returns server_error when RPC returns a row missing required fields (schema drift)", async () => {
+    // Defends against the cast at the firstRow boundary: a future RPC schema
+    // change that drops or renames a column must not silently emit a
+    // deviceId/deviceName=undefined response.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [{ device_id: "device-uuid" }], // missing device_name + won
+      error: null,
+    });
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "server_error" });
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
   it("rolls back via rollback_claim_pairing RPC when Redis write throws", async () => {
     const supabase = createMockSupabase();
     const redis = createMockRedis();
@@ -349,6 +407,50 @@ describe("claimPairingCode", () => {
       p_pairing_id: pairingId,
       p_user_id: "user-uuid",
     });
+  });
+
+  it("returns server_error and logs when rollback_claim_pairing RPC itself errors", async () => {
+    // Redis fails -> rollback is invoked -> rollback RPC also fails. The
+    // outer return must still surface server_error (not leak success), and
+    // we should log both failures so an operator can correlate them.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    const pairingId = setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [{ device_id: "device-uuid", device_name: "Librito", won: true }],
+      error: null,
+    });
+    supabase._results.set("rpc.rollback_claim_pairing", {
+      data: null,
+      error: { message: "rollback connection failure" },
+    });
+    redis.set.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const rpcSpy = vi.spyOn(supabase, "rpc");
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "server_error" });
+    expect(rpcSpy).toHaveBeenCalledTimes(2);
+    expect(rpcSpy).toHaveBeenNthCalledWith(2, "rollback_claim_pairing", {
+      p_pairing_id: pairingId,
+      p_user_id: "user-uuid",
+    });
+    // Both failure events must be logged (Redis + rollback RPC).
+    expect(errorSpy).toHaveBeenCalledWith(
+      "pairing.redis_token_write_failed",
+      expect.any(Object),
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      "pairing.rollback_rpc_failed",
+      expect.any(Object),
+    );
+    errorSpy.mockRestore();
   });
 
   it("does NOT invoke rollback when Redis write succeeds", async () => {

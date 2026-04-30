@@ -18,7 +18,7 @@
 -- The device API path uses the admin client. No RLS bypass concerns.
 -- Redis token write happens APPLICATION-SIDE after this RPC returns
 -- won=true. On Redis failure, caller invokes rollback_claim_pairing
--- (defined in 20260430000002_rollback_claim_pairing_rpc.sql).
+-- (defined in 20260430000004_create_rollback_claim_pairing_fn.sql).
 
 CREATE OR REPLACE FUNCTION public.claim_pairing_atomic(
   p_user_id    uuid,
@@ -46,12 +46,17 @@ BEGIN
 
   -- Try to win the claim transition. The conditional WHERE makes this
   -- idempotent under concurrent retries: only one caller can transition
-  -- claimed=false to true. Captures hardware_id for the device upsert.
+  -- claimed=false to true. The expires_at predicate is defence-in-depth:
+  -- the JS layer (src/lib/server/pairing.ts) already filters expired codes
+  -- before invoking this RPC, but enforcing expiry server-side closes any
+  -- gap from a misconfigured caller or future code path that bypasses the
+  -- JS filter. Captures hardware_id for the device upsert.
   UPDATE pairing_codes
      SET claimed = true,
          user_id = p_user_id
    WHERE id = p_pairing_id
      AND claimed = false
+     AND expires_at > now()
    RETURNING hardware_id INTO v_hardware_id;
 
   v_won := FOUND;
@@ -60,8 +65,10 @@ BEGIN
     -- We won. Insert OR update the device row in the same transaction.
     -- ON CONFLICT (user_id, hardware_id) handles re-pair (existing
     -- device for this user/hardware combination) by rotating the token
-    -- hash and clearing revoked_at. The UNIQUE constraint backing the
-    -- ON CONFLICT clause is defined in 20260412000002_create_devices_and_pairing.sql.
+    -- hash and clearing revoked_at. The backing UNIQUE constraint is
+    -- devices_user_id_hardware_id_key (auto-named by Postgres from the
+    -- UNIQUE(user_id, hardware_id) clause on the devices table). Source
+    -- of truth is `\d devices` in psql, not a specific migration file.
     INSERT INTO devices (user_id, hardware_id, api_token_hash)
     VALUES (p_user_id, v_hardware_id, p_token_hash)
     ON CONFLICT (user_id, hardware_id) DO UPDATE

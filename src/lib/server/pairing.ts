@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SetCommandOptions } from "@upstash/redis";
+import { firstRow } from "./rpc";
 import { generatePairingCode, generateDeviceToken, hashToken } from "./tokens";
 
 type Redis = {
@@ -104,6 +105,16 @@ type AtomicClaimRow = {
   won: boolean;
 };
 
+function isAtomicClaimRow(value: unknown): value is AtomicClaimRow {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.device_id === "string" &&
+    typeof row.device_name === "string" &&
+    typeof row.won === "boolean"
+  );
+}
+
 /**
  * Claim a pairing code on behalf of a logged-in user.
  *
@@ -128,7 +139,6 @@ export async function claimPairingCode(
   userId: string,
   code: string,
 ): Promise<ClaimResult> {
-  // 1. Resolve code → pairing_id + expiry.
   const { data: pairingCode, error: lookupError } = await supabase
     .from("pairing_codes")
     .select("id, expires_at")
@@ -140,14 +150,9 @@ export async function claimPairingCode(
   if (new Date(pairingCode.expires_at) < new Date())
     return { error: "code_expired" };
 
-  // 2. Generate device token + hash.
   const token = generateDeviceToken();
   const tokenHash = hashToken(token);
 
-  // 3. Atomic claim+device transition via RPC. The Postgres function
-  //    serializes concurrent same-pairing_id callers and atomically:
-  //    flips claimed=false→true, then INSERT/ON CONFLICT UPDATE devices.
-  //    Returns one row on success/replay or zero rows on already_claimed.
   const { data: rpcRows, error: rpcError } = await supabase.rpc(
     "claim_pairing_atomic",
     {
@@ -165,15 +170,20 @@ export async function claimPairingCode(
     return { error: "server_error" };
   }
 
-  const row = (Array.isArray(rpcRows) ? rpcRows[0] : rpcRows) as
-    | AtomicClaimRow
-    | null
-    | undefined;
+  const row = firstRow<AtomicClaimRow>(rpcRows);
   if (!row) return { error: "already_claimed" };
+  if (!isAtomicClaimRow(row)) {
+    // Schema drift: the RPC returned a row that does not match our expected
+    // shape. Fail closed instead of silently propagating undefined fields.
+    console.error("pairing.claim_atomic_rpc_unexpected_shape", {
+      pairingId: pairingCode.id,
+    });
+    return { error: "server_error" };
+  }
 
-  // 4. Only the winner writes Redis. Idempotent-replay losers (won=false)
-  //    trust that the winner has already written; clobbering with a
-  //    different token would mismatch the devices.api_token_hash.
+  // Only the winner writes Redis. Idempotent-replay losers (won=false) trust
+  // that the winner has already written; clobbering with a different token
+  // would mismatch devices.api_token_hash.
   if (row.won) {
     try {
       await redis.set(`pair:token:${pairingCode.id}`, token, {
@@ -199,6 +209,14 @@ export async function claimPairingCode(
       }
       return { error: "server_error" };
     }
+  } else {
+    // Replay path: the original winner wrote Redis up to PAIR_REDIS_TTL_SEC
+    // ago. If that key has already expired or been evicted, the device-side
+    // poller would loop on code_expired while we returned a deviceId — a
+    // dishonest 200. Surface code_expired to the browser so the user
+    // re-initiates pairing with a fresh code.
+    const existingToken = await redis.get(`pair:token:${pairingCode.id}`);
+    if (!existingToken) return { error: "code_expired" };
   }
 
   return { deviceId: row.device_id, deviceName: row.device_name };

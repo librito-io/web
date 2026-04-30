@@ -1,5 +1,6 @@
 import { basename } from "path";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { firstRow } from "./rpc";
 
 export const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 export const MAX_FILENAME_LENGTH = 255;
@@ -55,7 +56,7 @@ export async function recordConfirmFailure(
 
   if (rpcError) return { kind: "rpc_error" };
 
-  const row = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+  const row = firstRow<{ attempt_count?: number; status?: string }>(rpcRows);
   const basePayload: FailurePayloadBase = {
     transferId: ctx.transferId,
     userId: ctx.userId,
@@ -68,8 +69,8 @@ export async function recordConfirmFailure(
     return { kind: "no_change", payload: basePayload };
   }
 
-  const newAttemptCount = (row.attempt_count as number | undefined) ?? 0;
-  const newStatus = row.status as string | undefined;
+  const newAttemptCount = row.attempt_count ?? 0;
+  const newStatus = row.status;
 
   if (newStatus === "failed") {
     return {

@@ -8,19 +8,15 @@ vi.mock("$lib/server/auth", () => ({
   })),
 }));
 
-vi.mock("$lib/server/ratelimit", () => ({
-  transferConfirmLimiter: {
-    limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
-  },
-  // Pass-through wrapper so per-test overrides on the underlying limiter's
-  // `.limit` (e.g. denial scenarios) still flow through to the route.
-  safeLimit: async (
-    limiter: {
-      limit: (k: string) => Promise<{ success: boolean; reset: number }>;
+vi.mock("$lib/server/ratelimit", async () => {
+  const { passThroughSafeLimit } = await import("../helpers");
+  return {
+    transferConfirmLimiter: {
+      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
     },
-    key: string,
-  ) => limiter.limit(key),
-}));
+    safeLimit: passThroughSafeLimit,
+  };
+});
 
 const supabase = createMockSupabase();
 vi.mock("$lib/server/supabase", () => ({

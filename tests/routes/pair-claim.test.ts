@@ -19,18 +19,16 @@ vi.mock("$lib/server/pairing", () => ({
   })),
 }));
 
-vi.mock("$lib/server/ratelimit", () => ({
-  redis: {},
-  pairClaimLimiter: {
-    limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
-  },
-  safeLimit: async (
-    limiter: {
-      limit: (k: string) => Promise<{ success: boolean; reset: number }>;
+vi.mock("$lib/server/ratelimit", async () => {
+  const { passThroughSafeLimit } = await import("../helpers");
+  return {
+    redis: {},
+    pairClaimLimiter: {
+      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
     },
-    key: string,
-  ) => limiter.limit(key),
-}));
+    safeLimit: passThroughSafeLimit,
+  };
+});
 
 vi.mock("$lib/server/supabase", () => ({
   createAdminClient: () => ({}),

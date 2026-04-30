@@ -32,27 +32,16 @@ vi.mock("$lib/server/auth", async (importOriginal) => {
 
 const limitMock = vi.fn();
 const userLimitMock = vi.fn();
-vi.mock("$lib/server/ratelimit", () => ({
-  realtimeTokenLimiter: { limit: (...args: unknown[]) => limitMock(...args) },
-  realtimeTokenUserLimiter: {
-    limit: (...args: unknown[]) => userLimitMock(...args),
-  },
-  // Pass-through wrapper. The route now calls safeLimit(limiter, key, label);
-  // funnel back to the existing limit-mock spies so per-test denials still
-  // assert correctly. Catch surfaces fail-open semantics for any throw cases.
-  safeLimit: async (
-    limiter: {
-      limit: (k: string) => Promise<{ success: boolean; reset: number }>;
+vi.mock("$lib/server/ratelimit", async () => {
+  const { passThroughSafeLimit } = await import("../helpers");
+  return {
+    realtimeTokenLimiter: { limit: (...args: unknown[]) => limitMock(...args) },
+    realtimeTokenUserLimiter: {
+      limit: (...args: unknown[]) => userLimitMock(...args),
     },
-    key: string,
-  ) => {
-    try {
-      return await limiter.limit(key);
-    } catch {
-      return { success: true, reset: 0 };
-    }
-  },
-}));
+    safeLimit: passThroughSafeLimit,
+  };
+});
 
 const supabase = createMockSupabase();
 vi.mock("$lib/server/supabase", () => ({

@@ -8,11 +8,15 @@ vi.mock("$lib/server/auth", () => ({
   })),
 }));
 
-vi.mock("$lib/server/ratelimit", () => ({
-  transferConfirmLimiter: {
-    limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
-  },
-}));
+vi.mock("$lib/server/ratelimit", async () => {
+  const { passThroughSafeLimit } = await import("../helpers");
+  return {
+    transferConfirmLimiter: {
+      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+    },
+    safeLimit: passThroughSafeLimit,
+  };
+});
 
 const supabase = createMockSupabase();
 vi.mock("$lib/server/supabase", () => ({

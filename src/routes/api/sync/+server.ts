@@ -1,7 +1,7 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
-import { syncLimiter } from "$lib/server/ratelimit";
+import { syncLimiter, safeLimit } from "$lib/server/ratelimit";
 import { validateSyncPayload, processSync } from "$lib/server/sync";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
@@ -17,7 +17,11 @@ export const POST: RequestHandler = async ({ request }) => {
   const { device } = authResult;
 
   // 2. Rate limit by device ID
-  const { success, reset } = await syncLimiter.limit(device.id);
+  const { success, reset } = await safeLimit(
+    syncLimiter,
+    device.id,
+    "sync:device",
+  );
   if (!success) {
     const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
     return jsonError(429, "rate_limited", "Too many sync requests", retryAfter);

@@ -5,10 +5,67 @@ import {
   UPSTASH_REDIS_REST_TOKEN,
 } from "$env/static/private";
 
+// `@upstash/redis` defaults to 3 retries with exponential backoff (~4.3 s
+// total hold) before surfacing the error. Every request-path Redis call —
+// rate limit checks, pairing-token storage, pairing-token lookup —
+// inherits that budget. Under an Upstash outage, every in-flight request
+// would block on the retry budget for 4+ s before failing or falling open,
+// saturating Vercel function instances and turning a partial-Redis outage
+// into a Librito-wide 504 storm.
+//
+// Fail fast instead. Pairing-write fails closed via the existing
+// rollback_claim_pairing path (PR #40); pairing-read catches the throw
+// and returns code_expired so the device retries on the next 3 s poll
+// (`checkPairingStatus` and `claimPairingCode` replay-path in
+// pairing.ts); ratelimit consumers wrap `.limit()` in `safeLimit` below
+// so a Redis fail surfaces as fail-open (allow the request) rather than
+// 5xx. See audit issue P6.
+const UPSTASH_RETRY_BUDGET = 0;
+
 export const redis = new Redis({
   url: UPSTASH_REDIS_REST_URL,
   token: UPSTASH_REDIS_REST_TOKEN,
+  retry: { retries: UPSTASH_RETRY_BUDGET },
 });
+
+/**
+ * Wrap a `Ratelimit.limit()` call so an Upstash outage fails open (allow
+ * the request) instead of surfacing 5xx.
+ *
+ * Rationale: rate limits are an availability guard, not a security
+ * boundary. The downstream business logic still enforces the actual
+ * security invariants (auth, RLS, token hash lookup, claim atomicity).
+ * The cost of allowing a request during a partial-Upstash outage is one
+ * unmetered request per route hit; the cost of NOT allowing it is a
+ * 504-storm cascade that brings down endpoints with no actual rate-check
+ * work to do.
+ *
+ * Logs `ratelimit.upstash_unreachable` with the supplied `label` so an
+ * operator can correlate the throw across rate-limiter prefixes. The raw
+ * `key` is intentionally not logged — for unauth pair routes it would be
+ * the client IP, and for `pair:claim` it would be `${code}:${ip}` where
+ * the pairing code is a 5-min credential. The `label` plus the structured
+ * `error.message`/`stack` is enough for outage forensics without putting
+ * PII or credentials into log retention.
+ */
+export async function safeLimit(
+  limiter: Ratelimit,
+  key: string,
+  label: string,
+): Promise<{ success: boolean; reset: number }> {
+  try {
+    return await limiter.limit(key);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error("ratelimit.upstash_unreachable", {
+      limiter: label,
+      error,
+      stack,
+    });
+    return { success: true, reset: 0 };
+  }
+}
 
 // /api/pair/request — 3 requests per minute per IP
 export const pairRequestLimiter = new Ratelimit({

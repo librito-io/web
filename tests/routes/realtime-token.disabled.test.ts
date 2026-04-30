@@ -29,12 +29,16 @@ vi.mock("$lib/server/auth", async (importOriginal) => {
 
 const limitMock = vi.fn();
 const userLimitMock = vi.fn();
-vi.mock("$lib/server/ratelimit", () => ({
-  realtimeTokenLimiter: { limit: (...args: unknown[]) => limitMock(...args) },
-  realtimeTokenUserLimiter: {
-    limit: (...args: unknown[]) => userLimitMock(...args),
-  },
-}));
+vi.mock("$lib/server/ratelimit", async () => {
+  const { passThroughSafeLimit } = await import("../helpers");
+  return {
+    realtimeTokenLimiter: { limit: (...args: unknown[]) => limitMock(...args) },
+    realtimeTokenUserLimiter: {
+      limit: (...args: unknown[]) => userLimitMock(...args),
+    },
+    safeLimit: passThroughSafeLimit,
+  };
+});
 
 const supabase = createMockSupabase();
 vi.mock("$lib/server/supabase", () => ({

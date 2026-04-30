@@ -4,11 +4,15 @@ import { createMockSupabase } from "../helpers";
 
 // Mocks must be declared before importing the route module because route
 // imports $env/static/private transitively via ratelimit.ts / supabase.ts.
-vi.mock("$lib/server/ratelimit", () => ({
-  transferUploadLimiter: {
-    limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
-  },
-}));
+vi.mock("$lib/server/ratelimit", async () => {
+  const { passThroughSafeLimit } = await import("../helpers");
+  return {
+    transferUploadLimiter: {
+      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+    },
+    safeLimit: passThroughSafeLimit,
+  };
+});
 
 const supabase = createMockSupabase();
 vi.mock("$lib/server/supabase", () => ({

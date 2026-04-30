@@ -2,20 +2,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
-vi.mock("$lib/server/ratelimit", () => ({
-  transferUploadLimiter: {
-    limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
-  },
-  transferDownloadLimiter: {
-    limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
-  },
-  transferConfirmLimiter: {
-    limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
-  },
-  transferRetryLimiter: {
-    limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
-  },
-}));
+vi.mock("$lib/server/ratelimit", async () => {
+  const { passThroughSafeLimit } = await import("../helpers");
+  return {
+    transferUploadLimiter: {
+      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+    },
+    transferDownloadLimiter: {
+      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+    },
+    transferConfirmLimiter: {
+      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+    },
+    transferRetryLimiter: {
+      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+    },
+    safeLimit: passThroughSafeLimit,
+  };
+});
 
 const supabase = createMockSupabase();
 vi.mock("$lib/server/supabase", () => ({

@@ -81,7 +81,21 @@ export async function checkPairingStatus(
 
   if (!data.claimed) return { paired: false };
 
-  const token = await redis.get(`pair:token:${pairingId}`);
+  // Redis client is configured with retries:0 (see ratelimit.ts header).
+  // A transient throw here would otherwise surface as a 500 to the device,
+  // breaking the documented contract that pairing-read returns
+  // code_expired so the device retries on the next 3 s poll. The 5-min
+  // pairing-code TTL absorbs the missed poll.
+  let token: string | null;
+  try {
+    token = await redis.get(`pair:token:${pairingId}`);
+  } catch (err) {
+    console.error("pairing.redis_token_read_failed", {
+      pairingId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { error: "code_expired" };
+  }
   if (!token) return { error: "code_expired" };
 
   // user_email denormalised onto pairing_codes — see migration 20260430000006.
@@ -222,8 +236,18 @@ export async function claimPairingCode(
     // ago. If that key has already expired or been evicted, the device-side
     // poller would loop on code_expired while we returned a deviceId — a
     // dishonest 200. Surface code_expired to the browser so the user
-    // re-initiates pairing with a fresh code.
-    const existingToken = await redis.get(`pair:token:${pairingCode.id}`);
+    // re-initiates pairing with a fresh code. Same retries:0 throw-handling
+    // as checkPairingStatus above.
+    let existingToken: string | null;
+    try {
+      existingToken = await redis.get(`pair:token:${pairingCode.id}`);
+    } catch (err) {
+      console.error("pairing.redis_token_read_failed", {
+        pairingId: pairingCode.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { error: "code_expired" };
+    }
     if (!existingToken) return { error: "code_expired" };
   }
 

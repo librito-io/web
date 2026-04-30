@@ -99,11 +99,8 @@ function exceedsLength(
   return typeof obj[field] === "string" && (obj[field] as string).length > max;
 }
 
-// Range validation for the (chapter, startWord, endWord) tuple shared by
-// `highlights` and `deletedHighlights`. Returns the error string on failure
-// or null on success. Bounds: chapter is a Postgres smallint (0..32767);
-// word indices fit in a Postgres int (0..2^31-1); endWord >= startWord
-// (single-word highlights allowed — see migration 20260429000007).
+// Per-row range guard for highlights & deletedHighlights. Bounds match
+// Postgres column types. endWord >= startWord allows single-word highlights.
 function validateRange(
   obj: Record<string, unknown>,
   label: "Highlight" | "Deleted highlight",
@@ -127,10 +124,11 @@ function validateRange(
   if (
     typeof obj.endWord !== "number" ||
     !Number.isInteger(obj.endWord) ||
+    obj.endWord < 0 ||
     obj.endWord < obj.startWord ||
     obj.endWord > 2_147_483_647
   ) {
-    return `${label} endWord must not be less than startWord`;
+    return `${label} endWord must be an integer in [startWord, 2147483647]`;
   }
   return null;
 }

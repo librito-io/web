@@ -2,10 +2,7 @@ import { Resend } from "resend";
 import { RESEND_API_KEY } from "$env/static/private";
 import welcomeHtml from "../../../supabase/templates/welcome.html?raw";
 
-// One-shot warning at module load when RESEND_API_KEY is absent. The
-// per-signup log-and-skip pattern this replaces produced spurious noise
-// on self-host installs that intentionally ran without Resend; operators
-// reading their startup log get one clear signal here instead.
+// One warn at module load; per-call would spam self-host logs.
 if (!RESEND_API_KEY) {
   console.warn(
     "email.resend_unconfigured: RESEND_API_KEY not set — welcome emails will be silently skipped. " +

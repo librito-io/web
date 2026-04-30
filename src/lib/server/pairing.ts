@@ -29,21 +29,18 @@ type ClaimResult =
         | "server_error";
     };
 
-// Pairing codes expire after 5 minutes; align Redis TTL so the token lives
-// exactly as long as the code that produced it.
-const PAIR_REDIS_TTL_SEC = 300;
+// Single source of truth for pairing-code lifetime: drives Postgres
+// `expires_at`, Redis token TTL, and the `expiresIn` response field.
+const PAIRING_CODE_TTL_SEC = 300;
 
 export async function requestPairingCode(
   supabase: SupabaseClient,
   hardwareId: string,
 ): Promise<PairingResult> {
-  // One-shot collision retry. Postgres unique-violation (23505) on the
-  // pairing_codes.code column means we randomly generated a still-live
-  // code; re-roll once. Loop avoids exposing a recursion-state param in
-  // the public signature.
+  // Re-roll once on PG unique violation (random code collision with a still-live row).
   for (let attempt = 0; attempt < 2; attempt++) {
     const code = generatePairingCode();
-    const expiresAt = new Date(Date.now() + PAIR_REDIS_TTL_SEC * 1000);
+    const expiresAt = new Date(Date.now() + PAIRING_CODE_TTL_SEC * 1000);
 
     const { data, error } = await supabase
       .from("pairing_codes")
@@ -56,7 +53,7 @@ export async function requestPairingCode(
       .single();
 
     if (!error) {
-      return { code, pairingId: data.id, expiresIn: PAIR_REDIS_TTL_SEC };
+      return { code, pairingId: data.id, expiresIn: PAIRING_CODE_TTL_SEC };
     }
     if (error.code !== "23505") {
       throw new Error(`Failed to create pairing code: ${error.message}`);
@@ -198,7 +195,7 @@ export async function claimPairingCode(
   if (row.won) {
     try {
       await redis.set(`pair:token:${pairingCode.id}`, token, {
-        ex: PAIR_REDIS_TTL_SEC,
+        ex: PAIRING_CODE_TTL_SEC,
       });
     } catch (err) {
       console.error("pairing.redis_token_write_failed", {
@@ -221,7 +218,7 @@ export async function claimPairingCode(
       return { error: "server_error" };
     }
   } else {
-    // Replay path: the original winner wrote Redis up to PAIR_REDIS_TTL_SEC
+    // Replay path: the original winner wrote Redis up to PAIRING_CODE_TTL_SEC
     // ago. If that key has already expired or been evicted, the device-side
     // poller would loop on code_expired while we returned a deviceId — a
     // dishonest 200. Surface code_expired to the browser so the user

@@ -41,6 +41,34 @@ describe("requestPairingCode", () => {
 
     await expect(requestPairingCode(supabase, "hw-1")).rejects.toThrow();
   });
+
+  it("retries once on unique-violation and returns the second attempt", async () => {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("pairing_codes.insert", [
+      { data: null, error: { code: "23505", message: "unique violation" } },
+      { data: { id: "pairing-uuid-retry" }, error: null },
+    ]);
+
+    const result = await requestPairingCode(supabase, "hw-1");
+
+    expect(result).toEqual({
+      code: "482901",
+      pairingId: "pairing-uuid-retry",
+      expiresIn: 300,
+    });
+  });
+
+  it("throws after two consecutive unique-violations (retry exhausted)", async () => {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("pairing_codes.insert", [
+      { data: null, error: { code: "23505", message: "unique violation" } },
+      { data: null, error: { code: "23505", message: "unique violation" } },
+    ]);
+
+    await expect(requestPairingCode(supabase, "hw-1")).rejects.toThrow(
+      /retry exhausted/,
+    );
+  });
 });
 
 describe("checkPairingStatus", () => {

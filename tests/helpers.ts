@@ -10,6 +10,19 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  */
 export function createMockSupabase() {
   const results = new Map<string, { data: unknown; error: unknown }>();
+  // Queued results dequeue once per chain resolution, then fall through to
+  // `results`. Use for sequential-attempt scenarios (e.g. retry after
+  // unique-violation) where the same `<table>.<op>` key resolves to
+  // different values across calls.
+  const resultsQueue = new Map<
+    string,
+    Array<{ data: unknown; error: unknown }>
+  >();
+  function consume(key: string): { data: unknown; error: unknown } {
+    const queue = resultsQueue.get(key);
+    if (queue && queue.length > 0) return queue.shift()!;
+    return results.get(key) ?? { data: null, error: null };
+  }
   const storageResults = new Map<string, { data: unknown; error: unknown }>();
   // Records every `.from(table).upsert(rows, opts)` invocation so tests can
   // assert payload shape (e.g. that a column is intentionally omitted).
@@ -21,7 +34,7 @@ export function createMockSupabase() {
     const chain: Record<string, unknown> = {};
 
     const terminal = () => {
-      const raw = results.get(key) ?? { data: null, error: null };
+      const raw = consume(key);
       // Mirror real Supabase: .single()/.maybeSingle() returns a scalar row.
       // Tests often set `data: []` or `data: [row]` on the same select key
       // (because the handler also uses it for non-terminal awaits); unwrap
@@ -36,7 +49,7 @@ export function createMockSupabase() {
     const handler: ProxyHandler<Record<string, unknown>> = {
       get(_, prop: string) {
         if (prop === "then") {
-          const result = results.get(key) ?? { data: null, error: null };
+          const result = consume(key);
           return (onFulfilled: (value: unknown) => unknown) =>
             Promise.resolve(onFulfilled(result));
         }
@@ -171,6 +184,7 @@ export function createMockSupabase() {
     storage: { from: storageBucket },
     rpc,
     _results: results,
+    _resultsQueue: resultsQueue,
     _storage: storageResults,
     _storageSpy: storageSpy,
     _upsertCalls: upsertCalls,
@@ -180,6 +194,7 @@ export function createMockSupabase() {
 
   return client as unknown as SupabaseClient & {
     _results: Map<string, { data: unknown; error: unknown }>;
+    _resultsQueue: Map<string, Array<{ data: unknown; error: unknown }>>;
     _storage: Map<string, { data: unknown; error: unknown }>;
     _storageSpy: typeof storageSpy;
     _upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }>;

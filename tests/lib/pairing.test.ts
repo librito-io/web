@@ -126,31 +126,32 @@ describe("checkPairingStatus", () => {
   });
 });
 
+// Helper: stash a successful pairing_codes lookup against a future expiry so
+// the per-test setup focuses on the RPC return shape (the part each scenario
+// actually exercises). Returns the pairing_id used so tests can assert
+// rpc args / Redis keys.
+function setupValidLookup(
+  supabase: ReturnType<typeof createMockSupabase>,
+): string {
+  const pairingId = "pairing-uuid";
+  supabase._results.set("pairing_codes.select", {
+    data: {
+      id: pairingId,
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+    },
+    error: null,
+  });
+  return pairingId;
+}
+
 describe("claimPairingCode", () => {
-  it("validates code, creates device, stores token in redis", async () => {
+  it("delegates atomic claim to claim_pairing_atomic RPC; winner writes Redis", async () => {
     const supabase = createMockSupabase();
     const redis = createMockRedis();
-
-    // Code lookup
-    supabase._results.set("pairing_codes.select", {
-      data: {
-        id: "pairing-uuid",
-        hardware_id: "hw-device-1",
-        claimed: false,
-        expires_at: new Date(Date.now() + 60000).toISOString(),
-        user_id: null,
-      },
-      error: null,
-    });
-    // Code update (mark claimed)
-    supabase._results.set("pairing_codes.update", { data: null, error: null });
-    // Device insert path (no existing device)
-    supabase._results.set("devices.select", {
-      data: null,
-      error: { code: "PGRST116" },
-    });
-    supabase._results.set("devices.insert", {
-      data: { id: "device-uuid", name: "Librito" },
+    const pairingId = setupValidLookup(supabase);
+    const rpcSpy = vi.spyOn(supabase, "rpc");
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [{ device_id: "device-uuid", device_name: "Librito", won: true }],
       error: null,
     });
 
@@ -165,33 +166,35 @@ describe("claimPairingCode", () => {
       deviceId: "device-uuid",
       deviceName: "Librito",
     });
+    expect(rpcSpy).toHaveBeenCalledWith("claim_pairing_atomic", {
+      p_user_id: "user-uuid",
+      p_pairing_id: pairingId,
+      p_token_hash:
+        "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+    });
     expect(redis.set).toHaveBeenCalledWith(
-      "pair:token:pairing-uuid",
+      `pair:token:${pairingId}`,
       "sk_device_test_token_abc123",
       { ex: 300 },
     );
   });
 
-  it("re-pairs existing device by updating token hash and clearing revoked_at", async () => {
+  it("idempotent replay (won=false) returns the existing device WITHOUT writing Redis", async () => {
+    // Same-user retry path. Browser's first claim succeeded but the response
+    // dropped (Safari keep-alive); the second request must NOT clobber the
+    // winner's Redis token (mismatch with devices.api_token_hash would 401
+    // the device on next /api/sync).
     const supabase = createMockSupabase();
     const redis = createMockRedis();
-
-    supabase._results.set("pairing_codes.select", {
-      data: {
-        id: "pairing-uuid-2",
-        hardware_id: "hw-device-1",
-        claimed: false,
-        expires_at: new Date(Date.now() + 60000).toISOString(),
-        user_id: null,
-      },
+    const pairingId = setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [{ device_id: "device-uuid", device_name: "Librito", won: false }],
       error: null,
     });
-    supabase._results.set("pairing_codes.update", { data: null, error: null });
-    supabase._results.set("devices.select", {
-      data: { id: "existing-device-uuid", name: "My Reader" },
-      error: null,
+    // Original winner's token still alive in Redis — replay must succeed.
+    await redis.set(`pair:token:${pairingId}`, "sk_device_winner_token", {
+      ex: 300,
     });
-    supabase._results.set("devices.update", { data: null, error: null });
 
     const result = await claimPairingCode(
       supabase,
@@ -201,29 +204,93 @@ describe("claimPairingCode", () => {
     );
 
     expect(result).toEqual({
-      deviceId: "existing-device-uuid",
-      deviceName: "My Reader",
+      deviceId: "device-uuid",
+      deviceName: "Librito",
     });
+    // The replay-side mutation must not call redis.set; we only assert
+    // setup's pre-seed call here, no post-RPC writes.
+    expect(redis.set).toHaveBeenCalledTimes(1);
     expect(redis.set).toHaveBeenCalledWith(
-      "pair:token:pairing-uuid-2",
-      "sk_device_test_token_abc123",
+      `pair:token:${pairingId}`,
+      "sk_device_winner_token",
       { ex: 300 },
     );
   });
 
-  it("returns code_expired for expired codes", async () => {
+  it("replay after Redis TTL expiry returns code_expired (no dishonest 200)", async () => {
+    // Replay path with the original winner's Redis token already evicted.
+    // Browser must NOT receive a deviceId while the device-side poller is
+    // stuck on code_expired; force the user back through a fresh claim.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [{ device_id: "device-uuid", device_name: "Librito", won: false }],
+      error: null,
+    });
+    // Redis empty: pair:token:* was never written or has expired.
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "code_expired" });
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  it("returns already_claimed when RPC returns no rows (different user holds claim)", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [],
+      error: null,
+    });
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "already_claimed" });
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  it("returns already_claimed when RPC returns null (defensive)", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: null,
+      error: null,
+    });
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "already_claimed" });
+  });
+
+  it("returns code_expired for expired codes (short-circuits RPC)", async () => {
     const supabase = createMockSupabase();
     const redis = createMockRedis();
     supabase._results.set("pairing_codes.select", {
       data: {
         id: "old-uuid",
-        hardware_id: "hw-1",
-        claimed: false,
         expires_at: new Date(Date.now() - 5000).toISOString(),
-        user_id: null,
       },
       error: null,
     });
+    const rpcSpy = vi.spyOn(supabase, "rpc");
 
     const result = await claimPairingCode(
       supabase,
@@ -231,88 +298,9 @@ describe("claimPairingCode", () => {
       "user-uuid",
       "111111",
     );
+
     expect(result).toEqual({ error: "code_expired" });
-  });
-
-  it("replays idempotently when the same user re-claims a code they already own", async () => {
-    // Safari/WebKit can silently drop a successful claim response; the browser
-    // retries and must not get stuck on "already_claimed".
-    const supabase = createMockSupabase();
-    const redis = createMockRedis();
-    supabase._results.set("pairing_codes.select", {
-      data: {
-        id: "claimed-uuid",
-        hardware_id: "hw-1",
-        claimed: true,
-        expires_at: new Date(Date.now() + 60000).toISOString(),
-        user_id: "user-uuid",
-      },
-      error: null,
-    });
-    supabase._results.set("devices.select", {
-      data: { id: "device-uuid", name: "Librito" },
-      error: null,
-    });
-
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "222222",
-    );
-    expect(result).toEqual({
-      deviceId: "device-uuid",
-      deviceName: "Librito",
-    });
-    // Must not touch the token: prior claim remains authoritative.
-    expect(redis.set).not.toHaveBeenCalled();
-  });
-
-  it("rejects cross-user replay of a claimed code", async () => {
-    const supabase = createMockSupabase();
-    const redis = createMockRedis();
-    supabase._results.set("pairing_codes.select", {
-      data: {
-        id: "claimed-uuid",
-        hardware_id: "hw-1",
-        claimed: true,
-        expires_at: new Date(Date.now() + 60000).toISOString(),
-        user_id: "owner-user",
-      },
-      error: null,
-    });
-
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "attacker-user",
-      "222222",
-    );
-    expect(result).toEqual({ error: "already_claimed" });
-  });
-
-  it("returns already_claimed when the matching device row cannot be located on replay", async () => {
-    const supabase = createMockSupabase();
-    const redis = createMockRedis();
-    supabase._results.set("pairing_codes.select", {
-      data: {
-        id: "claimed-uuid",
-        hardware_id: "hw-1",
-        claimed: true,
-        expires_at: new Date(Date.now() + 60000).toISOString(),
-        user_id: "user-uuid",
-      },
-      error: null,
-    });
-    supabase._results.set("devices.select", { data: null, error: null });
-
-    const result = await claimPairingCode(
-      supabase,
-      redis,
-      "user-uuid",
-      "222222",
-    );
-    expect(result).toEqual({ error: "already_claimed" });
+    expect(rpcSpy).not.toHaveBeenCalled();
   });
 
   it("returns invalid_code when code does not exist", async () => {
@@ -320,7 +308,7 @@ describe("claimPairingCode", () => {
     const redis = createMockRedis();
     supabase._results.set("pairing_codes.select", {
       data: null,
-      error: { code: "PGRST116" },
+      error: null,
     });
 
     const result = await claimPairingCode(
@@ -329,6 +317,159 @@ describe("claimPairingCode", () => {
       "user-uuid",
       "999999",
     );
+
     expect(result).toEqual({ error: "invalid_code" });
+  });
+
+  it("returns server_error when pairing_codes lookup itself errors", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    supabase._results.set("pairing_codes.select", {
+      data: null,
+      error: { code: "08006", message: "connection failure" },
+    });
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "server_error" });
+  });
+
+  it("returns server_error when claim_pairing_atomic RPC errors", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: null,
+      error: { message: "connection failure" },
+    });
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "server_error" });
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  it("returns server_error when RPC returns a row missing required fields (schema drift)", async () => {
+    // Defends against the cast at the firstRow boundary: a future RPC schema
+    // change that drops or renames a column must not silently emit a
+    // deviceId/deviceName=undefined response.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [{ device_id: "device-uuid" }], // missing device_name + won
+      error: null,
+    });
+
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "server_error" });
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  it("rolls back via rollback_claim_pairing RPC when Redis write throws", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    const pairingId = setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [{ device_id: "device-uuid", device_name: "Librito", won: true }],
+      error: null,
+    });
+    redis.set.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+
+    const rpcSpy = vi.spyOn(supabase, "rpc");
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "server_error" });
+    // Two RPC calls: claim_pairing_atomic then rollback_claim_pairing.
+    expect(rpcSpy).toHaveBeenCalledTimes(2);
+    expect(rpcSpy).toHaveBeenNthCalledWith(2, "rollback_claim_pairing", {
+      p_pairing_id: pairingId,
+      p_user_id: "user-uuid",
+    });
+  });
+
+  it("returns server_error and logs when rollback_claim_pairing RPC itself errors", async () => {
+    // Redis fails -> rollback is invoked -> rollback RPC also fails. The
+    // outer return must still surface server_error (not leak success), and
+    // we should log both failures so an operator can correlate them.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    const pairingId = setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [{ device_id: "device-uuid", device_name: "Librito", won: true }],
+      error: null,
+    });
+    supabase._results.set("rpc.rollback_claim_pairing", {
+      data: null,
+      error: { message: "rollback connection failure" },
+    });
+    redis.set.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const rpcSpy = vi.spyOn(supabase, "rpc");
+    const result = await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "482901",
+    );
+
+    expect(result).toEqual({ error: "server_error" });
+    expect(rpcSpy).toHaveBeenCalledTimes(2);
+    expect(rpcSpy).toHaveBeenNthCalledWith(2, "rollback_claim_pairing", {
+      p_pairing_id: pairingId,
+      p_user_id: "user-uuid",
+    });
+    // Both failure events must be logged (Redis + rollback RPC).
+    expect(errorSpy).toHaveBeenCalledWith(
+      "pairing.redis_token_write_failed",
+      expect.any(Object),
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      "pairing.rollback_rpc_failed",
+      expect.any(Object),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("does NOT invoke rollback when Redis write succeeds", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [{ device_id: "device-uuid", device_name: "Librito", won: true }],
+      error: null,
+    });
+    const rpcSpy = vi.spyOn(supabase, "rpc");
+
+    await claimPairingCode(supabase, redis, "user-uuid", "482901");
+
+    // Exactly one RPC call: claim_pairing_atomic. No rollback.
+    expect(rpcSpy).toHaveBeenCalledTimes(1);
+    expect(rpcSpy).toHaveBeenCalledWith(
+      "claim_pairing_atomic",
+      expect.any(Object),
+    );
   });
 });

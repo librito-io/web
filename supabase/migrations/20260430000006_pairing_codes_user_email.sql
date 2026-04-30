@@ -35,17 +35,34 @@ COMMENT ON COLUMN public.pairing_codes.user_email IS
   'Denormalised auth.users.email at claim time. Stamped by '
   'claim_pairing_atomic (see 20260430000006) so '
   'src/lib/server/pairing.ts:checkPairingStatus can return it '
-  'without a gotrue round-trip per poll. NULL until claimed. '
+  'without a gotrue round-trip per poll. NULL until claimed, and '
+  'NULL-permitted post-claim too — operators may wire auth flows '
+  '(phone, OAuth-without-email scope) that produce session users '
+  'with no email. The read side surfaces NULL as empty string. '
   'Stale only if the user mutates their auth email AFTER claim '
   'but BEFORE the device finishes polling — harmless for the '
   'one-time confirmation UX. Audit issue P4.';
 
+-- Backfill any pre-existing claimed rows from auth.users so a
+-- deploy that lands during an active pairing window does not
+-- briefly surface empty userEmail to the device. Safe and cheap:
+-- pairing_codes is small/transient (5-min TTL); the join touches
+-- only claimed rows that survived migration. Self-heals within
+-- 5 minutes regardless, but the backfill closes the seam.
+UPDATE public.pairing_codes pc
+   SET user_email = au.email
+  FROM auth.users au
+ WHERE pc.user_id = au.id
+   AND pc.claimed = true
+   AND pc.user_email IS NULL;
+
 -- Drop the 3-arg signature so it cannot be invoked. The 4-arg
--- version below replaces it; existing call sites in
--- src/lib/server/pairing.ts will be updated in lockstep.
+-- version below is a fresh CREATE (different signature, not a
+-- replace) — plain `CREATE FUNCTION` will fail loudly if a re-run
+-- finds the function still present, which is the right signal.
 DROP FUNCTION IF EXISTS public.claim_pairing_atomic(uuid, uuid, text);
 
-CREATE OR REPLACE FUNCTION public.claim_pairing_atomic(
+CREATE FUNCTION public.claim_pairing_atomic(
   p_user_id    uuid,
   p_pairing_id uuid,
   p_token_hash text,
@@ -131,6 +148,11 @@ COMMENT ON FUNCTION public.claim_pairing_atomic(uuid, uuid, text, text) IS
 -- the row's denorm fields stay consistent with the claim flag.
 -- Signature unchanged, so the GRANT in 20260430000004 carries
 -- over.
+--
+-- Asymmetry rationale (do NOT delete the device row): see header
+-- of 20260430000004_create_rollback_claim_pairing_fn.sql. A
+-- contributor reading this migration first via grep should land
+-- on the canonical explanation rather than reinvent it.
 CREATE OR REPLACE FUNCTION public.rollback_claim_pairing(
   p_pairing_id uuid,
   p_user_id    uuid

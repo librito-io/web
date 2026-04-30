@@ -8,22 +8,23 @@
 -- explicit REVOKE documents intent and survives any future RLS policy
 -- that grants SELECT/UPDATE.
 --
--- WHY THE DO BLOCK: this file originally contained four bare statements
--- (3 REVOKE + 1 GRANT). The Supabase CLI v2.90 prepared-statement parser
--- sometimes sends multi-statement files as a single Parse message, hitting
--- Postgres SQLSTATE 42601 ("cannot insert multiple commands into a
--- prepared statement"). The trigger is inconsistent — it caught us during
--- production `supabase db push` even though local `db reset` had passed
--- with the earlier single-GRANT shape. Wrapping in a DO block collapses
--- the file to a single statement from the parser's perspective. Direct
--- psql ingestion of the bare-statement form works fine; this is purely
--- a CLI workaround.
+-- HISTORICAL NOTE — DO BLOCK WORKAROUND, NOW REMOVED:
+-- This file's original PR (#41) wrapped the four access-control statements
+-- in a DO $$ ... $$; block to dodge a Supabase CLI v2.90 parser bug. The
+-- bug, fixed in CLI v2.91.1 (supabase/cli#5064 "atomic parser"), was that
+-- the SQL splitter treated the substring "atomic" inside any identifier
+-- (e.g. our `claim_pairing_atomic` function name) as the start of a
+-- `BEGIN ATOMIC ... END;` block, then bundled subsequent statements into
+-- one prepared-statement Parse message and tripped Postgres SQLSTATE 42601
+-- ("cannot insert multiple commands into a prepared statement"). The
+-- "inconsistent trigger" the audit described was actually deterministic
+-- and keyed on the substring "atomic" in the function name — not flaky
+-- parsing. CI is now pinned to v2.95.4 (>= 2.91.1) so the wrapper is dead
+-- weight; bare REVOKE+GRANT applies cleanly via local `db reset` and prod
+-- `db push`. CLI downgrades below 2.91.1 will re-break this file — pin
+-- bump in `.github/workflows/migration-smoke.yml` is load-bearing.
 
-DO $$
-BEGIN
-  REVOKE ALL ON FUNCTION public.claim_pairing_atomic(uuid, uuid, text) FROM PUBLIC;
-  REVOKE ALL ON FUNCTION public.claim_pairing_atomic(uuid, uuid, text) FROM anon;
-  REVOKE ALL ON FUNCTION public.claim_pairing_atomic(uuid, uuid, text) FROM authenticated;
-  GRANT EXECUTE ON FUNCTION public.claim_pairing_atomic(uuid, uuid, text) TO service_role;
-END;
-$$;
+REVOKE ALL ON FUNCTION public.claim_pairing_atomic(uuid, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.claim_pairing_atomic(uuid, uuid, text) FROM anon;
+REVOKE ALL ON FUNCTION public.claim_pairing_atomic(uuid, uuid, text) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_pairing_atomic(uuid, uuid, text) TO service_role;

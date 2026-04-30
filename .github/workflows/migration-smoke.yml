@@ -26,7 +26,7 @@ jobs:
           # Pinned to match the local + production push-context CLI version.
           # Bumping requires a coordinated bump of every contributor's local CLI
           # so the parser behaviour stays uniform across local / CI / prod.
-          version: 2.90.0
+          version: 2.95.4
 
       - run: supabase start
       - run: supabase db reset --local

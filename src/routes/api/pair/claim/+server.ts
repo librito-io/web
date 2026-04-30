@@ -39,7 +39,13 @@ export const POST: RequestHandler = async ({
   }
 
   const supabase = createAdminClient();
-  const result = await claimPairingCode(supabase, redis, user.id, code);
+  // user.email comes from the server-validated session; never read it from
+  // the request body (would let the device fake the displayed account).
+  const result = await claimPairingCode(supabase, redis, {
+    userId: user.id,
+    userEmail: user.email ?? null,
+    code,
+  });
 
   if ("error" in result) {
     const messages: Record<string, string> = {

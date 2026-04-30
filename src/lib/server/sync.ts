@@ -395,24 +395,29 @@ export async function processSync(
     });
 
     if (allDeletes.length > 0) {
-      await Promise.all(
-        allDeletes.map(async (del) => {
-          const { error: delError } = await supabase
-            .from("highlights")
-            .update({ deleted_at: nowIso })
-            .eq("book_id", del.bookId)
-            .eq("chapter_index", del.chapter)
-            .eq("start_word", del.startWord)
-            .eq("end_word", del.endWord)
-            .is("deleted_at", null);
+      // Batched soft-delete via Postgres RPC. The previous shape fired one
+      // round-trip UPDATE per deleted highlight in a Promise.all loop —
+      // capped at 25,000 statements per request worst case (500 deletes
+      // × 50 books). soft_delete_highlights collapses the whole set into
+      // one statement. See migration 20260430000005 and audit issue P1.
+      const rows = allDeletes.map((del) => ({
+        book_id: del.bookId,
+        chapter: del.chapter,
+        start_word: del.startWord,
+        end_word: del.endWord,
+      }));
 
-          if (delError) {
-            throw new Error(
-              `Failed to soft-delete highlight: ${delError.message}`,
-            );
-          }
-        }),
-      );
+      const { error: delError } = await supabase.rpc("soft_delete_highlights", {
+        p_user_id: userId,
+        p_now: nowIso,
+        p_rows: rows,
+      });
+
+      if (delError) {
+        throw new Error(
+          `Failed to soft-delete highlights: ${delError.message}`,
+        );
+      }
     }
   }
 

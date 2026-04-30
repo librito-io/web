@@ -450,7 +450,7 @@ function setupSyncMocks(
   const defaults: Record<string, { data: unknown; error: unknown }> = {
     "books.upsert": { data: [], error: null },
     "highlights.upsert": { data: null, error: null },
-    "highlights.update": { data: null, error: null },
+    "rpc.soft_delete_highlights": { data: 0, error: null },
     "notes.select": { data: [], error: null },
     "notes.select.deleted": { data: [], error: null },
     "highlights.select": { data: [], error: null },
@@ -1136,5 +1136,157 @@ describe("processSync", () => {
         endWord: 150,
       },
     ]);
+  });
+});
+
+describe("processSync soft-delete RPC batching", () => {
+  // Audit issue P1: the previous shape fired one round-trip UPDATE per
+  // deleted highlight in a Promise.all loop, capped at 25,000 statements
+  // per request worst case. The refactor batches into a single RPC call.
+
+  it("invokes soft_delete_highlights RPC exactly once per sync, regardless of book/delete count", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "books.upsert": {
+        data: [
+          { id: "book-uuid-1", book_hash: "aaaa1111" },
+          { id: "book-uuid-2", book_hash: "bbbb2222" },
+          { id: "book-uuid-3", book_hash: "cccc3333" },
+          { id: "book-uuid-4", book_hash: "dddd4444" },
+          { id: "book-uuid-5", book_hash: "eeee5555" },
+        ],
+        error: null,
+      },
+      "rpc.soft_delete_highlights": { data: 100, error: null },
+    });
+
+    const books = [
+      "aaaa1111",
+      "bbbb2222",
+      "cccc3333",
+      "dddd4444",
+      "eeee5555",
+    ].map((bookHash) => ({
+      bookHash,
+      highlights: [],
+      deletedHighlights: Array.from({ length: 20 }, (_, i) => ({
+        chapter: 0,
+        startWord: i * 10,
+        endWord: i * 10 + 5,
+      })),
+    }));
+
+    await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 0,
+      books,
+    });
+
+    const rpcCalls = supabase._rpcCalls.filter(
+      (c) => c.name === "soft_delete_highlights",
+    );
+    expect(rpcCalls).toHaveLength(1);
+
+    // No per-row .from("highlights").update(...) calls — proves the loop is gone.
+    const highlightUpdates = supabase._updateCalls.filter(
+      (c) => c.table === "highlights",
+    );
+    expect(highlightUpdates).toHaveLength(0);
+  });
+
+  it("passes RPC args as { p_user_id, p_now, p_rows: [{book_id, chapter, start_word, end_word}, ...] }", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "books.upsert": {
+        data: [{ id: "book-uuid-1", book_hash: "aaaa1111" }],
+        error: null,
+      },
+    });
+
+    await processSync(supabase, "dev-1", "user-42", {
+      lastSyncedAt: 0,
+      books: [
+        {
+          bookHash: "aaaa1111",
+          highlights: [],
+          deletedHighlights: [
+            { chapter: 3, startWord: 100, endWord: 120 },
+            { chapter: 7, startWord: 500, endWord: 540 },
+          ],
+        },
+      ],
+    });
+
+    const call = supabase._rpcCalls.find(
+      (c) => c.name === "soft_delete_highlights",
+    );
+    expect(call).toBeDefined();
+    const args = call!.args as {
+      p_user_id: string;
+      p_now: string;
+      p_rows: Array<{
+        book_id: string;
+        chapter: number;
+        start_word: number;
+        end_word: number;
+      }>;
+    };
+    expect(args.p_user_id).toBe("user-42");
+    expect(typeof args.p_now).toBe("string");
+    expect(args.p_rows).toEqual([
+      { book_id: "book-uuid-1", chapter: 3, start_word: 100, end_word: 120 },
+      { book_id: "book-uuid-1", chapter: 7, start_word: 500, end_word: 540 },
+    ]);
+  });
+
+  it("does not invoke the RPC when the payload has zero deletedHighlights", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "books.upsert": {
+        data: [{ id: "book-uuid-1", book_hash: "aaaa1111" }],
+        error: null,
+      },
+    });
+
+    await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 0,
+      books: [
+        {
+          bookHash: "aaaa1111",
+          highlights: [{ chapter: 1, startWord: 0, endWord: 5, text: "hi" }],
+        },
+      ],
+    });
+
+    const rpcCalls = supabase._rpcCalls.filter(
+      (c) => c.name === "soft_delete_highlights",
+    );
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("throws when the RPC returns an error", async () => {
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase, {
+      "books.upsert": {
+        data: [{ id: "book-uuid-1", book_hash: "aaaa1111" }],
+        error: null,
+      },
+      "rpc.soft_delete_highlights": {
+        data: null,
+        error: { message: "constraint violation: highlights_user_id_fkey" },
+      },
+    });
+
+    await expect(
+      processSync(supabase, "dev-1", "user-1", {
+        lastSyncedAt: 0,
+        books: [
+          {
+            bookHash: "aaaa1111",
+            highlights: [],
+            deletedHighlights: [{ chapter: 0, startWord: 0, endWord: 5 }],
+          },
+        ],
+      }),
+    ).rejects.toThrow(/soft-delete highlights/i);
   });
 });

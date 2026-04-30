@@ -56,9 +56,27 @@ describe("safeLimit", () => {
       "ratelimit.upstash_unreachable",
       expect.objectContaining({
         limiter: "test:limiter",
-        key: "user-1",
-        error: expect.stringContaining("ECONNREFUSED"),
+        error: "ECONNREFUSED",
+        stack: expect.stringContaining("ECONNREFUSED"),
       }),
     );
+  });
+
+  it("does not log the raw rate-limit key (PII / credential hygiene)", async () => {
+    // For unauth pair routes the key is the client IP; for `pair:claim`
+    // the key is `${pairingCode}:${ip}`. Logging it on every Upstash
+    // failure would write PII (and a 5-min credential, in the claim case)
+    // into Vercel log retention. The label is enough to correlate.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const limiter = fakeLimiter(async () => {
+      throw new Error("upstash boom");
+    });
+
+    await safeLimit(limiter, "203.0.113.7", "pair:request");
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const payload = errorSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(payload.key).toBeUndefined();
+    expect(JSON.stringify(payload)).not.toContain("203.0.113.7");
   });
 });

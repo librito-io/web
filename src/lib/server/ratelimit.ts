@@ -37,7 +37,12 @@ export const redis = new Redis({
  * work to do.
  *
  * Logs `ratelimit.upstash_unreachable` with the supplied `label` so an
- * operator can correlate the throw across rate-limiter prefixes.
+ * operator can correlate the throw across rate-limiter prefixes. The raw
+ * `key` is intentionally not logged — for unauth pair routes it would be
+ * the client IP, and for `pair:claim` it would be `${code}:${ip}` where
+ * the pairing code is a 5-min credential. The `label` plus the structured
+ * `error.message`/`stack` is enough for outage forensics without putting
+ * PII or credentials into log retention.
  */
 export async function safeLimit(
   limiter: Ratelimit,
@@ -47,10 +52,12 @@ export async function safeLimit(
   try {
     return await limiter.limit(key);
   } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
     console.error("ratelimit.upstash_unreachable", {
       limiter: label,
-      key,
-      error: String(err),
+      error,
+      stack,
     });
     return { success: true, reset: 0 };
   }

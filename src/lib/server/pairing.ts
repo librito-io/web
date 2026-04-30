@@ -36,30 +36,35 @@ const PAIR_REDIS_TTL_SEC = 300;
 export async function requestPairingCode(
   supabase: SupabaseClient,
   hardwareId: string,
-  _retried = false,
 ): Promise<PairingResult> {
-  const code = generatePairingCode();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+  // One-shot collision retry. Postgres unique-violation (23505) on the
+  // pairing_codes.code column means we randomly generated a still-live
+  // code; re-roll once. Loop avoids exposing a recursion-state param in
+  // the public signature.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const code = generatePairingCode();
+    const expiresAt = new Date(Date.now() + PAIR_REDIS_TTL_SEC * 1000);
 
-  const { data, error } = await supabase
-    .from("pairing_codes")
-    .insert({
-      code,
-      hardware_id: hardwareId,
-      expires_at: expiresAt.toISOString(),
-    })
-    .select("id")
-    .single();
+    const { data, error } = await supabase
+      .from("pairing_codes")
+      .insert({
+        code,
+        hardware_id: hardwareId,
+        expires_at: expiresAt.toISOString(),
+      })
+      .select("id")
+      .single();
 
-  if (error) {
-    // Unique constraint violation = code collision (retry once)
-    if (error.code === "23505" && !_retried) {
-      return requestPairingCode(supabase, hardwareId, true);
+    if (!error) {
+      return { code, pairingId: data.id, expiresIn: PAIR_REDIS_TTL_SEC };
     }
-    throw new Error(`Failed to create pairing code: ${error.message}`);
+    if (error.code !== "23505") {
+      throw new Error(`Failed to create pairing code: ${error.message}`);
+    }
   }
-
-  return { code, pairingId: data.id, expiresIn: 300 };
+  throw new Error(
+    "Failed to create pairing code: unique-collision retry exhausted",
+  );
 }
 
 export async function checkPairingStatus(

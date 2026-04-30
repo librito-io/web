@@ -99,6 +99,42 @@ function exceedsLength(
   return typeof obj[field] === "string" && (obj[field] as string).length > max;
 }
 
+// Range validation for the (chapter, startWord, endWord) tuple shared by
+// `highlights` and `deletedHighlights`. Returns the error string on failure
+// or null on success. Bounds: chapter is a Postgres smallint (0..32767);
+// word indices fit in a Postgres int (0..2^31-1); endWord >= startWord
+// (single-word highlights allowed — see migration 20260429000007).
+function validateRange(
+  obj: Record<string, unknown>,
+  label: "Highlight" | "Deleted highlight",
+): string | null {
+  if (
+    typeof obj.chapter !== "number" ||
+    obj.chapter < 0 ||
+    !Number.isInteger(obj.chapter) ||
+    obj.chapter > 32767
+  ) {
+    return `${label} chapter must be a non-negative integer up to 32767`;
+  }
+  if (
+    typeof obj.startWord !== "number" ||
+    obj.startWord < 0 ||
+    !Number.isInteger(obj.startWord) ||
+    obj.startWord > 2_147_483_647
+  ) {
+    return `${label} startWord must be a non-negative integer`;
+  }
+  if (
+    typeof obj.endWord !== "number" ||
+    !Number.isInteger(obj.endWord) ||
+    obj.endWord < obj.startWord ||
+    obj.endWord > 2_147_483_647
+  ) {
+    return `${label} endWord must not be less than startWord`;
+  }
+  return null;
+}
+
 export function validateSyncPayload(
   body: unknown,
 ): { payload: SyncPayload } | { error: string } {
@@ -171,34 +207,8 @@ export function validateSyncPayload(
         return { error: "Each highlight must be an object" };
       }
       const hl = h as Record<string, unknown>;
-      if (
-        typeof hl.chapter !== "number" ||
-        hl.chapter < 0 ||
-        !Number.isInteger(hl.chapter) ||
-        hl.chapter > 32767
-      ) {
-        return {
-          error: "Highlight chapter must be a non-negative integer up to 32767",
-        };
-      }
-      if (
-        typeof hl.startWord !== "number" ||
-        hl.startWord < 0 ||
-        !Number.isInteger(hl.startWord) ||
-        hl.startWord > 2_147_483_647
-      ) {
-        return {
-          error: "Highlight startWord must be a non-negative integer",
-        };
-      }
-      if (
-        typeof hl.endWord !== "number" ||
-        !Number.isInteger(hl.endWord) ||
-        hl.endWord < (hl.startWord as number) ||
-        hl.endWord > 2_147_483_647
-      ) {
-        return { error: "Highlight endWord must not be less than startWord" };
-      }
+      const rangeError = validateRange(hl, "Highlight");
+      if (rangeError) return { error: rangeError };
       if (
         typeof hl.text !== "string" ||
         hl.text.length === 0 ||
@@ -231,9 +241,7 @@ export function validateSyncPayload(
         if (
           hl.paragraphBreaks.some(
             (n: unknown) =>
-              typeof n !== "number" ||
-              !Number.isInteger(n) ||
-              (n as number) < 0,
+              typeof n !== "number" || !Number.isInteger(n) || n < 0,
           )
         ) {
           return {
@@ -267,37 +275,8 @@ export function validateSyncPayload(
           return { error: "Each deleted highlight must be an object" };
         }
         const dl = d as Record<string, unknown>;
-        if (
-          typeof dl.chapter !== "number" ||
-          dl.chapter < 0 ||
-          !Number.isInteger(dl.chapter) ||
-          dl.chapter > 32767
-        ) {
-          return {
-            error:
-              "Deleted highlight chapter must be a non-negative integer up to 32767",
-          };
-        }
-        if (
-          typeof dl.startWord !== "number" ||
-          dl.startWord < 0 ||
-          !Number.isInteger(dl.startWord) ||
-          dl.startWord > 2_147_483_647
-        ) {
-          return {
-            error: "Deleted highlight startWord must be a non-negative integer",
-          };
-        }
-        if (
-          typeof dl.endWord !== "number" ||
-          !Number.isInteger(dl.endWord) ||
-          dl.endWord < (dl.startWord as number) ||
-          dl.endWord > 2_147_483_647
-        ) {
-          return {
-            error: "Deleted highlight endWord must not be less than startWord",
-          };
-        }
+        const rangeError = validateRange(dl, "Deleted highlight");
+        if (rangeError) return { error: rangeError };
       }
     }
   }

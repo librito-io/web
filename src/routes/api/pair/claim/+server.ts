@@ -39,7 +39,13 @@ export const POST: RequestHandler = async ({
   }
 
   const supabase = createAdminClient();
-  const result = await claimPairingCode(supabase, redis, user.id, code);
+  const result = await claimPairingCode(
+    supabase,
+    redis,
+    user.id,
+    user.email ?? "",
+    code,
+  );
 
   if ("error" in result) {
     const messages: Record<string, string> = {

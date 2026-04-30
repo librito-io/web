@@ -66,7 +66,35 @@ describe("checkPairingStatus", () => {
       data: {
         claimed: true,
         expires_at: new Date(Date.now() + 60000).toISOString(),
-        user_id: null,
+        user_email: "claimer@example.com",
+      },
+      error: null,
+    });
+    await redis.set("pair:token:pairing-uuid", "sk_device_test_token", {
+      ex: 300,
+    });
+
+    const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
+    expect(result).toEqual({
+      paired: true,
+      token: "sk_device_test_token",
+      userEmail: "claimer@example.com",
+    });
+  });
+
+  it("returns paired: true with empty userEmail when user_email column is null", async () => {
+    // Defensive: claim_pairing_atomic always stamps user_email at claim
+    // time, so this state shouldn't occur in practice — but historical
+    // pre-denorm rows may exist if a user paired before the migration
+    // landed and their pairing_codes row never expired (5 min TTL means
+    // this is a non-event for production but the contract still holds).
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_email: null,
       },
       error: null,
     });
@@ -89,7 +117,7 @@ describe("checkPairingStatus", () => {
       data: {
         claimed: true,
         expires_at: new Date(Date.now() + 60000).toISOString(),
-        user_id: null,
+        user_email: "claimer@example.com",
       },
       error: null,
     });
@@ -159,6 +187,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "482901",
     );
 
@@ -171,6 +200,7 @@ describe("claimPairingCode", () => {
       p_pairing_id: pairingId,
       p_token_hash:
         "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+      p_user_email: "user@example.com",
     });
     expect(redis.set).toHaveBeenCalledWith(
       `pair:token:${pairingId}`,
@@ -200,6 +230,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "482901",
     );
 
@@ -234,6 +265,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "482901",
     );
 
@@ -254,6 +286,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "482901",
     );
 
@@ -274,6 +307,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "482901",
     );
 
@@ -296,6 +330,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "111111",
     );
 
@@ -315,6 +350,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "999999",
     );
 
@@ -333,6 +369,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "482901",
     );
 
@@ -352,6 +389,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "482901",
     );
 
@@ -375,6 +413,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "482901",
     );
 
@@ -397,6 +436,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "482901",
     );
 
@@ -432,6 +472,7 @@ describe("claimPairingCode", () => {
       supabase,
       redis,
       "user-uuid",
+      "user@example.com",
       "482901",
     );
 
@@ -463,7 +504,13 @@ describe("claimPairingCode", () => {
     });
     const rpcSpy = vi.spyOn(supabase, "rpc");
 
-    await claimPairingCode(supabase, redis, "user-uuid", "482901");
+    await claimPairingCode(
+      supabase,
+      redis,
+      "user-uuid",
+      "user@example.com",
+      "482901",
+    );
 
     // Exactly one RPC call: claim_pairing_atomic. No rollback.
     expect(rpcSpy).toHaveBeenCalledTimes(1);

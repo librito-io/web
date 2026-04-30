@@ -69,7 +69,7 @@ export async function checkPairingStatus(
 ): Promise<StatusResult> {
   const { data, error } = await supabase
     .from("pairing_codes")
-    .select("claimed, expires_at, user_id")
+    .select("claimed, expires_at, user_email")
     .eq("id", pairingId)
     .single();
 
@@ -82,17 +82,10 @@ export async function checkPairingStatus(
   const token = await redis.get(`pair:token:${pairingId}`);
   if (!token) return { error: "code_expired" };
 
-  // Fetch the claimer's email from auth.users (device displays it in the
-  // Cloud submenu so the user can confirm the right account)
-  let userEmail = "";
-  if (data.user_id) {
-    const { data: userRes } = await supabase.auth.admin.getUserById(
-      data.user_id,
-    );
-    userEmail = userRes?.user?.email ?? "";
-  }
-
-  return { paired: true, token, userEmail };
+  // user_email is denormalised onto pairing_codes by claim_pairing_atomic
+  // (see migration 20260430000006). Replaces a per-poll
+  // auth.admin.getUserById gotrue round-trip.
+  return { paired: true, token, userEmail: data.user_email ?? "" };
 }
 
 // claim_pairing_atomic RPC return shape (one row or empty).
@@ -137,6 +130,7 @@ export async function claimPairingCode(
   supabase: SupabaseClient,
   redis: Redis,
   userId: string,
+  userEmail: string,
   code: string,
 ): Promise<ClaimResult> {
   const { data: pairingCode, error: lookupError } = await supabase
@@ -153,12 +147,17 @@ export async function claimPairingCode(
   const token = generateDeviceToken();
   const tokenHash = hashToken(token);
 
+  // user_email is denormalised into pairing_codes for the device-status
+  // poll's benefit (see migration 20260430000006 / audit P4). The route
+  // handler reads it from safeGetSession() — no auth.admin.getUserById
+  // round-trip needed.
   const { data: rpcRows, error: rpcError } = await supabase.rpc(
     "claim_pairing_atomic",
     {
       p_user_id: userId,
       p_pairing_id: pairingCode.id,
       p_token_hash: tokenHash,
+      p_user_email: userEmail,
     },
   );
 

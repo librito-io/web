@@ -11,7 +11,6 @@ import { DOWNLOAD_URL_TTL } from "$lib/server/transfer";
 export const GET: RequestHandler = async ({ request, params }) => {
   const supabase = createAdminClient();
 
-  // 1. Authenticate device
   const authResult = await authenticateDevice(request, supabase);
   if ("error" in authResult) {
     return authErrorResponse(authResult.error);
@@ -19,7 +18,6 @@ export const GET: RequestHandler = async ({ request, params }) => {
 
   const { device } = authResult;
 
-  // 2. Rate limit by device ID
   const limited = await enforceRateLimit(
     transferDownloadLimiter,
     device.id,
@@ -27,32 +25,30 @@ export const GET: RequestHandler = async ({ request, params }) => {
   );
   if (limited) return limited;
 
-  // 3. Fetch transfer and verify ownership + status
-  const { data: transfer, error: fetchError } = await supabase
+  const { data: rows, error: fetchError } = await supabase
     .from("book_transfers")
-    .select(
-      "id, user_id, device_id, status, storage_path, sha256, filename, file_size",
-    )
+    .select("id, user_id, device_id, status, storage_path, sha256, filename")
     .eq("id", params.id)
-    .maybeSingle();
+    .is("scrubbed_at", null);
 
   if (fetchError) {
     return jsonError(500, "server_error", "Failed to fetch transfer record");
   }
+
+  const transfer = Array.isArray(rows) ? (rows[0] ?? null) : rows;
 
   if (!transfer || transfer.user_id !== device.userId) {
     return jsonError(404, "not_found", "Transfer not found");
   }
 
   if (transfer.status !== "pending") {
-    return jsonError(404, "not_found", "Transfer not found");
+    return jsonError(409, "not_pending", "Transfer is not in pending status");
   }
 
   if (transfer.device_id !== null && transfer.device_id !== device.id) {
     return jsonError(404, "not_found", "Transfer not found");
   }
 
-  // 4. Generate signed download URL (1-hour TTL)
   const { data: urlData, error: urlError } = await supabase.storage
     .from("book-transfers")
     .createSignedUrl(transfer.storage_path, DOWNLOAD_URL_TTL);
@@ -68,12 +64,10 @@ export const GET: RequestHandler = async ({ request, params }) => {
     ttl: DOWNLOAD_URL_TTL,
   });
 
-  // 5. Return URL + metadata
   return jsonSuccess({
-    url: urlData.signedUrl,
+    downloadUrl: urlData.signedUrl,
+    transferId: transfer.id,
     sha256: transfer.sha256,
     filename: transfer.filename,
-    fileSize: transfer.file_size,
-    expiresIn: DOWNLOAD_URL_TTL,
   });
 };

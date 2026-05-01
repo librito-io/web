@@ -1,10 +1,22 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { jwtVerify, importJWK } from "jose";
 import {
   mintRealtimeToken,
   REALTIME_TOKEN_TTL_SECONDS,
 } from "$lib/server/realtime";
 import { DEV_STANDBY_JWK, DEV_KID } from "../fixtures/dev-jwk";
+
+// Spy on importJWK while delegating to the real implementation. The
+// realtime module imports `importJWK` from "jose" at module load, so the
+// mock must be in place before that import resolves — vi.mock is hoisted
+// above ESM imports automatically.
+vi.mock("jose", async () => {
+  const actual = await vi.importActual<typeof import("jose")>("jose");
+  return {
+    ...actual,
+    importJWK: vi.fn(actual.importJWK),
+  };
+});
 
 const SUPABASE_URL = "https://test-proj.supabase.co";
 
@@ -65,6 +77,27 @@ describe("mintRealtimeToken", () => {
         supabaseUrl: SUPABASE_URL,
       }),
     ).rejects.toThrow(/private component|d field|missing/i);
+  });
+
+  it("caches importJWK result by kid across mints with the same key", async () => {
+    const importJwkSpy = vi.mocked(importJWK);
+    importJwkSpy.mockClear();
+
+    // Two mints with the same kid — second must reuse the cached CryptoKey.
+    // (The module-scope cache may already be warm from earlier tests in
+    // this file, in which case the count is 0 — that is also acceptable
+    // evidence the cache is working. The regression we're guarding
+    // against is "called once per mint", which would show as ≥2 here.)
+    const opts = {
+      userId: "11111111-1111-1111-1111-111111111111",
+      deviceId: "22222222-2222-2222-2222-222222222222",
+      privateJwk: DEV_STANDBY_JWK,
+      supabaseUrl: SUPABASE_URL,
+    };
+    await mintRealtimeToken(opts);
+    await mintRealtimeToken(opts);
+
+    expect(importJwkSpy.mock.calls.length).toBeLessThanOrEqual(1);
   });
 
   it("rejects verification with a different keypair", async () => {

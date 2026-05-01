@@ -43,6 +43,9 @@ export function getRealtimeConnectionInfo(): {
 // us recover automatically after a rotation propagates.
 let jwksKidConfirmed: string | null = null;
 
+// kid-keyed; rotation propagates by missing the cache and re-importing.
+const importedKeys = new Map<string, CryptoKey>();
+
 async function checkKidInJwks(kid: string, supabaseUrl: string): Promise<void> {
   if (jwksKidConfirmed === kid) return;
   try {
@@ -98,11 +101,15 @@ export async function mintRealtimeToken(opts: {
     );
   }
 
-  // Strip key_ops so importJWK doesn't reject a verify-only standby JWK.
-  // The on-disk dev key has key_ops=["verify"] (gotrue's standby contract),
-  // but jose insists on a sign-capable key for a private import.
-  const { key_ops, ...jwkForImport } = opts.privateJwk;
-  const key = await importJWK(jwkForImport, "ES256");
+  let key = importedKeys.get(opts.privateJwk.kid);
+  if (!key) {
+    // Strip key_ops so importJWK doesn't reject a verify-only standby JWK.
+    // The on-disk dev key has key_ops=["verify"] (gotrue's standby contract),
+    // but jose insists on a sign-capable key for a private import.
+    const { key_ops, ...jwkForImport } = opts.privateJwk;
+    key = (await importJWK(jwkForImport, "ES256")) as CryptoKey;
+    importedKeys.set(opts.privateJwk.kid, key);
+  }
   const nowSec = Math.floor(Date.now() / 1000);
   const issuer = `${opts.supabaseUrl}/auth/v1`;
 

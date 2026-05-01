@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { untrack } from "svelte";
+
   interface Transfer {
     id: string;
     filename: string;
@@ -21,7 +23,7 @@
   }
 
   let { data } = $props();
-  let transfers = $state<Transfer[]>(data.transfers);
+  let transfers = $state<Transfer[]>(untrack(() => data.transfers));
   let uploads = $state<UploadState[]>([]);
   let dragOver = $state(false);
   let cancellingIds = $state<Set<string>>(new Set());

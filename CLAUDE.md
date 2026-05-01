@@ -298,6 +298,7 @@ See `.env.example`. Required:
 - `UPSTASH_REDIS_REST_URL` — Upstash Redis URL
 - `UPSTASH_REDIS_REST_TOKEN` — Upstash Redis token
 - `LIBRITO_JWT_PRIVATE_KEY_JWK` — Full JWK JSON (single line, includes `d`) of the Supabase standby signing key. Server-side only. Signs `/api/realtime-token` ES256 tokens; Realtime verifies via Supabase's project JWKS where the public side is published. Rotation runbook: `docs/ws-rt-follow-ups.md` item 8.
+- `PUBLIC_SITE_URL` — _Optional._ Canonical site URL for outbound email links (defaults to `https://librito.io` when unset). Self-hosters should set this to their deployed origin.
 
 ## Code Style
 

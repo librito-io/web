@@ -473,6 +473,7 @@ export async function processSync(
       .select("id, filename, file_size, storage_path, sha256")
       .eq("user_id", userId)
       .eq("status", "pending")
+      // deviceId UUID-validated at auth boundary; do NOT pass user-controlled identifiers to .or() filters without validation.
       .or(`device_id.eq.${deviceId},device_id.is.null`)
       .overrideTypes<TransferRow[], { merge: false }>(),
 

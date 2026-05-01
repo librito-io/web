@@ -7,8 +7,13 @@ vi.mock("$env/static/private", () => ({
   UPSTASH_REDIS_REST_TOKEN: "mock-token",
 }));
 
-import { safeLimit } from "$lib/server/ratelimit";
-import type { Ratelimit } from "@upstash/ratelimit";
+import {
+  safeLimit,
+  createLimiter,
+  type RateLimiter,
+  type FailMode,
+} from "$lib/server/ratelimit";
+import { Ratelimit } from "@upstash/ratelimit";
 
 function fakeLimiter(
   impl: () => Promise<{ success: boolean; reset: number }>,
@@ -78,5 +83,43 @@ describe("safeLimit", () => {
     const payload = errorSpy.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(payload.key).toBeUndefined();
     expect(JSON.stringify(payload)).not.toContain("203.0.113.7");
+  });
+});
+
+describe("createLimiter", () => {
+  it("derives label from prefix by stripping the rl: namespace", () => {
+    const limiter = createLimiter({
+      window: Ratelimit.slidingWindow(5, "5m"),
+      prefix: "rl:pair:claim",
+      failMode: "closed",
+    });
+    expect(limiter.label).toBe("pair:claim");
+    expect(limiter.failMode).toBe("closed");
+    expect(typeof limiter.limit).toBe("function");
+  });
+
+  it("throws if prefix doesn't start with rl:", () => {
+    expect(() =>
+      createLimiter({
+        window: Ratelimit.slidingWindow(1, "1s"),
+        prefix: "pair:request",
+        failMode: "open",
+      }),
+    ).toThrow(/prefix must start with "rl:"/);
+  });
+
+  it("requires explicit failMode (no default)", () => {
+    const open = createLimiter({
+      window: Ratelimit.slidingWindow(1, "1s"),
+      prefix: "rl:test:open",
+      failMode: "open",
+    });
+    const closed = createLimiter({
+      window: Ratelimit.slidingWindow(1, "1s"),
+      prefix: "rl:test:closed",
+      failMode: "closed",
+    });
+    expect(open.failMode).toBe("open");
+    expect(closed.failMode).toBe("closed");
   });
 });

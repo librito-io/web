@@ -28,6 +28,61 @@ export const redis = new Redis({
   retry: { retries: UPSTASH_RETRY_BUDGET },
 });
 
+// ----------------------------------------------------------------------
+// Per-limiter fail-mode policy (PR #48).
+//
+// Each limiter declares its posture at construction. Routes use
+// `enforceRateLimit` / `enforceRateLimits` (added in the next commit) to
+// map the limiter's outcome to an HTTP response without re-deciding the
+// policy at the callsite.
+//
+// failMode: "open"   — Upstash outage allows the request. Use for
+//                      availability-class limits where downstream auth/
+//                      RLS still gate access (sync, transfer, pair
+//                      request/status).
+// failMode: "closed" — Upstash outage returns 503. Use for
+//                      brute-force gates and credential mint endpoints
+//                      (pair:claim, realtime-token).
+// ----------------------------------------------------------------------
+
+export type FailMode = "open" | "closed";
+
+export type LimitResult = Awaited<ReturnType<Ratelimit["limit"]>>;
+
+export type RateLimiter = {
+  /**
+   * Apply the rate limit for the supplied key. Narrows the upstream
+   * `Ratelimit.limit(key, opts?)` signature — extras (`req`, `geo`,
+   * `userAgent` for analytics) are not threaded through. Future analytics
+   * wiring would widen this; trivial refactor when it lands.
+   */
+  limit: (key: string) => Promise<LimitResult>;
+  readonly label: string;
+  readonly failMode: FailMode;
+};
+
+export function createLimiter(opts: {
+  window: ReturnType<typeof Ratelimit.slidingWindow>;
+  prefix: string;
+  failMode: FailMode;
+}): RateLimiter {
+  if (!opts.prefix.startsWith("rl:")) {
+    throw new Error(
+      `createLimiter: prefix must start with "rl:" — received "${opts.prefix}"`,
+    );
+  }
+  const inner = new Ratelimit({
+    redis,
+    limiter: opts.window,
+    prefix: opts.prefix,
+  });
+  return {
+    limit: (key) => inner.limit(key),
+    label: opts.prefix.slice(3),
+    failMode: opts.failMode,
+  };
+}
+
 /**
  * Wrap a `Ratelimit.limit()` call so an Upstash outage fails open (allow
  * the request) instead of surfacing 5xx.

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { _ } from "$lib/i18n";
   import HighlightCard from "$lib/components/HighlightCard.svelte";
   import SortPillRow from "$lib/components/SortPillRow.svelte";
@@ -11,10 +12,10 @@
 
   let { data } = $props();
 
-  let sort = $state<Sort>(data.sort);
-  let items = $state<FeedRow[]>(data.rows);
-  let cursor = $state<string | null>(data.nextCursor);
-  let done = $state(data.nextCursor === null);
+  let sort = $state<Sort>(untrack(() => data.sort));
+  let items = $state<FeedRow[]>(untrack(() => data.rows));
+  let cursor = $state<string | null>(untrack(() => data.nextCursor));
+  let done = $state(untrack(() => data.nextCursor === null));
 
   let ctxVisible = $state(false);
   let ctxX = $state(0);

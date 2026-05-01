@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { _ } from "$lib/i18n";
   import { relativeTime } from "$lib/time/relativeTime";
 
@@ -15,11 +15,13 @@
       onReady?: (api: { handleDelete: () => Promise<void> }) => void;
     }>();
 
-  let text = $state(initialText ?? "");
-  let persistedText = $state(initialText ?? "");
-  let updatedAt = $state(initialUpdatedAt);
+  let text = $state(untrack(() => initialText ?? ""));
+  let persistedText = $state(untrack(() => initialText ?? ""));
+  let updatedAt = $state(untrack(() => initialUpdatedAt));
   let mode = $state<"empty" | "display" | "editor">(
-    initialText && initialText.length > 0 ? "display" : "empty",
+    untrack(() =>
+      initialText && initialText.length > 0 ? "display" : "empty",
+    ),
   );
   let status = $state<SaveStatus>("idle");
   let expanded = $state(false);

@@ -235,6 +235,38 @@ describe("safeLimit — timeout", () => {
     }
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  // TG2: timeout interaction in the multi-limiter path. After T1 the
+  // sequencing means a hang on limiter A short-circuits before limiter B
+  // is invoked — this test pins that semantics so a future Promise.all
+  // re-introduction can't slip through silently.
+  it("returns 503 when the first sequenced limiter times out and never invokes the second", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const aImpl = vi.fn(() => new Promise<LimitResult>(() => {}));
+    const bImpl = vi.fn(async () => fullLimitResult({ success: true }));
+    const a: RateLimiter = { limit: aImpl, label: "first", failMode: "closed" };
+    const b: RateLimiter = {
+      limit: bImpl,
+      label: "second",
+      failMode: "closed",
+    };
+    const promise = enforceRateLimits(
+      [
+        { limiter: a, key: "k-a" },
+        { limiter: b, key: "k-b" },
+      ],
+      "msg",
+    );
+    await vi.advanceTimersByTimeAsync(1501);
+    const res = await promise;
+    expect(res!.status).toBe(503);
+    expect(res!.headers.get("Retry-After")).toBe("30");
+    expect(bImpl).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "ratelimit.upstash_timeout",
+      expect.objectContaining({ limiter: "first" }),
+    );
+  });
 });
 
 describe("safeLimit — log payload hygiene (no PII / credentials)", () => {
@@ -353,6 +385,27 @@ describe("enforceRateLimits — multi-limiter precedence", () => {
       [
         { limiter: a, key: "k-a" },
         { limiter: b, key: "k-b" },
+      ],
+      "msg",
+    );
+    expect(res).toBeNull();
+  });
+
+  // TG1: a fail-open throw must not synthesize a fail-closed sentinel —
+  // the per-limiter policy is load-bearing. Pins the contract so a future
+  // refactor of `safeLimit` cannot conflate the two failure arms.
+  it("returns null when a fail-open limiter throws and a fail-closed limiter allows", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const open = fakeLimiter("open", async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    const closed = fakeLimiter("closed", async () =>
+      fullLimitResult({ success: true }),
+    );
+    const res = await enforceRateLimits(
+      [
+        { limiter: open, key: "k-open" },
+        { limiter: closed, key: "k-closed" },
       ],
       "msg",
     );

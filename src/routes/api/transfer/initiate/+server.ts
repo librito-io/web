@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { transferUploadLimiter, legacySafeLimit } from "$lib/server/ratelimit";
+import { transferUploadLimiter, enforceRateLimit } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import {
   sanitizeFilename,
@@ -53,15 +53,12 @@ export const POST: RequestHandler = async ({
   }
   const clientSha = sha256;
 
-  const { success, reset } = await legacySafeLimit(
+  const limited = await enforceRateLimit(
     transferUploadLimiter,
     user.id,
-    "transfer:upload",
+    "Too many uploads",
   );
-  if (!success) {
-    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
-    return jsonError(429, "rate_limited", "Too many uploads", retryAfter);
-  }
+  if (limited) return limited;
 
   const supabase = createAdminClient();
 

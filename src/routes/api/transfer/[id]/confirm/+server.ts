@@ -1,7 +1,10 @@
 import type { RequestHandler } from "./$types";
 import { authenticateDevice } from "$lib/server/auth";
 import { createAdminClient } from "$lib/server/supabase";
-import { transferConfirmLimiter, legacySafeLimit } from "$lib/server/ratelimit";
+import {
+  transferConfirmLimiter,
+  enforceRateLimit,
+} from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { recordConfirmFailure } from "$lib/server/transfer";
 
@@ -16,15 +19,12 @@ export const POST: RequestHandler = async ({ request, params }) => {
   const { device } = authResult;
   const transferId = params.id;
 
-  const { success, reset } = await legacySafeLimit(
+  const limited = await enforceRateLimit(
     transferConfirmLimiter,
     `${device.id}:${transferId}`,
-    "transfer:confirm",
+    "Too many confirms",
   );
-  if (!success) {
-    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
-    return jsonError(429, "rate_limited", "Too many confirms", retryAfter);
-  }
+  if (limited) return limited;
 
   const { data: transfer, error: fetchError } = await supabase
     .from("book_transfers")

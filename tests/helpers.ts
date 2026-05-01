@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { jsonError } from "../src/lib/server/errors";
 
 /**
  * Creates a mock Supabase client with chainable query builder.
@@ -223,6 +224,82 @@ export const passThroughLegacySafeLimit = async (
   } catch {
     return { success: true, reset: 0 };
   }
+};
+
+type _RateLimiter = {
+  limit: (k: string) => Promise<{ success: boolean; reset: number }>;
+  label: string;
+  failMode: "open" | "closed";
+};
+
+/**
+ * Pass-through mock for `enforceRateLimit`. Delegates to the underlying
+ * limiter's `.limit()` so per-test denial spies fire; on throw, applies
+ * the limiter's failMode (closed → 503, open → null) so test semantics
+ * match production. The 503 retry-after literal `30` below must match
+ * `FAIL_CLOSED_RETRY_AFTER_SEC` in `src/lib/server/ratelimit.ts`.
+ */
+export const passThroughEnforceRateLimit = async (
+  limiter: _RateLimiter,
+  key: string,
+  message: string,
+): Promise<Response | null> => {
+  try {
+    const result = await limiter.limit(key);
+    if (!result.success) {
+      const retryAfter = Math.max(
+        1,
+        Math.ceil((result.reset - Date.now()) / 1000),
+      );
+      return jsonError(429, "rate_limited", message, retryAfter);
+    }
+    return null;
+  } catch {
+    if (limiter.failMode === "closed") {
+      return jsonError(
+        503,
+        "rate_limit_unavailable",
+        "Service temporarily unavailable. Please retry shortly.",
+        30,
+      );
+    }
+    return null;
+  }
+};
+
+export const passThroughEnforceRateLimits = async (
+  checks: Array<{ limiter: _RateLimiter; key: string }>,
+  message: string,
+): Promise<Response | null> => {
+  const outcomes = await Promise.all(
+    checks.map(async (c) => {
+      try {
+        const r = await c.limiter.limit(c.key);
+        return { ok: true as const, r };
+      } catch {
+        return { ok: false as const, failMode: c.limiter.failMode };
+      }
+    }),
+  );
+  if (outcomes.some((o) => !o.ok && o.failMode === "closed")) {
+    return jsonError(
+      503,
+      "rate_limit_unavailable",
+      "Service temporarily unavailable. Please retry shortly.",
+      30,
+    );
+  }
+  const denied = outcomes
+    .filter(
+      (o): o is { ok: true; r: { success: boolean; reset: number } } => o.ok,
+    )
+    .filter((o) => !o.r.success);
+  if (denied.length > 0) {
+    const reset = Math.max(...denied.map((o) => o.r.reset));
+    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
+    return jsonError(429, "rate_limited", message, retryAfter);
+  }
+  return null;
 };
 
 /** Mock Redis with in-memory store */

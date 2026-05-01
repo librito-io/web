@@ -3,7 +3,7 @@ import { createAdminClient } from "$lib/server/supabase";
 import {
   redis,
   pairClaimLimiter,
-  legacySafeLimit,
+  enforceRateLimit,
 } from "$lib/server/ratelimit";
 import { claimPairingCode } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
@@ -31,20 +31,12 @@ export const POST: RequestHandler = async ({
 
   // Rate limit by code:IP
   const ip = getClientAddress();
-  const { success, reset } = await legacySafeLimit(
+  const limited = await enforceRateLimit(
     pairClaimLimiter,
     `${code}:${ip}`,
-    "pair:claim",
+    "Too many attempts for this code",
   );
-  if (!success) {
-    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
-    return jsonError(
-      429,
-      "rate_limited",
-      "Too many attempts for this code",
-      retryAfter,
-    );
-  }
+  if (limited) return limited;
 
   const supabase = createAdminClient();
   // user.email comes from the server-validated session; never read it from

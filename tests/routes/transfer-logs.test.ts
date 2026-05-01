@@ -3,21 +3,53 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
 vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughLegacySafeLimit } = await import("../helpers");
+  const { passThroughEnforceRateLimit } = await import("../helpers");
   return {
     transferUploadLimiter: {
-      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+      limit: vi.fn(async () => ({
+        success: true,
+        reset: Date.now() + 60_000,
+        limit: 5,
+        remaining: 4,
+        pending: Promise.resolve(),
+      })),
+      label: "transfer:upload",
+      failMode: "open",
     },
     transferDownloadLimiter: {
-      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+      limit: vi.fn(async () => ({
+        success: true,
+        reset: Date.now() + 60_000,
+        limit: 5,
+        remaining: 4,
+        pending: Promise.resolve(),
+      })),
+      label: "transfer:download",
+      failMode: "open",
     },
     transferConfirmLimiter: {
-      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+      limit: vi.fn(async () => ({
+        success: true,
+        reset: Date.now() + 60_000,
+        limit: 5,
+        remaining: 4,
+        pending: Promise.resolve(),
+      })),
+      label: "transfer:confirm",
+      failMode: "open",
     },
     transferRetryLimiter: {
-      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+      limit: vi.fn(async () => ({
+        success: true,
+        reset: Date.now() + 60_000,
+        limit: 5,
+        remaining: 4,
+        pending: Promise.resolve(),
+      })),
+      label: "transfer:retry",
+      failMode: "open",
     },
-    legacySafeLimit: passThroughLegacySafeLimit,
+    enforceRateLimit: passThroughEnforceRateLimit,
   };
 });
 

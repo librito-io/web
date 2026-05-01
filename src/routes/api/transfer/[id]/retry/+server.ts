@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { transferRetryLimiter, legacySafeLimit } from "$lib/server/ratelimit";
+import { transferRetryLimiter, enforceRateLimit } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
 export const POST: RequestHandler = async ({
@@ -10,15 +10,12 @@ export const POST: RequestHandler = async ({
   const { user } = await safeGetSession();
   if (!user) return jsonError(401, "unauthorized", "Must be logged in");
 
-  const { success, reset } = await legacySafeLimit(
+  const limited = await enforceRateLimit(
     transferRetryLimiter,
     user.id,
-    "transfer:retry",
+    "Too many retries",
   );
-  if (!success) {
-    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
-    return jsonError(429, "rate_limited", "Too many retries", retryAfter);
-  }
+  if (limited) return limited;
 
   const supabase = createAdminClient();
   const { id } = params;

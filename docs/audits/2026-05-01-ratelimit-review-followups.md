@@ -20,21 +20,21 @@ Source-of-truth for fix work that came out of `/branch-review` on `feat/ratelimi
 
 ## Status overview
 
-| #   | Issue                                                                                  | Severity              | Score | PR  | Status | Session date |
-| --- | -------------------------------------------------------------------------------------- | --------------------- | ----- | --- | ------ | ------------ |
-| R1  | `safeLimit` discriminated-union refactor (eliminates synthetic struct + 2 `as` casts)  | Refactor (types)      | ~50   | —   | open   | —            |
-| T1  | `enforceRateLimits` Promise.all → sequence per-device → per-user; log on partial drain | Warning (bug/UX)      | 85    | —   | open   | —            |
-| C1  | Cast `as LimitResult[]` at `ratelimit.ts:231` → type-predicate filter                  | Warning (types)       | 87    | —   | open   | —            |
-| K1  | Extract `FAIL_CLOSED_RETRY_AFTER_SEC` to `ratelimit.constants.ts`; consume in tests    | Warning (test drift)  | 75    | —   | open   | —            |
-| H1  | Replace `_RateLimiter` mock type with `import type { RateLimiter }`                    | Warning (types/drift) | 72    | —   | open   | —            |
-| M1  | Migrate route tests to real `enforceRateLimits` + delete pass-through helpers          | Warning (test arch)   | 68    | —   | open   | —            |
-| P1  | Flip `pairRequestLimiter` to `failMode: "closed"`                                      | Policy (avail)        | 32    | —   | open   | —            |
-| D1  | WHY-comment for `transferConfirmLimiter` fail-open rationale                           | Doc                   | info  | —   | open   | —            |
-| D2  | Refresh stale AbortSignal-era comment in `safeLimit`                                   | Doc                   | ~30   | —   | open   | —            |
-| TG1 | Add `enforceRateLimits` test: fail-open throws while fail-closed allows                | Test gap              | 72    | —   | open   | —            |
-| TG2 | Add `enforceRateLimits` × timeout multi-limiter test                                   | Test gap              | ~35   | —   | open   | —            |
-| SK1 | `isFailClosed` `in`-check vs Symbol-keyed sentinel                                     | Skip                  | ~25   | —   | skip   | —            |
-| SK2 | `passThroughEnforceRateLimits` filter chain density                                    | Skip                  | ~25   | —   | skip   | —            |
+| #   | Issue                                                                                  | Severity              | Score | PR                                               | Status                     | Session date |
+| --- | -------------------------------------------------------------------------------------- | --------------------- | ----- | ------------------------------------------------ | -------------------------- | ------------ |
+| R1  | `safeLimit` discriminated-union refactor (eliminates synthetic struct + 2 `as` casts)  | Refactor (types)      | ~50   | [#50](https://github.com/librito-io/web/pull/50) | in-review                  | 2026-05-01   |
+| T1  | `enforceRateLimits` Promise.all → sequence per-device → per-user; log on partial drain | Warning (bug/UX)      | 85    | —                                                | open                       | —            |
+| C1  | Cast `as LimitResult[]` at `ratelimit.ts:231` → type-predicate filter                  | Warning (types)       | 87    | [#50](https://github.com/librito-io/web/pull/50) | in-review (subsumed by R1) | 2026-05-01   |
+| K1  | Extract `FAIL_CLOSED_RETRY_AFTER_SEC` to `ratelimit.constants.ts`; consume in tests    | Warning (test drift)  | 75    | —                                                | open                       | —            |
+| H1  | Replace `_RateLimiter` mock type with `import type { RateLimiter }`                    | Warning (types/drift) | 72    | —                                                | open                       | —            |
+| M1  | Migrate route tests to real `enforceRateLimits` + delete pass-through helpers          | Warning (test arch)   | 68    | —                                                | open                       | —            |
+| P1  | Flip `pairRequestLimiter` to `failMode: "closed"`                                      | Policy (avail)        | 32    | —                                                | open                       | —            |
+| D1  | WHY-comment for `transferConfirmLimiter` fail-open rationale                           | Doc                   | info  | —                                                | open                       | —            |
+| D2  | Refresh stale AbortSignal-era comment in `safeLimit`                                   | Doc                   | ~30   | —                                                | open                       | —            |
+| TG1 | Add `enforceRateLimits` test: fail-open throws while fail-closed allows                | Test gap              | 72    | —                                                | open                       | —            |
+| TG2 | Add `enforceRateLimits` × timeout multi-limiter test                                   | Test gap              | ~35   | —                                                | open                       | —            |
+| SK1 | `isFailClosed` `in`-check vs Symbol-keyed sentinel                                     | Skip                  | ~25   | —                                                | skip                       | —            |
+| SK2 | `passThroughEnforceRateLimits` filter chain density                                    | Skip                  | ~25   | —                                                | skip                       | —            |
 
 ## Suggested execution order
 

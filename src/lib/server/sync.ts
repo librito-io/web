@@ -398,7 +398,16 @@ export async function processSync(
     }
   }
 
-  // 2. Query notes, deleted highlights, and pending transfers in parallel
+  // 2. Query notes, deleted highlights, and pending transfers in parallel.
+  //
+  // Join queries on `notes!inner` / `books!inner` resolve to nested objects at
+  // runtime (`n.highlights.books.book_hash`) but PostgREST's generic inference
+  // widens them to arrays without a generated `Database` type. We use
+  // `.overrideTypes<XRow[], { merge: false }>()` — Supabase's first-class type
+  // override — to bind each query's `.data` to the runtime shape declared
+  // below. This eliminates the `as unknown as XRow[]` casts at the use sites
+  // and keeps the count-query `.count` accessor on a properly typed envelope.
+  // Replace once L6 ships generated types via `supabase gen types typescript`.
   const [
     noteResult,
     deletedNotesResult,
@@ -423,7 +432,8 @@ export async function processSync(
       .eq("user_id", userId)
       .gt("updated_at", lastSynced)
       .is("deleted_at", null)
-      .is("highlights.deleted_at", null),
+      .is("highlights.deleted_at", null)
+      .overrideTypes<NoteRow[], { merge: false }>(),
 
     supabase
       .from("notes")
@@ -440,7 +450,8 @@ export async function processSync(
       )
       .eq("user_id", userId)
       .gt("updated_at", lastSynced)
-      .not("deleted_at", "is", null),
+      .not("deleted_at", "is", null)
+      .overrideTypes<DeletedNoteRow[], { merge: false }>(),
 
     supabase
       .from("highlights")
@@ -454,14 +465,16 @@ export async function processSync(
       )
       .eq("user_id", userId)
       .not("deleted_at", "is", null)
-      .gt("updated_at", lastSynced),
+      .gt("updated_at", lastSynced)
+      .overrideTypes<DeletedHighlightRow[], { merge: false }>(),
 
     supabase
       .from("book_transfers")
       .select("id, filename, file_size, storage_path, sha256")
       .eq("user_id", userId)
       .eq("status", "pending")
-      .or(`device_id.eq.${deviceId},device_id.is.null`),
+      .or(`device_id.eq.${deviceId},device_id.is.null`)
+      .overrideTypes<TransferRow[], { merge: false }>(),
 
     supabase
       .from("book_transfers")
@@ -489,9 +502,7 @@ export async function processSync(
     );
   }
 
-  const notes: ResponseNote[] = (
-    (noteResult.data ?? []) as unknown as NoteRow[]
-  ).map((n) => ({
+  const notes: ResponseNote[] = (noteResult.data ?? []).map((n) => ({
     bookHash: n.highlights.books.book_hash,
     chapter: n.highlights.chapter_index,
     startWord: n.highlights.start_word,
@@ -501,7 +512,7 @@ export async function processSync(
   }));
 
   const deletedHighlights: ResponseDeletedHighlight[] = (
-    (deletedResult.data ?? []) as unknown as DeletedHighlightRow[]
+    deletedResult.data ?? []
   ).map((h) => ({
     bookHash: h.books.book_hash,
     chapter: h.chapter_index,
@@ -510,7 +521,7 @@ export async function processSync(
   }));
 
   const deletedNotes: ResponseDeletedNote[] = (
-    (deletedNotesResult.data ?? []) as unknown as DeletedNoteRow[]
+    deletedNotesResult.data ?? []
   ).map((n) => ({
     bookHash: n.highlights.books.book_hash,
     chapter: n.highlights.chapter_index,
@@ -518,7 +529,7 @@ export async function processSync(
     endWord: n.highlights.end_word,
   }));
 
-  const transferRows = (transferResult.data as TransferRow[] | null) ?? [];
+  const transferRows = transferResult.data ?? [];
   const urlResults = await Promise.allSettled(
     transferRows.map((t) =>
       supabase.storage
@@ -576,8 +587,7 @@ export async function processSync(
       `Failed to fetch failedTransferCount: ${failedCountResult.error.message}`,
     );
   } else {
-    failedTransferCount =
-      (failedCountResult as unknown as { count?: number }).count ?? 0;
+    failedTransferCount = failedCountResult.count ?? 0;
   }
 
   return {

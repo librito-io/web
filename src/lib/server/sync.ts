@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DOWNLOAD_URL_TTL } from "./transfer";
+import { SYNC_DOWNLOAD_URL_TTL } from "./transfer";
 
 // --- Incoming payload types (device → server) ---
 
@@ -523,7 +523,7 @@ export async function processSync(
     transferRows.map((t) =>
       supabase.storage
         .from("book-transfers")
-        .createSignedUrl(t.storage_path, DOWNLOAD_URL_TTL),
+        .createSignedUrl(t.storage_path, SYNC_DOWNLOAD_URL_TTL),
     ),
   );
 
@@ -540,7 +540,7 @@ export async function processSync(
         ...base,
         downloadUrl: urlResult.value.data.signedUrl,
         sha256: t.sha256,
-        urlExpiresIn: DOWNLOAD_URL_TTL,
+        urlExpiresIn: SYNC_DOWNLOAD_URL_TTL,
       };
     }
 

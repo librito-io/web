@@ -6,7 +6,11 @@ export const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 export const MAX_FILENAME_LENGTH = 255;
 export const MAX_PENDING_TRANSFERS = 20;
 export const UPLOAD_URL_TTL = 300; // 5 minutes
-export const DOWNLOAD_URL_TTL = 3600; // 1 hour
+// TTL for /api/transfer/[id]/download-url — device fetches the file promptly.
+export const DOWNLOAD_URL_TTL = 300;
+// TTL for URLs embedded in sync responses — longer window to accommodate
+// the device's next sync cycle before it needs to fetch the file.
+export const SYNC_DOWNLOAD_URL_TTL = 3600;
 
 // Maximum /confirm-side failure attempts before a transfer flips to `failed`.
 // Mirrored as the default of `increment_transfer_attempt(p_max_attempts)`.

@@ -54,6 +54,7 @@ export const POST: RequestHandler = async ({ request, params }) => {
     .from("book_transfers")
     .update({
       status: "downloaded",
+      device_id: device.id,
       downloaded_at: new Date().toISOString(),
       attempt_count: 0,
       last_error: null,

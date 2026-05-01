@@ -20,6 +20,11 @@ vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_ANON_KEY: "test-anon-key-not-a-real-jwt",
 }));
 
+vi.mock("$env/static/private", () => ({
+  UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
+  UPSTASH_REDIS_REST_TOKEN: "mock-token",
+}));
+
 const authMock = vi.fn();
 vi.mock("$lib/server/auth", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -31,20 +36,18 @@ vi.mock("$lib/server/auth", async (importOriginal) => {
 
 const limitMock = vi.fn();
 const userLimitMock = vi.fn();
-vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughEnforceRateLimits } = await import("../helpers");
+vi.mock("$lib/server/ratelimit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
   return {
+    ...actual,
     realtimeTokenLimiter: {
+      ...actual.realtimeTokenLimiter,
       limit: (...args: unknown[]) => limitMock(...args),
-      label: "realtime:token",
-      failMode: "closed",
     },
     realtimeTokenUserLimiter: {
+      ...actual.realtimeTokenUserLimiter,
       limit: (...args: unknown[]) => userLimitMock(...args),
-      label: "realtime:token:user",
-      failMode: "closed",
     },
-    enforceRateLimits: passThroughEnforceRateLimits,
   };
 });
 

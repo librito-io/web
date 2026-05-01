@@ -7,6 +7,7 @@ import {
   DEV_STANDBY_JWK_STR,
   DEV_KID,
 } from "../fixtures/dev-jwk";
+import { FAIL_CLOSED_RETRY_AFTER_SEC } from "$lib/server/ratelimit.constants";
 
 const TEST_SUPABASE_URL = "https://test-proj.supabase.co";
 
@@ -30,22 +31,25 @@ vi.mock("$lib/server/auth", async (importOriginal) => {
   };
 });
 
+vi.mock("$env/static/private", () => ({
+  UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
+  UPSTASH_REDIS_REST_TOKEN: "mock-token",
+}));
+
 const limitMock = vi.fn();
 const userLimitMock = vi.fn();
-vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughEnforceRateLimits } = await import("../helpers");
+vi.mock("$lib/server/ratelimit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
   return {
+    ...actual,
     realtimeTokenLimiter: {
+      ...actual.realtimeTokenLimiter,
       limit: (...args: unknown[]) => limitMock(...args),
-      label: "realtime:token",
-      failMode: "closed",
     },
     realtimeTokenUserLimiter: {
+      ...actual.realtimeTokenUserLimiter,
       limit: (...args: unknown[]) => userLimitMock(...args),
-      label: "realtime:token:user",
-      failMode: "closed",
     },
-    enforceRateLimits: passThroughEnforceRateLimits,
   };
 });
 
@@ -259,7 +263,9 @@ describe("POST /api/realtime-token — fail-closed under Upstash outage", () => 
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await POST(buildRequest());
     expect(res.status).toBe(503);
-    expect(res.headers.get("Retry-After")).toBe("30");
+    expect(res.headers.get("Retry-After")).toBe(
+      String(FAIL_CLOSED_RETRY_AFTER_SEC),
+    );
     errorSpy.mockRestore();
   });
 
@@ -277,7 +283,9 @@ describe("POST /api/realtime-token — fail-closed under Upstash outage", () => 
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await POST(buildRequest());
     expect(res.status).toBe(503);
-    expect(res.headers.get("Retry-After")).toBe("30");
+    expect(res.headers.get("Retry-After")).toBe(
+      String(FAIL_CLOSED_RETRY_AFTER_SEC),
+    );
     errorSpy.mockRestore();
   });
 });

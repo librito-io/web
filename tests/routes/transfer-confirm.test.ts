@@ -2,16 +2,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
+vi.mock("$env/static/private", () => ({
+  UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
+  UPSTASH_REDIS_REST_TOKEN: "mock-token",
+}));
+
 vi.mock("$lib/server/auth", () => ({
   authenticateDevice: vi.fn(async () => ({
     device: { id: "d-1", userId: "u-1" },
   })),
 }));
 
-vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughEnforceRateLimit } = await import("../helpers");
+vi.mock("$lib/server/ratelimit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
   return {
+    ...actual,
     transferConfirmLimiter: {
+      ...actual.transferConfirmLimiter,
       limit: vi.fn(async () => ({
         success: true,
         reset: Date.now() + 60_000,
@@ -19,10 +26,7 @@ vi.mock("$lib/server/ratelimit", async () => {
         remaining: 4,
         pending: Promise.resolve(),
       })),
-      label: "transfer:confirm",
-      failMode: "open",
     },
-    enforceRateLimit: passThroughEnforceRateLimit,
   };
 });
 

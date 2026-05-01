@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
+vi.mock("$env/static/private", () => ({
+  UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
+  UPSTASH_REDIS_REST_TOKEN: "mock-token",
+}));
+
 vi.mock("$lib/server/auth", () => ({
   authenticateDevice: vi.fn(async () => ({
     device: { id: "d-1", userId: "u-1" },
@@ -9,15 +14,14 @@ vi.mock("$lib/server/auth", () => ({
 }));
 
 const limitMock = vi.fn();
-vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughEnforceRateLimit } = await import("../helpers");
+vi.mock("$lib/server/ratelimit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
   return {
+    ...actual,
     syncLimiter: {
+      ...actual.syncLimiter,
       limit: (...args: unknown[]) => limitMock(...args),
-      label: "sync:device",
-      failMode: "open" as const,
     },
-    enforceRateLimit: passThroughEnforceRateLimit,
   };
 });
 

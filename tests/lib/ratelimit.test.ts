@@ -359,15 +359,18 @@ describe("enforceRateLimits — multi-limiter precedence", () => {
     expect(res).toBeNull();
   });
 
-  it("returns 429 with max(reset) when one limiter denies", async () => {
+  it("short-circuits on first deny: later limiters are not invoked, retry-after comes from the first denier", async () => {
     const reset1 = Date.now() + 5_000;
-    const reset2 = Date.now() + 11_000;
-    const a = fakeLimiter("closed", async () =>
+    const aImpl = vi.fn(async () =>
       fullLimitResult({ success: false, reset: reset1 }),
     );
-    const b = fakeLimiter("closed", async () =>
-      fullLimitResult({ success: false, reset: reset2 }),
-    );
+    const bImpl = vi.fn(async () => fullLimitResult({ success: true }));
+    const a: RateLimiter = { limit: aImpl, label: "first", failMode: "closed" };
+    const b: RateLimiter = {
+      limit: bImpl,
+      label: "second",
+      failMode: "closed",
+    };
     const res = await enforceRateLimits(
       [
         { limiter: a, key: "k-a" },
@@ -376,17 +379,29 @@ describe("enforceRateLimits — multi-limiter precedence", () => {
       "msg",
     );
     expect(res!.status).toBe(429);
-    expect(res!.headers.get("Retry-After")).toBe("11");
+    expect(res!.headers.get("Retry-After")).toBe("5");
+    expect(aImpl).toHaveBeenCalledTimes(1);
+    // T1: short-circuit — second limiter's quota is never decremented when
+    // the first limiter has already denied. Prevents per-device storms from
+    // draining the per-user budget on /api/realtime-token.
+    expect(bImpl).not.toHaveBeenCalled();
   });
 
-  it("returns 503 when any limiter fails closed (overrides denials)", async () => {
+  it("returns 503 when first limiter fails closed; later limiters not invoked (no partial drain to log)", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const a = fakeLimiter("closed", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const aImpl = vi.fn(async () => {
       throw new Error("ECONNREFUSED");
     });
-    const b = fakeLimiter("closed", async () =>
+    const bImpl = vi.fn(async () =>
       fullLimitResult({ success: false, reset: Date.now() + 60_000 }),
     );
+    const a: RateLimiter = { limit: aImpl, label: "first", failMode: "closed" };
+    const b: RateLimiter = {
+      limit: bImpl,
+      label: "second",
+      failMode: "closed",
+    };
     const res = await enforceRateLimits(
       [
         { limiter: a, key: "k-a" },
@@ -396,6 +411,60 @@ describe("enforceRateLimits — multi-limiter precedence", () => {
     );
     expect(res!.status).toBe(503);
     expect(res!.headers.get("Retry-After")).toBe("30");
+    expect(bImpl).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "ratelimit.upstash_unreachable",
+      expect.objectContaining({ limiter: "first" }),
+    );
+    // No earlier success to lament: no partial_drain warn.
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      "ratelimit.partial_drain",
+      expect.anything(),
+    );
+  });
+
+  it("logs ratelimit.partial_drain when an earlier limiter succeeded but a later limiter fail-closed", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const aImpl = vi.fn(async () => fullLimitResult({ success: true }));
+    const bImpl = vi.fn(async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    const a: RateLimiter = {
+      limit: aImpl,
+      label: "realtime:token",
+      failMode: "closed",
+    };
+    const b: RateLimiter = {
+      limit: bImpl,
+      label: "realtime:token:user",
+      failMode: "closed",
+    };
+    const res = await enforceRateLimits(
+      [
+        { limiter: a, key: "k-a" },
+        { limiter: b, key: "k-b" },
+      ],
+      "msg",
+    );
+    expect(res!.status).toBe(503);
+    expect(aImpl).toHaveBeenCalledTimes(1);
+    expect(bImpl).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "ratelimit.upstash_unreachable",
+      expect.objectContaining({ limiter: "realtime:token:user" }),
+    );
+    // T1: operators need a single log line linking the device-locked
+    // window to the upstream blip — the per-device bucket's token has
+    // already been burned; the per-user bucket failed; the device cannot
+    // mint until the per-device window rolls over.
+    expect(warnSpy).toHaveBeenCalledWith(
+      "ratelimit.partial_drain",
+      expect.objectContaining({
+        succeededLabels: ["realtime:token"],
+        failedLabel: "realtime:token:user",
+      }),
+    );
   });
 
   it("throws on empty array", async () => {

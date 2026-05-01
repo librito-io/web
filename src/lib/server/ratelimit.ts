@@ -210,10 +210,26 @@ export async function enforceRateLimit(
 }
 
 /**
- * Multi-limiter route helper. Runs all checks via Promise.all (no
- * short-circuit — all checks are gated on the same Upstash availability,
- * so latency is dominated by the slowest call regardless). Precedence:
- * any failClosed → 503; else any deny → 429 with max(reset); else null.
+ * Multi-limiter route helper. Runs `checks` sequentially in array order
+ * and short-circuits on the first deny so the loser's downstream tokens
+ * are not consumed (sliding-window decrements happen at call time on the
+ * Upstash side — once spent, the bucket is locked until the window rolls
+ * over even if the request is later rejected).
+ *
+ * Precedence within the prefix that did execute:
+ *   any failClosed → 503; else any deny → 429 with that limiter's reset;
+ *   else null.
+ *
+ * Latency cost vs. Promise.all is bounded by `UPSTASH_TIMEOUT_MS` per
+ * call (~50–100 ms typical). For our only N>1 caller (`/api/realtime-token`,
+ * mints once per minute per device) the trade buys two operationally
+ * load-bearing properties:
+ *   - per-device storms cannot drain the per-user budget (T1 #2);
+ *   - asymmetric Redis blips emit `ratelimit.partial_drain` so a
+ *     device-locked window is correlatable to the upstream cause (T1 #1).
+ *
+ * Order callers in priority of binding constraint (per-device 1/60s
+ * before per-user 30/h on /api/realtime-token).
  */
 export async function enforceRateLimits(
   checks: Array<{ limiter: RateLimiter; key: string }>,
@@ -222,24 +238,39 @@ export async function enforceRateLimits(
   if (checks.length === 0) {
     throw new Error("enforceRateLimits: checks must be a non-empty array");
   }
-  const outcomes = await Promise.all(
-    checks.map((c) => safeLimit(c.limiter, c.key)),
-  );
-  if (outcomes.some((o) => o.kind === "failClosed")) {
-    return jsonError(
-      503,
-      "rate_limit_unavailable",
-      "Service temporarily unavailable. Please retry shortly.",
-      FAIL_CLOSED_RETRY_AFTER_SEC,
-    );
-  }
-  const denied = outcomes.flatMap((o) =>
-    o.kind === "ok" && !o.result.success ? [o.result] : [],
-  );
-  if (denied.length > 0) {
-    const reset = Math.max(...denied.map((r) => r.reset));
-    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
-    return jsonError(429, "rate_limited", message, retryAfter);
+  const succeededLabels: string[] = [];
+  for (const check of checks) {
+    const outcome = await safeLimit(check.limiter, check.key);
+    if (outcome.kind === "failClosed") {
+      if (succeededLabels.length > 0) {
+        // The earlier limiter(s) already consumed their tokens against the
+        // upstream; this one failed → 503. Surface the asymmetry so an
+        // operator looking at "device locked out of /realtime-token" can
+        // correlate to the Upstash blip in the same time window.
+        console.warn("ratelimit.partial_drain", {
+          succeededLabels: [...succeededLabels],
+          failedLabel: outcome.label,
+        });
+      }
+      return jsonError(
+        503,
+        "rate_limit_unavailable",
+        "Service temporarily unavailable. Please retry shortly.",
+        FAIL_CLOSED_RETRY_AFTER_SEC,
+      );
+    }
+    if (outcome.kind === "failOpen") {
+      succeededLabels.push(outcome.label);
+      continue;
+    }
+    if (!outcome.result.success) {
+      const retryAfter = Math.max(
+        1,
+        Math.ceil((outcome.result.reset - Date.now()) / 1000),
+      );
+      return jsonError(429, "rate_limited", message, retryAfter);
+    }
+    succeededLabels.push(check.limiter.label);
   }
   return null;
 }

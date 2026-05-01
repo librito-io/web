@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { pairRequestLimiter, safeLimit } from "$lib/server/ratelimit";
+import { pairRequestLimiter, legacySafeLimit } from "$lib/server/ratelimit";
 import { requestPairingCode } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
@@ -10,7 +10,7 @@ const UUID_RE =
 export const POST: RequestHandler = async ({ request, getClientAddress }) => {
   // Rate limit by IP
   const ip = getClientAddress();
-  const { success, reset } = await safeLimit(
+  const { success, reset } = await legacySafeLimit(
     pairRequestLimiter,
     ip,
     "pair:request",

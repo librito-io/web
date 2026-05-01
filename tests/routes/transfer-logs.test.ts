@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
 vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughSafeLimit } = await import("../helpers");
+  const { passThroughLegacySafeLimit } = await import("../helpers");
   return {
     transferUploadLimiter: {
       limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
@@ -17,7 +17,7 @@ vi.mock("$lib/server/ratelimit", async () => {
     transferRetryLimiter: {
       limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
     },
-    safeLimit: passThroughSafeLimit,
+    legacySafeLimit: passThroughLegacySafeLimit,
   };
 });
 

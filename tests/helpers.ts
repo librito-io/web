@@ -212,7 +212,7 @@ export function createMockSupabase() {
  * semantics rather than an uncaught rejection. Replaces 8 inline copies
  * across `tests/routes/*.test.ts`.
  */
-export const passThroughSafeLimit = async (
+export const passThroughLegacySafeLimit = async (
   limiter: {
     limit: (k: string) => Promise<{ success: boolean; reset: number }>;
   },

@@ -1,7 +1,7 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
-import { syncLimiter, safeLimit } from "$lib/server/ratelimit";
+import { syncLimiter, legacySafeLimit } from "$lib/server/ratelimit";
 import { validateSyncPayload, processSync } from "$lib/server/sync";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
@@ -17,7 +17,7 @@ export const POST: RequestHandler = async ({ request }) => {
   const { device } = authResult;
 
   // 2. Rate limit by device ID
-  const { success, reset } = await safeLimit(
+  const { success, reset } = await legacySafeLimit(
     syncLimiter,
     device.id,
     "sync:device",

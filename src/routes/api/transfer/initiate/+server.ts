@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { transferUploadLimiter, safeLimit } from "$lib/server/ratelimit";
+import { transferUploadLimiter, legacySafeLimit } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import {
   sanitizeFilename,
@@ -53,7 +53,7 @@ export const POST: RequestHandler = async ({
   }
   const clientSha = sha256;
 
-  const { success, reset } = await safeLimit(
+  const { success, reset } = await legacySafeLimit(
     transferUploadLimiter,
     user.id,
     "transfer:upload",

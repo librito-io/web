@@ -20,13 +20,13 @@ vi.mock("$lib/server/pairing", () => ({
 }));
 
 vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughSafeLimit } = await import("../helpers");
+  const { passThroughLegacySafeLimit } = await import("../helpers");
   return {
     redis: {},
     pairClaimLimiter: {
       limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
     },
-    safeLimit: passThroughSafeLimit,
+    legacySafeLimit: passThroughLegacySafeLimit,
   };
 });
 

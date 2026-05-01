@@ -1,7 +1,10 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
-import { transferDownloadLimiter, safeLimit } from "$lib/server/ratelimit";
+import {
+  transferDownloadLimiter,
+  legacySafeLimit,
+} from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { DOWNLOAD_URL_TTL } from "$lib/server/transfer";
 
@@ -17,7 +20,7 @@ export const GET: RequestHandler = async ({ request, params }) => {
   const { device } = authResult;
 
   // 2. Rate limit by device ID
-  const { success, reset } = await safeLimit(
+  const { success, reset } = await legacySafeLimit(
     transferDownloadLimiter,
     device.id,
     "transfer:download",

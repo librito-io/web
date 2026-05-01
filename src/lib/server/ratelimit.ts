@@ -4,6 +4,7 @@ import {
   UPSTASH_REDIS_REST_URL,
   UPSTASH_REDIS_REST_TOKEN,
 } from "$env/static/private";
+import { jsonError } from "$lib/server/errors";
 
 // `@upstash/redis` defaults to 3 retries with exponential backoff (~4.3 s
 // total hold) before surfacing the error. Every request-path Redis call —
@@ -32,9 +33,8 @@ export const redis = new Redis({
 // Per-limiter fail-mode policy (PR #48).
 //
 // Each limiter declares its posture at construction. Routes use
-// `enforceRateLimit` / `enforceRateLimits` (added in the next commit) to
-// map the limiter's outcome to an HTTP response without re-deciding the
-// policy at the callsite.
+// `enforceRateLimit` / `enforceRateLimits` to map the limiter's outcome
+// to an HTTP response without re-deciding the policy at the callsite.
 //
 // failMode: "open"   — Upstash outage allows the request. Use for
 //                      availability-class limits where downstream auth/
@@ -83,27 +83,168 @@ export function createLimiter(opts: {
   };
 }
 
+// ----------------------------------------------------------------------
+// Internal: single-limiter check with timeout + fail-mode handling.
+// Public callers should use enforceRateLimit / enforceRateLimits below.
+// ----------------------------------------------------------------------
+
+const UPSTASH_TIMEOUT_MS = 1500;
+const FAIL_CLOSED_RETRY_AFTER_SEC = 30;
+
+type FailClosedSentinel = { failClosed: true };
+
+function isFailClosed(
+  v: LimitResult | FailClosedSentinel,
+): v is FailClosedSentinel {
+  return "failClosed" in v && v.failClosed === true;
+}
+
+function syntheticAllowResult(): LimitResult {
+  return {
+    success: true,
+    limit: 0,
+    remaining: 0,
+    reset: 0,
+    pending: Promise.resolve(),
+  } as LimitResult;
+}
+
+function isProgrammerError(err: unknown): boolean {
+  return (
+    err instanceof RangeError ||
+    err instanceof SyntaxError ||
+    err instanceof ReferenceError
+  );
+}
+
+function isTransportError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === "TypeError" && "cause" in err) return true;
+  return /fetch failed|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|abort|network/i.test(
+    err.message,
+  );
+}
+
+async function safeLimit(
+  limiter: RateLimiter,
+  key: string,
+): Promise<LimitResult | FailClosedSentinel> {
+  const ctrl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      // signal not yet consumed by Upstash SDK — placeholder for when it supports AbortSignal
+      ctrl.abort();
+      reject(
+        Object.assign(new Error("ratelimit_timeout"), { __timeout: true }),
+      );
+    }, UPSTASH_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([limiter.limit(key), timeoutPromise]);
+  } catch (err) {
+    if (isProgrammerError(err)) throw err;
+    const isTimeout =
+      typeof err === "object" && err !== null && "__timeout" in err;
+    const errorName = err instanceof Error ? err.name : typeof err;
+    const error = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    if (isTimeout) {
+      console.error("ratelimit.upstash_timeout", {
+        limiter: limiter.label,
+        failMode: limiter.failMode,
+        timeoutMs: UPSTASH_TIMEOUT_MS,
+      });
+    } else if (isTransportError(err)) {
+      console.error("ratelimit.upstash_unreachable", {
+        limiter: limiter.label,
+        failMode: limiter.failMode,
+        error,
+        stack,
+      });
+    } else {
+      console.error("ratelimit.unexpected_throw", {
+        limiter: limiter.label,
+        failMode: limiter.failMode,
+        errorName,
+        error,
+        stack,
+      });
+    }
+    return limiter.failMode === "closed"
+      ? { failClosed: true }
+      : syntheticAllowResult();
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /**
- * Wrap a `Ratelimit.limit()` call so an Upstash outage fails open (allow
- * the request) instead of surfacing 5xx.
- *
- * Rationale: rate limits are an availability guard, not a security
- * boundary. The downstream business logic still enforces the actual
- * security invariants (auth, RLS, token hash lookup, claim atomicity).
- * The cost of allowing a request during a partial-Upstash outage is one
- * unmetered request per route hit; the cost of NOT allowing it is a
- * 504-storm cascade that brings down endpoints with no actual rate-check
- * work to do.
- *
- * Logs `ratelimit.upstash_unreachable` with the supplied `label` so an
- * operator can correlate the throw across rate-limiter prefixes. The raw
- * `key` is intentionally not logged — for unauth pair routes it would be
- * the client IP, and for `pair:claim` it would be `${code}:${ip}` where
- * the pairing code is a 5-min credential. The `label` plus the structured
- * `error.message`/`stack` is enough for outage forensics without putting
- * PII or credentials into log retention.
+ * Single-limiter route helper. Returns a 429 Response on denial, a 503
+ * Response on Upstash failure for fail-closed limiters, or null when the
+ * route should proceed.
  */
-export async function safeLimit(
+export async function enforceRateLimit(
+  limiter: RateLimiter,
+  key: string,
+  message: string,
+): Promise<Response | null> {
+  const result = await safeLimit(limiter, key);
+  if (isFailClosed(result)) {
+    return jsonError(
+      503,
+      "rate_limit_unavailable",
+      "Service temporarily unavailable. Please retry shortly.",
+      FAIL_CLOSED_RETRY_AFTER_SEC,
+    );
+  }
+  if (result.success) return null;
+  const retryAfter = Math.max(1, Math.ceil((result.reset - Date.now()) / 1000));
+  return jsonError(429, "rate_limited", message, retryAfter);
+}
+
+/**
+ * Multi-limiter route helper. Runs all checks via Promise.all (no
+ * short-circuit — all checks are gated on the same Upstash availability,
+ * so latency is dominated by the slowest call regardless). Precedence:
+ * any failClosed → 503; else any deny → 429 with max(reset); else null.
+ */
+export async function enforceRateLimits(
+  checks: Array<{ limiter: RateLimiter; key: string }>,
+  message: string,
+): Promise<Response | null> {
+  if (checks.length === 0) {
+    throw new Error("enforceRateLimits: checks must be a non-empty array");
+  }
+  const results = await Promise.all(
+    checks.map((c) => safeLimit(c.limiter, c.key)),
+  );
+  if (results.some(isFailClosed)) {
+    return jsonError(
+      503,
+      "rate_limit_unavailable",
+      "Service temporarily unavailable. Please retry shortly.",
+      FAIL_CLOSED_RETRY_AFTER_SEC,
+    );
+  }
+  const denied = (results as LimitResult[]).filter((r) => !r.success);
+  if (denied.length > 0) {
+    const reset = Math.max(...denied.map((r) => r.reset));
+    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
+    return jsonError(429, "rate_limited", message, retryAfter);
+  }
+  return null;
+}
+
+/**
+ * @deprecated PR #47 shim — kept only so the in-progress route migration
+ * can land in atomic commits. Removed in the final commit of PR #48.
+ *
+ * Body is identical to PR #47's `safeLimit`: catch-all wrapper returning
+ * `{ success: true, reset: 0 }` on any throw, with the structured
+ * `ratelimit.upstash_unreachable` log line and no `key` in payload.
+ */
+export async function legacySafeLimit(
   limiter: Ratelimit,
   key: string,
   label: string,

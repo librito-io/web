@@ -1,7 +1,7 @@
 import type { RequestHandler } from "./$types";
 import { authenticateDevice } from "$lib/server/auth";
 import { createAdminClient } from "$lib/server/supabase";
-import { transferConfirmLimiter, safeLimit } from "$lib/server/ratelimit";
+import { transferConfirmLimiter, legacySafeLimit } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { recordConfirmFailure } from "$lib/server/transfer";
 
@@ -16,7 +16,7 @@ export const POST: RequestHandler = async ({ request, params }) => {
   const { device } = authResult;
   const transferId = params.id;
 
-  const { success, reset } = await safeLimit(
+  const { success, reset } = await legacySafeLimit(
     transferConfirmLimiter,
     `${device.id}:${transferId}`,
     "transfer:confirm",

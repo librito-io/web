@@ -1,6 +1,10 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { redis, pairClaimLimiter, safeLimit } from "$lib/server/ratelimit";
+import {
+  redis,
+  pairClaimLimiter,
+  legacySafeLimit,
+} from "$lib/server/ratelimit";
 import { claimPairingCode } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
@@ -27,7 +31,7 @@ export const POST: RequestHandler = async ({
 
   // Rate limit by code:IP
   const ip = getClientAddress();
-  const { success, reset } = await safeLimit(
+  const { success, reset } = await legacySafeLimit(
     pairClaimLimiter,
     `${code}:${ip}`,
     "pair:claim",

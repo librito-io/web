@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { transferRetryLimiter, safeLimit } from "$lib/server/ratelimit";
+import { transferRetryLimiter, legacySafeLimit } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
 export const POST: RequestHandler = async ({
@@ -10,7 +10,7 @@ export const POST: RequestHandler = async ({
   const { user } = await safeGetSession();
   if (!user) return jsonError(401, "unauthorized", "Must be logged in");
 
-  const { success, reset } = await safeLimit(
+  const { success, reset } = await legacySafeLimit(
     transferRetryLimiter,
     user.id,
     "transfer:retry",

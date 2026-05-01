@@ -11,6 +11,12 @@
 //    through as `null`, not as the empty string. The single NULL → ""
 //    conversion lives in pairing.ts:checkPairingStatus.
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { FAIL_CLOSED_RETRY_AFTER_SEC } from "$lib/server/ratelimit.constants";
+
+vi.mock("$env/static/private", () => ({
+  UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
+  UPSTASH_REDIS_REST_TOKEN: "mock-token",
+}));
 
 vi.mock("$lib/server/pairing", () => ({
   claimPairingCode: vi.fn(async () => ({
@@ -19,11 +25,15 @@ vi.mock("$lib/server/pairing", () => ({
   })),
 }));
 
-vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughEnforceRateLimit } = await import("../helpers");
+// Substitute only the limiter export — `enforceRateLimit` and the rest
+// of the module stay real, so the route exercises the production
+// fail-closed path (safeLimit + jsonError) end-to-end.
+vi.mock("$lib/server/ratelimit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
   return {
-    redis: {},
+    ...actual,
     pairClaimLimiter: {
+      ...actual.pairClaimLimiter,
       limit: vi.fn(async () => ({
         success: true,
         reset: Date.now() + 60_000,
@@ -31,10 +41,7 @@ vi.mock("$lib/server/ratelimit", async () => {
         remaining: 4,
         pending: Promise.resolve(),
       })),
-      label: "pair:claim",
-      failMode: "closed",
     },
-    enforceRateLimit: passThroughEnforceRateLimit,
   };
 });
 
@@ -75,7 +82,9 @@ describe("POST /api/pair/claim — fail-closed under Upstash outage", () => {
     const event = buildEvent({ code: "123456" }, { id: "u-1", email: "u@x" });
     const res = await POST(event);
     expect(res.status).toBe(503);
-    expect(res.headers.get("Retry-After")).toBe("30");
+    expect(res.headers.get("Retry-After")).toBe(
+      String(FAIL_CLOSED_RETRY_AFTER_SEC),
+    );
     const body = await res.json();
     expect(body.error).toBe("rate_limit_unavailable");
     errorSpy.mockRestore();

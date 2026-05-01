@@ -2,54 +2,33 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
-vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughEnforceRateLimit } = await import("../helpers");
+vi.mock("$env/static/private", () => ({
+  UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
+  UPSTASH_REDIS_REST_TOKEN: "mock-token",
+}));
+
+vi.mock("$lib/server/ratelimit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
+  const allow = () =>
+    vi.fn(async () => ({
+      success: true,
+      reset: Date.now() + 60_000,
+      limit: 5,
+      remaining: 4,
+      pending: Promise.resolve(),
+    }));
   return {
-    transferUploadLimiter: {
-      limit: vi.fn(async () => ({
-        success: true,
-        reset: Date.now() + 60_000,
-        limit: 5,
-        remaining: 4,
-        pending: Promise.resolve(),
-      })),
-      label: "transfer:upload",
-      failMode: "open",
-    },
+    ...actual,
+    transferUploadLimiter: { ...actual.transferUploadLimiter, limit: allow() },
     transferDownloadLimiter: {
-      limit: vi.fn(async () => ({
-        success: true,
-        reset: Date.now() + 60_000,
-        limit: 5,
-        remaining: 4,
-        pending: Promise.resolve(),
-      })),
-      label: "transfer:download",
-      failMode: "open",
+      ...actual.transferDownloadLimiter,
+      limit: allow(),
     },
     transferConfirmLimiter: {
-      limit: vi.fn(async () => ({
-        success: true,
-        reset: Date.now() + 60_000,
-        limit: 5,
-        remaining: 4,
-        pending: Promise.resolve(),
-      })),
-      label: "transfer:confirm",
-      failMode: "open",
+      ...actual.transferConfirmLimiter,
+      limit: allow(),
     },
-    transferRetryLimiter: {
-      limit: vi.fn(async () => ({
-        success: true,
-        reset: Date.now() + 60_000,
-        limit: 5,
-        remaining: 4,
-        pending: Promise.resolve(),
-      })),
-      label: "transfer:retry",
-      failMode: "open",
-    },
-    enforceRateLimit: passThroughEnforceRateLimit,
+    transferRetryLimiter: { ...actual.transferRetryLimiter, limit: allow() },
   };
 });
 

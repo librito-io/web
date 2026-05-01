@@ -2,10 +2,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
-vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughEnforceRateLimit } = await import("../helpers");
+vi.mock("$env/static/private", () => ({
+  UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
+  UPSTASH_REDIS_REST_TOKEN: "mock-token",
+}));
+
+vi.mock("$lib/server/ratelimit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
   return {
+    ...actual,
     transferRetryLimiter: {
+      ...actual.transferRetryLimiter,
       limit: vi.fn(async () => ({
         success: true,
         reset: Date.now() + 60_000,
@@ -13,10 +20,7 @@ vi.mock("$lib/server/ratelimit", async () => {
         remaining: 4,
         pending: Promise.resolve(),
       })),
-      label: "transfer:retry",
-      failMode: "open",
     },
-    enforceRateLimit: passThroughEnforceRateLimit,
   };
 });
 

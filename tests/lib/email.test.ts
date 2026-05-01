@@ -50,6 +50,49 @@ describe("sendWelcomeEmail", () => {
     expect(call.html).not.toContain("{{APP_URL}}");
   });
 
+  it("strips injected payloads from a malicious siteUrl", async () => {
+    await sendWelcomeEmail(
+      "user@example.com",
+      'https://evil.com"><script>alert(1)</script>',
+    );
+
+    const client = _getResendClient();
+    if (!client) throw new Error("Client should exist in test");
+    const call = vi.mocked(client.emails.send).mock.calls[0][0];
+    // safeSiteUrl rejects unparseable URLs (the embedded `">` makes WHATWG
+    // URL throw) and falls back to the canonical origin.
+    expect(call.html).not.toContain("<script>alert(1)</script>");
+    expect(call.html).not.toContain("evil.com");
+    expect(call.html).toContain("https://librito.io/app");
+  });
+
+  it("strips path/query/fragment from a parseable but extended siteUrl", async () => {
+    // A parseable URL with a path — safeSiteUrl returns origin only, so
+    // any future template that drops siteUrl into an attribute can't be
+    // pivoted via path/query injection.
+    await sendWelcomeEmail(
+      "user@example.com",
+      "https://attacker.example/some/path?q=1#frag",
+    );
+
+    const client = _getResendClient();
+    if (!client) throw new Error("Client should exist in test");
+    const call = vi.mocked(client.emails.send).mock.calls[0][0];
+    expect(call.html).toContain("https://attacker.example/app");
+    expect(call.html).not.toContain("/some/path");
+    expect(call.html).not.toContain("?q=1");
+    expect(call.html).not.toContain("#frag");
+  });
+
+  it("falls back to canonical site URL when given an unparseable siteUrl", async () => {
+    await sendWelcomeEmail("user@example.com", "not a url at all");
+
+    const client = _getResendClient();
+    if (!client) throw new Error("Client should exist in test");
+    const call = vi.mocked(client.emails.send).mock.calls[0][0];
+    expect(call.html).toContain("https://librito.io/app");
+  });
+
   it("does not throw on send failure", async () => {
     const client = _getResendClient();
     if (!client) throw new Error("Client should exist in test");

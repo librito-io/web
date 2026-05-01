@@ -21,6 +21,18 @@ function getClient(): Resend | null {
 /** Exposed for testing only */
 export const _getResendClient = getClient;
 
+function safeSiteUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new Error("scheme");
+    }
+    return parsed.origin;
+  } catch {
+    return "https://librito.io";
+  }
+}
+
 export async function sendWelcomeEmail(
   email: string,
   siteUrl: string,
@@ -29,7 +41,10 @@ export async function sendWelcomeEmail(
     const client = getClient();
     if (!client) return;
 
-    const html = welcomeHtml.replace(/\{\{APP_URL\}\}/g, `${siteUrl}/app`);
+    const html = welcomeHtml.replace(
+      /\{\{APP_URL\}\}/g,
+      `${safeSiteUrl(siteUrl)}/app`,
+    );
 
     await client.emails.send({
       from: "Librito <noreply@librito.io>",

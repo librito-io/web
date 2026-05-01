@@ -3,6 +3,8 @@ import { authenticateDevice } from "$lib/server/auth";
 import { createMockSupabase } from "../helpers";
 
 const TEST_TOKEN = "sk_device_test_token_abc123def456";
+const VALID_DEVICE_ID = "11111111-1111-4111-8111-111111111111";
+const VALID_USER_ID = "22222222-2222-4222-8222-222222222222";
 
 function makeRequest(token?: string): Request {
   const headers: Record<string, string> = {};
@@ -17,8 +19,8 @@ describe("authenticateDevice", () => {
     const supabase = createMockSupabase();
     supabase._results.set("devices.select", {
       data: {
-        id: "device-uuid",
-        user_id: "user-uuid",
+        id: VALID_DEVICE_ID,
+        user_id: VALID_USER_ID,
         hardware_id: "hw-001",
         name: "My Reader",
         revoked_at: null,
@@ -29,8 +31,8 @@ describe("authenticateDevice", () => {
     const result = await authenticateDevice(makeRequest(TEST_TOKEN), supabase);
     expect(result).toEqual({
       device: {
-        id: "device-uuid",
-        userId: "user-uuid",
+        id: VALID_DEVICE_ID,
+        userId: VALID_USER_ID,
         hardwareId: "hw-001",
         name: "My Reader",
       },
@@ -78,12 +80,46 @@ describe("authenticateDevice", () => {
     expect(result).toEqual({ error: "invalid_token" });
   });
 
+  it("returns invalid_token when device.id is not a valid UUID", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("devices.select", {
+      data: {
+        id: "not-a-uuid'); DROP TABLE devices;--",
+        user_id: VALID_USER_ID,
+        hardware_id: "hw-001",
+        name: "Sketchy Reader",
+        revoked_at: null,
+      },
+      error: null,
+    });
+
+    const result = await authenticateDevice(makeRequest(TEST_TOKEN), supabase);
+    expect(result).toEqual({ error: "invalid_token" });
+  });
+
+  it("returns invalid_token when device.user_id is not a valid UUID", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("devices.select", {
+      data: {
+        id: VALID_DEVICE_ID,
+        user_id: "not-a-uuid",
+        hardware_id: "hw-001",
+        name: "Sketchy Reader",
+        revoked_at: null,
+      },
+      error: null,
+    });
+
+    const result = await authenticateDevice(makeRequest(TEST_TOKEN), supabase);
+    expect(result).toEqual({ error: "invalid_token" });
+  });
+
   it("returns token_revoked when device is revoked", async () => {
     const supabase = createMockSupabase();
     supabase._results.set("devices.select", {
       data: {
-        id: "device-uuid",
-        user_id: "user-uuid",
+        id: VALID_DEVICE_ID,
+        user_id: VALID_USER_ID,
         hardware_id: "hw-001",
         name: "Revoked Reader",
         revoked_at: "2026-04-10T00:00:00Z",

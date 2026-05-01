@@ -19,6 +19,9 @@ const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
   token_revoked: "Device token has been revoked. Re-pair the device.",
 };
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // All auth errors map to 401 (per RFC 7235 — missing/invalid/revoked
 // credentials all mean "you are not authenticated"). Used by every
 // authenticated device endpoint. /api/device/unpair is the one
@@ -56,6 +59,14 @@ export async function authenticateDevice(
 
   if (device.revoked_at) {
     return { error: "token_revoked" };
+  }
+
+  // Defense-in-depth: device.id and device.user_id flow into raw PostgREST
+  // filter strings (sync.ts .or()/.eq()). UUID format is enforced by the
+  // schema, but validating at the auth boundary makes the trust contract
+  // explicit and survives future schema relaxations.
+  if (!UUID_RE.test(device.id) || !UUID_RE.test(device.user_id)) {
+    return { error: "invalid_token" };
   }
 
   return {

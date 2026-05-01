@@ -236,35 +236,6 @@ export async function enforceRateLimits(
   return null;
 }
 
-/**
- * @deprecated PR #47 shim — kept only so the in-progress route migration
- * can land in atomic commits. Removed in the final commit of PR #48.
- *
- * Body is identical to PR #47's `safeLimit`: catch-all wrapper returning
- * `{ success: true, reset: 0 }` on any throw, with the structured
- * `ratelimit.upstash_unreachable` log line and no `key` in payload.
- */
-export async function legacySafeLimit(
-  limiter: {
-    limit: (key: string) => Promise<{ success: boolean; reset: number }>;
-  },
-  key: string,
-  label: string,
-): Promise<{ success: boolean; reset: number }> {
-  try {
-    return await limiter.limit(key);
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    const stack = err instanceof Error ? err.stack : undefined;
-    console.error("ratelimit.upstash_unreachable", {
-      limiter: label,
-      error,
-      stack,
-    });
-    return { success: true, reset: 0 };
-  }
-}
-
 // /api/pair/request — 3 requests per minute per IP
 export const pairRequestLimiter = createLimiter({
   window: Ratelimit.slidingWindow(3, "1m"),

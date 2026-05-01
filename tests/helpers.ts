@@ -204,28 +204,6 @@ export function createMockSupabase() {
   };
 }
 
-/**
- * Pass-through mock for `safeLimit` used by every route test that mocks
- * `$lib/server/ratelimit`. Delegates to the underlying limiter's `.limit()`
- * so per-test denial spies (e.g. `limitMock.mockResolvedValueOnce`) still
- * fire, and catches throws into fail-open `{ success: true, reset: 0 }` so
- * tests that force `.limit` to throw observe production fail-open
- * semantics rather than an uncaught rejection. Replaces 8 inline copies
- * across `tests/routes/*.test.ts`.
- */
-export const passThroughLegacySafeLimit = async (
-  limiter: {
-    limit: (k: string) => Promise<{ success: boolean; reset: number }>;
-  },
-  key: string,
-): Promise<{ success: boolean; reset: number }> => {
-  try {
-    return await limiter.limit(key);
-  } catch {
-    return { success: true, reset: 0 };
-  }
-};
-
 type _RateLimiter = {
   limit: (k: string) => Promise<{ success: boolean; reset: number }>;
   label: string;

@@ -91,23 +91,19 @@ export function createLimiter(opts: {
 const UPSTASH_TIMEOUT_MS = 1500;
 const FAIL_CLOSED_RETRY_AFTER_SEC = 30;
 
-type FailClosedSentinel = { failClosed: true };
-
-function isFailClosed(
-  v: LimitResult | FailClosedSentinel,
-): v is FailClosedSentinel {
-  return "failClosed" in v && v.failClosed === true;
-}
-
-function syntheticAllowResult(): LimitResult {
-  return {
-    success: true,
-    limit: 0,
-    remaining: 0,
-    reset: 0,
-    pending: Promise.resolve(),
-  } as LimitResult;
-}
+/**
+ * Outcome of a single `safeLimit` call. Discriminated on `kind` so the
+ * fail-open allow path is distinguishable from a genuine quota success.
+ *   - `ok`         — upstream returned a `LimitResult`; read `.success`.
+ *   - `failOpen`   — upstream errored, limiter policy is fail-open; the
+ *                    caller should treat the request as allowed.
+ *   - `failClosed` — upstream errored, limiter policy is fail-closed; the
+ *                    caller should emit a 503.
+ */
+export type SafeOutcome =
+  | { kind: "ok"; result: LimitResult }
+  | { kind: "failOpen"; label: string }
+  | { kind: "failClosed"; label: string };
 
 function isProgrammerError(err: unknown): boolean {
   return (
@@ -125,10 +121,14 @@ function isTransportError(err: unknown): boolean {
   );
 }
 
-async function safeLimit(
+/**
+ * @internal — exported for unit-test contract assertions only. Production
+ * callers should use `enforceRateLimit` / `enforceRateLimits`.
+ */
+export async function safeLimit(
   limiter: RateLimiter,
   key: string,
-): Promise<LimitResult | FailClosedSentinel> {
+): Promise<SafeOutcome> {
   // The Upstash REST client doesn't accept an AbortSignal on `.limit()`, so
   // a timed-out call still completes in the background. Promise.race caps
   // user-perceived latency; the orphaned request is bounded by the function
@@ -142,7 +142,8 @@ async function safeLimit(
     }, UPSTASH_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([limiter.limit(key), timeoutPromise]);
+    const result = await Promise.race([limiter.limit(key), timeoutPromise]);
+    return { kind: "ok", result };
   } catch (err) {
     if (isProgrammerError(err)) throw err;
     const isTimeout =
@@ -173,8 +174,8 @@ async function safeLimit(
       });
     }
     return limiter.failMode === "closed"
-      ? { failClosed: true }
-      : syntheticAllowResult();
+      ? { kind: "failClosed", label: limiter.label }
+      : { kind: "failOpen", label: limiter.label };
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
@@ -190,8 +191,8 @@ export async function enforceRateLimit(
   key: string,
   message: string,
 ): Promise<Response | null> {
-  const result = await safeLimit(limiter, key);
-  if (isFailClosed(result)) {
+  const outcome = await safeLimit(limiter, key);
+  if (outcome.kind === "failClosed") {
     return jsonError(
       503,
       "rate_limit_unavailable",
@@ -199,8 +200,12 @@ export async function enforceRateLimit(
       FAIL_CLOSED_RETRY_AFTER_SEC,
     );
   }
-  if (result.success) return null;
-  const retryAfter = Math.max(1, Math.ceil((result.reset - Date.now()) / 1000));
+  if (outcome.kind === "failOpen") return null;
+  if (outcome.result.success) return null;
+  const retryAfter = Math.max(
+    1,
+    Math.ceil((outcome.result.reset - Date.now()) / 1000),
+  );
   return jsonError(429, "rate_limited", message, retryAfter);
 }
 
@@ -217,10 +222,10 @@ export async function enforceRateLimits(
   if (checks.length === 0) {
     throw new Error("enforceRateLimits: checks must be a non-empty array");
   }
-  const results = await Promise.all(
+  const outcomes = await Promise.all(
     checks.map((c) => safeLimit(c.limiter, c.key)),
   );
-  if (results.some(isFailClosed)) {
+  if (outcomes.some((o) => o.kind === "failClosed")) {
     return jsonError(
       503,
       "rate_limit_unavailable",
@@ -228,7 +233,9 @@ export async function enforceRateLimits(
       FAIL_CLOSED_RETRY_AFTER_SEC,
     );
   }
-  const denied = (results as LimitResult[]).filter((r) => !r.success);
+  const denied = outcomes.flatMap((o) =>
+    o.kind === "ok" && !o.result.success ? [o.result] : [],
+  );
   if (denied.length > 0) {
     const reset = Math.max(...denied.map((r) => r.reset));
     const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));

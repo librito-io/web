@@ -11,9 +11,11 @@ import {
   createLimiter,
   enforceRateLimit,
   enforceRateLimits,
+  safeLimit,
   type RateLimiter,
   type LimitResult,
   type FailMode,
+  type SafeOutcome,
 } from "$lib/server/ratelimit";
 import { Ratelimit } from "@upstash/ratelimit";
 
@@ -276,6 +278,66 @@ describe("safeLimit — log payload hygiene (no PII / credentials)", () => {
     const payload = errorSpy.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(payload.key).toBeUndefined();
     expect(JSON.stringify(payload)).not.toContain(SENSITIVE_KEY);
+  });
+});
+
+describe("safeLimit — discriminated-union outcome shape", () => {
+  // Contract test: future readers of `SafeOutcome` should see that:
+  //   - upstream success/deny → kind:"ok" carrying the real LimitResult
+  //   - upstream throw + failMode:"open"   → kind:"failOpen"
+  //   - upstream throw + failMode:"closed" → kind:"failClosed"
+  // No synthetic LimitResult ever stands in for a fail-open allow.
+
+  it("returns kind:'ok' with the real LimitResult on upstream success", async () => {
+    const allowed = fullLimitResult({ success: true, limit: 5, remaining: 4 });
+    const limiter = fakeLimiter("open", async () => allowed);
+    const outcome = await safeLimit(limiter, "k");
+    expect(outcome.kind).toBe("ok");
+    if (outcome.kind === "ok") {
+      expect(outcome.result).toBe(allowed);
+    }
+  });
+
+  it("returns kind:'ok' with the real LimitResult on upstream deny", async () => {
+    const denied = fullLimitResult({
+      success: false,
+      reset: Date.now() + 1000,
+    });
+    const limiter = fakeLimiter("closed", async () => denied);
+    const outcome = await safeLimit(limiter, "k");
+    expect(outcome.kind).toBe("ok");
+    if (outcome.kind === "ok") {
+      expect(outcome.result.success).toBe(false);
+    }
+  });
+
+  it("returns kind:'failOpen' with the limiter label when fail-open limiter throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const limiter = fakeLimiter("open", async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    const outcome = await safeLimit(limiter, "k");
+    expect(outcome).toEqual({ kind: "failOpen", label: "test:open" });
+  });
+
+  it("returns kind:'failClosed' with the limiter label when fail-closed limiter throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const limiter = fakeLimiter("closed", async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    const outcome = await safeLimit(limiter, "k");
+    expect(outcome).toEqual({ kind: "failClosed", label: "test:closed" });
+  });
+
+  it("SafeOutcome is exported and assignable to the three documented variants", () => {
+    const ok: SafeOutcome = { kind: "ok", result: fullLimitResult() };
+    const open: SafeOutcome = { kind: "failOpen", label: "x" };
+    const closed: SafeOutcome = { kind: "failClosed", label: "y" };
+    expect([ok.kind, open.kind, closed.kind]).toEqual([
+      "ok",
+      "failOpen",
+      "failClosed",
+    ]);
   });
 });
 

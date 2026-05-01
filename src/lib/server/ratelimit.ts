@@ -245,7 +245,9 @@ export async function enforceRateLimits(
  * `ratelimit.upstash_unreachable` log line and no `key` in payload.
  */
 export async function legacySafeLimit(
-  limiter: Ratelimit,
+  limiter: {
+    limit: (key: string) => Promise<{ success: boolean; reset: number }>;
+  },
   key: string,
   label: string,
 ): Promise<{ success: boolean; reset: number }> {
@@ -264,62 +266,62 @@ export async function legacySafeLimit(
 }
 
 // /api/pair/request — 3 requests per minute per IP
-export const pairRequestLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(3, "1m"),
+export const pairRequestLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(3, "1m"),
   prefix: "rl:pair:request",
+  failMode: "open",
 });
 
 // /api/pair/status/[pairingId] — 1 request per 3 seconds per IP
-export const pairStatusLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(1, "3s"),
+export const pairStatusLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(1, "3s"),
   prefix: "rl:pair:status",
+  failMode: "open",
 });
 
 // /api/pair/claim — 5 attempts per 5 minutes per code:IP
-export const pairClaimLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(5, "5m"),
+export const pairClaimLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(5, "5m"),
   prefix: "rl:pair:claim",
+  failMode: "closed",
 });
 
 // /api/sync — 1 request per 30 seconds per device
-export const syncLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(1, "30s"),
-  prefix: "rl:sync",
+export const syncLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(1, "30s"),
+  prefix: "rl:sync:device",
+  failMode: "open",
 });
 
 // Transfer: upload initiation (browser, per user)
-export const transferUploadLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(5, "1m"),
+export const transferUploadLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(5, "1m"),
   prefix: "rl:transfer:upload",
+  failMode: "open",
 });
 
 // Transfer: download URL (device, per device)
-export const transferDownloadLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(1, "10s"),
+export const transferDownloadLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(1, "10s"),
   prefix: "rl:transfer:download",
+  failMode: "open",
 });
 
 // Transfer: confirm (device, per device:transfer). Caps the /confirm-loop
 // abuse window — a stolen device token cannot drive attempt_count from 0
 // to MAX_TRANSFER_ATTEMPTS in tight succession on a single transfer.
-export const transferConfirmLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(5, "1m"),
+export const transferConfirmLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(5, "1m"),
   prefix: "rl:transfer:confirm",
+  failMode: "open",
 });
 
 // Transfer: retry (browser, per user). Mirrors initiate's posture so a
 // failed-row reset cannot be looped from the UI or a script.
-export const transferRetryLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(5, "1m"),
+export const transferRetryLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(5, "1m"),
   prefix: "rl:transfer:retry",
+  failMode: "open",
 });
 
 // /api/realtime-token — two limiters layered for defense in depth.
@@ -327,14 +329,17 @@ export const transferRetryLimiter = new Ratelimit({
 // Per-user: 30 mints / 1 h. Bounds re-pair-loop bypass (a logged-in user
 // re-pairs to mint a new device.id and skip the per-device cap). 30/h
 // covers a fleet of ~25 devices on one account with reconnect headroom.
-export const realtimeTokenLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(1, "60s"),
+//
+// Both fail closed: a single Upstash blip must not collapse the
+// defense-in-depth invariant under a signed-credential mint endpoint.
+export const realtimeTokenLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(1, "60s"),
   prefix: "rl:realtime:token",
+  failMode: "closed",
 });
 
-export const realtimeTokenUserLimiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(30, "1h"),
+export const realtimeTokenUserLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(30, "1h"),
   prefix: "rl:realtime:token:user",
+  failMode: "closed",
 });

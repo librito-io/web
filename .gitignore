@@ -15,3 +15,7 @@ docs/superpowers/
 supabase/.temp/
 supabase/.branches/
 supabase/signing_keys.json
+
+# Working audit docs (mid-session fix trackers). Mirrors docs/superpowers/
+# pattern. Closed audits graduate to tracked docs/audits/ via dedicated PR.
+docs/audits-wip/

@@ -129,10 +129,10 @@ export async function safeLimit(
   limiter: RateLimiter,
   key: string,
 ): Promise<SafeOutcome> {
-  // The Upstash REST client doesn't accept an AbortSignal on `.limit()`, so
-  // a timed-out call still completes in the background. Promise.race caps
-  // user-perceived latency; the orphaned request is bounded by the function
-  // lifetime. When the SDK gains signal support, plumb it through here.
+  // Upstash REST `.limit()` does not accept an `AbortSignal`; a timed-out
+  // call resolves in the background and the result is discarded by
+  // `Promise.race`. The orphaned request is bounded by the function
+  // lifetime.
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
@@ -275,11 +275,19 @@ export async function enforceRateLimits(
   return null;
 }
 
-// /api/pair/request — 3 requests per minute per IP
+// /api/pair/request — 3 requests per minute per IP. Fail-closed because
+// the endpoint is unauthenticated and writes a row to `pairing_codes`
+// per call. The unique index `idx_pairing_codes_unclaimed` covers
+// `code` (not `hardware_id`), so multiple unclaimed rows per
+// `hardware_id` are allowed and bounded only by the 5-minute TTL.
+// Under an Upstash outage the fail-open posture would let an attacker
+// rotating UUIDs flood inserts at platform-permitted rate. The outage
+// cost of fail-closed is anonymous 503s on a route that already retries
+// — acceptable. Mirrors `pairClaimLimiter`'s brute-force-gate posture.
 export const pairRequestLimiter = createLimiter({
   window: Ratelimit.slidingWindow(3, "1m"),
   prefix: "rl:pair:request",
-  failMode: "open",
+  failMode: "closed",
 });
 
 // /api/pair/status/[pairingId] — 1 request per 3 seconds per IP
@@ -320,6 +328,10 @@ export const transferDownloadLimiter = createLimiter({
 // Transfer: confirm (device, per device:transfer). Caps the /confirm-loop
 // abuse window — a stolen device token cannot drive attempt_count from 0
 // to MAX_TRANSFER_ATTEMPTS in tight succession on a single transfer.
+// Fail-open is safe because /confirm is a guarded UPDATE … WHERE
+// status='pending'; replays after Upstash recovery are no-ops. Worst
+// case during outage: a device-authed attacker burns their own quota
+// for no effect on row state.
 export const transferConfirmLimiter = createLimiter({
   window: Ratelimit.slidingWindow(5, "1m"),
   prefix: "rl:transfer:confirm",

@@ -26,7 +26,7 @@ describe("rate-limit policy snapshot", () => {
   // updating the design doc and getting review on the security
   // implication.
   it("locks per-limiter failMode policy", () => {
-    expect(pairRequestLimiter.failMode).toBe("open");
+    expect(pairRequestLimiter.failMode).toBe("closed");
     expect(pairStatusLimiter.failMode).toBe("open");
     expect(pairClaimLimiter.failMode).toBe("closed");
     expect(syncLimiter.failMode).toBe("open");

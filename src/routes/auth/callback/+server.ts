@@ -1,11 +1,15 @@
 import { redirect } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
-import { PUBLIC_SITE_URL } from "$env/static/public";
+import { env } from "$env/dynamic/public";
 import { sendWelcomeEmail } from "$lib/server/email";
 
 // Don't trust the request Host header for outbound email links — pull from
-// build-time env so a misconfigured proxy can't inject phishing links.
-const SITE_URL = PUBLIC_SITE_URL || "https://librito.io";
+// runtime env so a misconfigured proxy can't inject phishing links.
+// Use $env/dynamic/public (not static/public) so an unset PUBLIC_SITE_URL
+// doesn't fail the build; static/public requires the export to exist at
+// build time, which Vercel preview/prod won't have until the env var is
+// configured.
+const SITE_URL = env.PUBLIC_SITE_URL || "https://librito.io";
 
 export const GET: RequestHandler = async ({ url, locals: { supabase } }) => {
   const code = url.searchParams.get("code");

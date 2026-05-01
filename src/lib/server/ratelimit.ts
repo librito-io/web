@@ -5,6 +5,7 @@ import {
   UPSTASH_REDIS_REST_TOKEN,
 } from "$env/static/private";
 import { jsonError } from "$lib/server/errors";
+import { FAIL_CLOSED_RETRY_AFTER_SEC } from "$lib/server/ratelimit.constants";
 
 // `@upstash/redis` defaults to 3 retries with exponential backoff (~4.3 s
 // total hold) before surfacing the error. Every request-path Redis call —
@@ -89,7 +90,6 @@ export function createLimiter(opts: {
 // ----------------------------------------------------------------------
 
 const UPSTASH_TIMEOUT_MS = 1500;
-const FAIL_CLOSED_RETRY_AFTER_SEC = 30;
 
 /**
  * Outcome of a single `safeLimit` call. Discriminated on `kind` so the

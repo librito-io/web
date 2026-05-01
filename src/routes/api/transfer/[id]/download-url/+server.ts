@@ -1,7 +1,10 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
-import { transferDownloadLimiter, safeLimit } from "$lib/server/ratelimit";
+import {
+  transferDownloadLimiter,
+  enforceRateLimit,
+} from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { DOWNLOAD_URL_TTL } from "$lib/server/transfer";
 
@@ -17,15 +20,12 @@ export const GET: RequestHandler = async ({ request, params }) => {
   const { device } = authResult;
 
   // 2. Rate limit by device ID
-  const { success, reset } = await safeLimit(
+  const limited = await enforceRateLimit(
     transferDownloadLimiter,
     device.id,
-    "transfer:download",
+    "Too many requests",
   );
-  if (!success) {
-    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
-    return jsonError(429, "rate_limited", "Too many requests", retryAfter);
-  }
+  if (limited) return limited;
 
   // 3. Fetch transfer and verify ownership + status
   const { data: transfer, error: fetchError } = await supabase

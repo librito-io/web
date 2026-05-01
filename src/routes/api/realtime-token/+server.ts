@@ -6,7 +6,7 @@ import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import {
   realtimeTokenLimiter,
   realtimeTokenUserLimiter,
-  safeLimit,
+  enforceRateLimits,
 } from "$lib/server/ratelimit";
 import {
   mintRealtimeToken,
@@ -46,20 +46,14 @@ export const POST: RequestHandler = async ({ request }) => {
     return jsonError(500, "server_error", "Failed to mint Realtime token");
   }
 
-  const [perDevice, perUser] = await Promise.all([
-    safeLimit(realtimeTokenLimiter, device.id, "realtime:token"),
-    safeLimit(realtimeTokenUserLimiter, device.userId, "realtime:token:user"),
-  ]);
-  if (!perDevice.success || !perUser.success) {
-    const reset = Math.max(perDevice.reset, perUser.reset);
-    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
-    return jsonError(
-      429,
-      "rate_limited",
-      "Too many realtime token requests",
-      retryAfter,
-    );
-  }
+  const limited = await enforceRateLimits(
+    [
+      { limiter: realtimeTokenLimiter, key: device.id },
+      { limiter: realtimeTokenUserLimiter, key: device.userId },
+    ],
+    "Too many realtime token requests",
+  );
+  if (limited) return limited;
 
   try {
     const { token, expiresIn } = await mintRealtimeToken({

@@ -9,12 +9,20 @@ vi.mock("$lib/server/auth", () => ({
 }));
 
 vi.mock("$lib/server/ratelimit", async () => {
-  const { passThroughSafeLimit } = await import("../helpers");
+  const { passThroughEnforceRateLimit } = await import("../helpers");
   return {
     transferConfirmLimiter: {
-      limit: vi.fn(async () => ({ success: true, reset: Date.now() + 60_000 })),
+      limit: vi.fn(async () => ({
+        success: true,
+        reset: Date.now() + 60_000,
+        limit: 5,
+        remaining: 4,
+        pending: Promise.resolve(),
+      })),
+      label: "transfer:confirm",
+      failMode: "open",
     },
-    safeLimit: passThroughSafeLimit,
+    enforceRateLimit: passThroughEnforceRateLimit,
   };
 });
 

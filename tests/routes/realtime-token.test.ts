@@ -237,3 +237,47 @@ describe("POST /api/realtime-token (standby-key ES256)", () => {
     });
   });
 });
+
+describe("POST /api/realtime-token — fail-closed under Upstash outage", () => {
+  beforeEach(() => {
+    limitMock.mockReset();
+    userLimitMock.mockReset();
+    authMock.mockReset();
+  });
+
+  it("returns 503 when per-device limiter throws", async () => {
+    limitMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    userLimitMock.mockResolvedValueOnce({
+      success: true,
+      reset: Date.now() + 60_000,
+      limit: 30,
+      remaining: 29,
+      pending: Promise.resolve(),
+    });
+    authMock.mockResolvedValueOnce({ device: { id: "d-1", userId: "u-1" } });
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(buildRequest());
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("30");
+    errorSpy.mockRestore();
+  });
+
+  it("returns 503 when per-user limiter throws", async () => {
+    limitMock.mockResolvedValueOnce({
+      success: true,
+      reset: Date.now() + 60_000,
+      limit: 1,
+      remaining: 0,
+      pending: Promise.resolve(),
+    });
+    userLimitMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    authMock.mockResolvedValueOnce({ device: { id: "d-1", userId: "u-1" } });
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(buildRequest());
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("30");
+    errorSpy.mockRestore();
+  });
+});

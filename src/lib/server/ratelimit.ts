@@ -18,9 +18,9 @@ import { jsonError } from "$lib/server/errors";
 // rollback_claim_pairing path (PR #40); pairing-read catches the throw
 // and returns code_expired so the device retries on the next 3 s poll
 // (`checkPairingStatus` and `claimPairingCode` replay-path in
-// pairing.ts); ratelimit consumers wrap `.limit()` in `safeLimit` below
-// so a Redis fail surfaces as fail-open (allow the request) rather than
-// 5xx. See audit issue P6.
+// pairing.ts); ratelimit callers use enforceRateLimit / enforceRateLimits,
+// which apply each limiter's declared failMode (open → allow, closed → 503).
+// See audit issue P6 and the PR #48 fail-mode policy design doc.
 const UPSTASH_RETRY_BUDGET = 0;
 
 export const redis = new Redis({
@@ -129,12 +129,13 @@ async function safeLimit(
   limiter: RateLimiter,
   key: string,
 ): Promise<LimitResult | FailClosedSentinel> {
-  const ctrl = new AbortController();
+  // The Upstash REST client doesn't accept an AbortSignal on `.limit()`, so
+  // a timed-out call still completes in the background. Promise.race caps
+  // user-perceived latency; the orphaned request is bounded by the function
+  // lifetime. When the SDK gains signal support, plumb it through here.
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      // signal not yet consumed by Upstash SDK — placeholder for when it supports AbortSignal
-      ctrl.abort();
       reject(
         Object.assign(new Error("ratelimit_timeout"), { __timeout: true }),
       );

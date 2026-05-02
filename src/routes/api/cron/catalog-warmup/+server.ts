@@ -1,0 +1,120 @@
+import type { RequestHandler } from "./$types";
+import { createAdminClient } from "$lib/server/supabase";
+import { jsonError, jsonSuccess } from "$lib/server/errors";
+import { canonicalizeIsbn } from "$lib/server/catalog/isbn";
+import { resolveIsbn } from "$lib/server/catalog/fetcher";
+import {
+  catalogOpenLibraryLimiter,
+  catalogGoogleBooksLimiter,
+} from "$lib/server/ratelimit";
+import {
+  CRON_SECRET,
+  CATALOG_WARMUP_ENABLED,
+  NYT_BOOKS_API_KEY,
+} from "$env/static/private";
+
+const MAX_PER_RUN = 100;
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return out === 0;
+}
+
+async function fetchNytBestsellerIsbns(
+  apiKey: string,
+  fetchFn: typeof fetch,
+): Promise<string[]> {
+  if (!apiKey) return [];
+  const lists = [
+    "hardcover-fiction",
+    "hardcover-nonfiction",
+    "trade-fiction-paperback",
+  ];
+  const isbns = new Set<string>();
+  for (const list of lists) {
+    try {
+      const res = await fetchFn(
+        `https://api.nytimes.com/svc/books/v3/lists/current/${list}.json?api-key=${encodeURIComponent(apiKey)}`,
+      );
+      if (!res.ok) continue;
+      const body = (await res.json()) as {
+        results?: { books?: { primary_isbn13?: string }[] };
+      };
+      for (const b of body.results?.books ?? []) {
+        const c = canonicalizeIsbn(b.primary_isbn13);
+        if (c) isbns.add(c);
+      }
+    } catch (err) {
+      console.warn("catalog_warmup_nyt_failed", { list, error: String(err) });
+    }
+  }
+  return [...isbns];
+}
+
+export const POST: RequestHandler = async ({ request }) => {
+  const auth = request.headers.get("authorization") ?? "";
+  if (!timingSafeEqual(auth, `Bearer ${CRON_SECRET}`)) {
+    return jsonError(401, "unauthorized", "Cron secret mismatch");
+  }
+  if (CATALOG_WARMUP_ENABLED !== "true") {
+    return jsonSuccess({ skipped: true });
+  }
+
+  const supabase = createAdminClient();
+  const start = Date.now();
+  const candidates = await fetchNytBestsellerIsbns(NYT_BOOKS_API_KEY, fetch);
+
+  const { data: known } = await supabase
+    .from("book_catalog")
+    .select("isbn")
+    .in("isbn", candidates);
+  const knownSet = new Set(
+    ((known ?? []) as { isbn: string }[]).map((r) => r.isbn),
+  );
+  const fresh = candidates
+    .filter((i) => !knownSet.has(i))
+    .slice(0, MAX_PER_RUN);
+
+  let resolved = 0;
+  let rateLimited = 0;
+  for (const isbn of fresh) {
+    try {
+      const r = await resolveIsbn(supabase, isbn, {
+        rateLimiters: {
+          openLibrary: catalogOpenLibraryLimiter,
+          googleBooks: catalogGoogleBooksLimiter,
+        },
+      });
+      if (r.rateLimited) {
+        rateLimited += 1;
+        // Pacing — bail out for this run; budget will be replenished by next week.
+        break;
+      }
+      resolved += 1;
+    } catch (err) {
+      console.warn("catalog_warmup_resolve_failed", {
+        isbn,
+        error: String(err),
+      });
+    }
+  }
+
+  const durationMs = Date.now() - start;
+  console.log(
+    JSON.stringify({
+      cron: "catalog-warmup",
+      candidates: candidates.length,
+      resolved,
+      rateLimited,
+      durationMs,
+    }),
+  );
+  return jsonSuccess({
+    candidates: candidates.length,
+    resolved,
+    rateLimited,
+    durationMs,
+  });
+};

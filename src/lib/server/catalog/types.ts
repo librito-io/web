@@ -26,6 +26,13 @@ export interface OpenLibraryWork {
   subjects?: string[];
 }
 
+export interface OpenLibrarySearchDoc {
+  cover_i?: number;
+  title?: string;
+  author_name?: string[];
+  key?: string;
+}
+
 export interface GoogleBooksItem {
   id: string;
   volumeInfo: {

@@ -1,0 +1,30 @@
+{
+  "kind": "books#volumes",
+  "totalItems": 1,
+  "items": [
+    {
+      "kind": "books#volume",
+      "id": "iXn5U2IziiEC",
+      "etag": "dummyEtag",
+      "selfLink": "https://www.googleapis.com/books/v1/volumes/iXn5U2IziiEC",
+      "volumeInfo": {
+        "title": "The Great Gatsby",
+        "authors": ["F. Scott Fitzgerald"],
+        "publisher": "Scribner",
+        "publishedDate": "1925",
+        "description": "The story of the mysteriously wealthy Jay Gatsby and his love for the beautiful Daisy Buchanan, of lavish parties on Long Island at a time when The New York Times noted gin was the national drink and sex the national obsession.",
+        "industryIdentifiers": [
+          { "type": "ISBN_10", "identifier": "0743273567" },
+          { "type": "ISBN_13", "identifier": "9780743273565" }
+        ],
+        "pageCount": 180,
+        "categories": ["Fiction"],
+        "language": "en",
+        "imageLinks": {
+          "smallThumbnail": "http://books.google.com/books/content?id=iXn5U2IziiEC&printsec=frontcover&img=1&zoom=5&source=gbs_api",
+          "thumbnail": "http://books.google.com/books/content?id=iXn5U2IziiEC&printsec=frontcover&img=1&zoom=1&source=gbs_api"
+        }
+      }
+    }
+  ]
+}

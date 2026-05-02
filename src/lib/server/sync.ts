@@ -408,11 +408,45 @@ export async function processSync(
   // below. This eliminates the `as unknown as XRow[]` casts at the use sites
   // and keeps the count-query `.count` accessor on a properly typed envelope.
   // Replace once L6 ships generated types via `supabase gen types typescript`.
+  const transferReadPromise = supabase
+    .from("book_transfers")
+    .select("id, filename, file_size, storage_path, sha256")
+    .eq("user_id", userId)
+    .eq("status", "pending")
+    // deviceId UUID-validated at auth boundary; do NOT pass user-controlled identifiers to .or() filters without validation.
+    .or(`device_id.eq.${deviceId},device_id.is.null`)
+    .overrideTypes<TransferRow[], { merge: false }>();
+
+  // kicks off signed-URL fan-out as soon as transfers land, in parallel with the other read-phase queries.
+  const urlsPromise = transferReadPromise.then(async (result) => {
+    if (result.error) {
+      return {
+        result,
+        urls: [] as PromiseSettledResult<
+          Awaited<
+            ReturnType<
+              ReturnType<typeof supabase.storage.from>["createSignedUrl"]
+            >
+          >
+        >[],
+      };
+    }
+    const rows = result.data ?? [];
+    const urls = await Promise.allSettled(
+      rows.map((t) =>
+        supabase.storage
+          .from("book-transfers")
+          .createSignedUrl(t.storage_path, SYNC_DOWNLOAD_URL_TTL),
+      ),
+    );
+    return { result, urls };
+  });
+
   const [
     noteResult,
     deletedNotesResult,
     deletedResult,
-    transferResult,
+    transferAndUrls,
     failedCountResult,
   ] = await Promise.all([
     supabase
@@ -468,14 +502,7 @@ export async function processSync(
       .gt("updated_at", lastSynced)
       .overrideTypes<DeletedHighlightRow[], { merge: false }>(),
 
-    supabase
-      .from("book_transfers")
-      .select("id, filename, file_size, storage_path, sha256")
-      .eq("user_id", userId)
-      .eq("status", "pending")
-      // deviceId UUID-validated at auth boundary; do NOT pass user-controlled identifiers to .or() filters without validation.
-      .or(`device_id.eq.${deviceId},device_id.is.null`)
-      .overrideTypes<TransferRow[], { merge: false }>(),
+    urlsPromise,
 
     supabase
       .from("book_transfers")
@@ -483,6 +510,9 @@ export async function processSync(
       .eq("user_id", userId)
       .eq("status", "failed"),
   ]);
+
+  const transferResult = transferAndUrls.result;
+  const urlResults = transferAndUrls.urls;
 
   if (noteResult.error) {
     throw new Error(`Failed to fetch notes: ${noteResult.error.message}`);
@@ -531,13 +561,6 @@ export async function processSync(
   }));
 
   const transferRows = transferResult.data ?? [];
-  const urlResults = await Promise.allSettled(
-    transferRows.map((t) =>
-      supabase.storage
-        .from("book-transfers")
-        .createSignedUrl(t.storage_path, SYNC_DOWNLOAD_URL_TTL),
-    ),
-  );
 
   const pendingTransfers: ResponseTransfer[] = transferRows.map((t, i) => {
     const urlResult = urlResults[i];

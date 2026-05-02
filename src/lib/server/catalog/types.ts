@@ -1,3 +1,47 @@
+// Upstream API response shapes — shared across catalog modules
+
+export interface OpenLibraryAuthor {
+  name?: string;
+}
+
+export interface OpenLibraryPublisher {
+  name?: string;
+}
+
+export interface OpenLibraryDataDoc {
+  title?: string;
+  authors?: OpenLibraryAuthor[];
+  publishers?: OpenLibraryPublisher[];
+  number_of_pages?: number;
+  publish_date?: string;
+  subjects?: { name: string }[] | string[];
+  cover?: { large?: string; medium?: string; small?: string };
+  url?: string;
+  identifiers?: { isbn_10?: string[]; [key: string]: string[] | undefined };
+  works?: { key: string }[];
+}
+
+export interface OpenLibraryWork {
+  description?: string | { value: string };
+  subjects?: string[];
+}
+
+export interface GoogleBooksItem {
+  id: string;
+  volumeInfo: {
+    title?: string;
+    authors?: string[];
+    publisher?: string;
+    publishedDate?: string;
+    description?: string;
+    pageCount?: number;
+    language?: string;
+    categories?: string[];
+    imageLinks?: { thumbnail?: string; large?: string };
+    industryIdentifiers?: { type: string; identifier: string }[];
+  };
+}
+
 export type CoverStorageBackend = "cloudflare-images" | "supabase";
 export type CoverVariant = "thumbnail" | "medium" | "large";
 export type DescriptionProvider = "openlibrary" | "google_books" | "manual";

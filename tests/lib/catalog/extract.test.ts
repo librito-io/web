@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   extractOpenLibraryMetadata,
   extractGoogleBooksMetadata,
-  type GoogleBooksItem,
 } from "../../../src/lib/server/catalog/extract";
+import type { GoogleBooksItem } from "../../../src/lib/server/catalog/types";
 import gatsbyOL from "../../fixtures/openlibrary/great-gatsby.json";
 import gatsbyOLWork from "../../fixtures/openlibrary/great-gatsby-work.json";
 import gatsbyGB from "../../fixtures/googlebooks/great-gatsby.json";

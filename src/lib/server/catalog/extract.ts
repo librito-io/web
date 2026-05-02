@@ -1,28 +1,9 @@
-import type { CatalogMetadata } from "./types";
-
-interface OpenLibraryAuthor {
-  name?: string;
-}
-interface OpenLibraryPublisher {
-  name?: string;
-}
-interface OpenLibraryDataDoc {
-  title?: string;
-  authors?: OpenLibraryAuthor[];
-  publishers?: OpenLibraryPublisher[];
-  number_of_pages?: number;
-  publish_date?: string;
-  subjects?: { name: string }[] | string[];
-  cover?: { large?: string; medium?: string; small?: string };
-  url?: string;
-  identifiers?: { isbn_10?: string[]; [key: string]: string[] | undefined };
-  works?: { key: string }[];
-}
-
-interface OpenLibraryWork {
-  description?: string | { value: string };
-  subjects?: string[];
-}
+import type {
+  CatalogMetadata,
+  OpenLibraryDataDoc,
+  OpenLibraryWork,
+  GoogleBooksItem,
+} from "./types";
 
 function flattenSubjects(input: unknown): string[] | undefined {
   if (!Array.isArray(input)) return undefined;
@@ -68,22 +49,6 @@ export function extractOpenLibraryMetadata(
     out.description_provider = "openlibrary";
   }
   return out;
-}
-
-export interface GoogleBooksItem {
-  id: string;
-  volumeInfo: {
-    title?: string;
-    authors?: string[];
-    publisher?: string;
-    publishedDate?: string;
-    description?: string;
-    pageCount?: number;
-    language?: string;
-    categories?: string[];
-    imageLinks?: { thumbnail?: string; large?: string };
-    industryIdentifiers?: { type: string; identifier: string }[];
-  };
 }
 
 export function extractGoogleBooksMetadata(

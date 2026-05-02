@@ -62,9 +62,25 @@ export const POST: RequestHandler = async ({ request }) => {
     return jsonSuccess({ skipped: true });
   }
 
+  let bodyIsbns: string[] | null = null;
+  if (request.headers.get("content-type")?.includes("application/json")) {
+    try {
+      const body = (await request.json()) as { isbns?: unknown };
+      if (Array.isArray(body.isbns)) {
+        bodyIsbns = body.isbns
+          .map((s) => (typeof s === "string" ? canonicalizeIsbn(s) : null))
+          .filter((s): s is string => !!s);
+      }
+    } catch {
+      // Body parse failure — fall through to NYT default.
+    }
+  }
+
   const supabase = createAdminClient();
   const start = Date.now();
-  const candidates = await fetchNytBestsellerIsbns(NYT_BOOKS_API_KEY, fetch);
+  const candidates = bodyIsbns
+    ? bodyIsbns
+    : await fetchNytBestsellerIsbns(NYT_BOOKS_API_KEY, fetch);
 
   const { data: known } = await supabase
     .from("book_catalog")
@@ -101,10 +117,12 @@ export const POST: RequestHandler = async ({ request }) => {
     }
   }
 
+  const source = bodyIsbns ? "body" : "nyt";
   const durationMs = Date.now() - start;
   console.log(
     JSON.stringify({
       cron: "catalog-warmup",
+      source,
       candidates: candidates.length,
       resolved,
       rateLimited,
@@ -112,6 +130,7 @@ export const POST: RequestHandler = async ({ request }) => {
     }),
   );
   return jsonSuccess({
+    source,
     candidates: candidates.length,
     resolved,
     rateLimited,

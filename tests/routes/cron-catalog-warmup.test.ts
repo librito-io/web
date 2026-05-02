@@ -79,4 +79,43 @@ describe("POST /api/cron/catalog-warmup", () => {
     // Called for at most MAX_PER_RUN ISBNs.
     expect(resolveIsbnSpy.mock.calls.length).toBeLessThanOrEqual(100);
   });
+
+  it("uses body ISBNs when provided in JSON body", async () => {
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+    const event = {
+      request: new Request("http://x/api/cron/catalog-warmup", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          isbns: ["9780743273565", "9780451524935"],
+        }),
+      }),
+    } as unknown as Parameters<typeof POST>[0];
+    const res = await POST(event);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.source).toBe("body");
+    expect(resolveIsbnSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to NYT when body present but isbns is not an array", async () => {
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+    const event = {
+      request: new Request("http://x/api/cron/catalog-warmup", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ isbns: "not-an-array" }),
+      }),
+    } as unknown as Parameters<typeof POST>[0];
+    const res = await POST(event);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.source).toBe("nyt");
+  });
 });

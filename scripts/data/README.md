@@ -1,42 +1,25 @@
-# scripts/data — catalog seed inputs
+# Seeding `book_catalog` (operator workflow)
 
-`seed-isbns.json` is a flat array of ISBN-13 strings. It is consumed by
-`scripts/seed-catalog.ts`, which calls `resolveIsbn` for each entry,
-respecting the catalog rate-limit budgets (80 req / 5 min Open Library,
-800 req / day Google Books).
+Set `CRON_SECRET` locally (from Vercel env, since it's marked Sensitive — paste directly):
 
-## Sources
+    export CRON_SECRET="<paste-from-vercel>"
 
-1. NYT Books API current bestseller lists (Hardcover Fiction, Hardcover
-   Nonfiction, Trade Paperback, Children's Middle Grade — top 10 of each,
-   pulled weekly for the past year via the NYT API).
-2. Open Library subject pages for high-volume genres
-   (`/subjects/fantasy.json?limit=100&sort=popular`, etc.).
-3. Project Gutenberg's top 100 downloads for classic / public-domain titles.
+Prepare an ISBN list as JSON:
 
-## Format
+    echo '{"isbns": ["9780743273565", "9780451524935"]}' > /tmp/seed.json
 
-```json
-["9780743273565", "9780451524935", "9780062316097"]
-```
+Trigger:
 
-ISBN-10 entries are auto-converted by `canonicalizeIsbn` so either form is fine.
+    curl -X POST -H "Authorization: Bearer $CRON_SECRET" \
+      -H "Content-Type: application/json" \
+      -d @/tmp/seed.json \
+      https://librito.io/api/cron/catalog-warmup
 
-## Operator workflow
+Each call processes ≤100 ISBNs (MAX_PER_RUN cap) and respects the 80/5min Open Library rate-limit budget. For larger seed lists, split + loop:
 
-```bash
-# 1. Drop ISBNs into seed-isbns.json
-# 2. Set production env locally:
-export PUBLIC_SUPABASE_URL=...
-export SUPABASE_SERVICE_ROLE_KEY=...
-export UPSTASH_REDIS_REST_URL=...
-export UPSTASH_REDIS_REST_TOKEN=...
-export COVER_STORAGE_BACKEND=cloudflare-images
-export CLOUDFLARE_ACCOUNT_ID=...
-export CLOUDFLARE_IMAGES_API_TOKEN=...
-# 3. Run the script
-npm run seed:catalog
-```
+    for chunk in chunks/*.json; do
+      curl -X POST ... -d @"$chunk" ...
+      sleep 300
+    done
 
-The script is idempotent — re-running over an existing seed list skips
-already-cached ISBNs in `book_catalog` (positive-cache hit short-circuits).
+Pre-launch warmup of ~3k ISBNs takes ~30 invocations + ~2.5h elapsed (mostly rate-limit pacing).

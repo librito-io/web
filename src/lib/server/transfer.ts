@@ -1,6 +1,10 @@
 import { basename } from "path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { firstRow } from "./rpc";
+import type { Database } from "$lib/types/database";
+
+type IncrementTransferAttemptRow =
+  Database["public"]["Functions"]["increment_transfer_attempt"]["Returns"][number];
 
 export const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 export const MAX_FILENAME_LENGTH = 255;
@@ -60,7 +64,7 @@ export async function recordConfirmFailure(
 
   if (rpcError) return { kind: "rpc_error" };
 
-  const row = firstRow<{ attempt_count?: number; status?: string }>(rpcRows);
+  const row = firstRow<IncrementTransferAttemptRow>(rpcRows);
   const basePayload: FailurePayloadBase = {
     transferId: ctx.transferId,
     userId: ctx.userId,

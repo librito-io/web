@@ -49,6 +49,10 @@ export const GET: RequestHandler = async ({ request, params }) => {
     return jsonError(404, "not_found", "Transfer not found");
   }
 
+  if (!transfer.storage_path) {
+    return jsonError(500, "server_error", "Transfer file not available");
+  }
+
   const { data: urlData, error: urlError } = await supabase.storage
     .from("book-transfers")
     .createSignedUrl(transfer.storage_path, DOWNLOAD_URL_TTL);

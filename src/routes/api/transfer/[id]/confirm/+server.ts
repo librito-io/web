@@ -110,12 +110,14 @@ export const POST: RequestHandler = async ({ request, params }) => {
   });
 
   // Best-effort: delete file from storage
-  try {
-    await supabase.storage
-      .from("book-transfers")
-      .remove([transfer.storage_path]);
-  } catch {
-    // File cleanup is not critical
+  if (transfer.storage_path) {
+    try {
+      await supabase.storage
+        .from("book-transfers")
+        .remove([transfer.storage_path]);
+    } catch {
+      // File cleanup is not critical
+    }
   }
 
   return jsonSuccess({ success: true });

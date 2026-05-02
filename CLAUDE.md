@@ -156,23 +156,34 @@ Production keys are managed entirely through Supabase Dashboard → Project Sett
 
 ## Release Process
 
-**Vercel deploys only the application code. Supabase database migrations do not run automatically.** These are two separate systems with no built-in link.
+Production deploys are automated via `.github/workflows/production-deploy.yml`. Push to `main` triggers the workflow.
 
-When a PR adds or modifies a file in `supabase/migrations/`, the migration reaches production in a second step performed manually after the PR merges:
+**Flow:**
 
-```bash
-# From a machine already linked to the production Supabase project
-# (one-time setup: `supabase login` + `supabase link --project-ref <ref>`)
-cd /path/to/web
-git checkout main && git pull
-supabase migration list        # confirm local has a migration remote does not
-supabase db push --dry-run     # preview what would apply
-supabase db push               # apply
-```
+1. **changes** job: detect if `supabase/migrations/**` changed.
+2. **migrate** job (conditional): if migrations changed, requires manual approval via the `production` GitHub environment, then runs `supabase db push --linked`. Migration failure blocks deploy.
+3. **deploy** job: runs after migrate succeeds or is skipped (no migration changes). Deploys via `vercel deploy --prod`.
 
-Forgetting this step looks like a post-deploy 500 from any endpoint that reads a new column, because the deployed code references schema the database does not yet have. Always run `supabase migration list` before declaring a schema-touching deploy complete.
+Vercel git auto-deploy on `main` is disabled in `vercel.ts` — the workflow is the single deploy source of truth. Preview deploys for PRs remain enabled.
 
-For recurring schema work, consider wiring a GitHub Action that runs `supabase db push` on merge to main. At current release cadence (solo dev, ad-hoc schema work) the manual step is preferred — it forces a deliberate "production write" pause.
+**One-time GitHub setup (before workflow will succeed):**
+
+Create environment named `production` (Settings → Environments) with at least one required reviewer. Then set:
+
+| Type     | Name                    | Where to get it                                                                        |
+| -------- | ----------------------- | -------------------------------------------------------------------------------------- |
+| Secret   | `SUPABASE_ACCESS_TOKEN` | [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) |
+| Secret   | `SUPABASE_DB_PASSWORD`  | Supabase project → Settings → Database                                                 |
+| Secret   | `VERCEL_TOKEN`          | [vercel.com/account/tokens](https://vercel.com/account/tokens)                         |
+| Variable | `SUPABASE_PROJECT_REF`  | `<ref>` portion of your Supabase project URL                                           |
+| Variable | `VERCEL_ORG_ID`         | `team_97PZEmFN50tinLPzmLF0ql0O` (from `.vercel/project.json`)                          |
+| Variable | `VERCEL_PROJECT_ID`     | `prj_wl2OutUDRlAtw9N222fGzfg10uJQ` (from `.vercel/project.json`)                       |
+
+If tokens are not set before the first merge, the workflow fails loudly — no deploy happens.
+
+**Token rotation:** every 90 days. Regenerate via the respective dashboards, update the GitHub secret.
+
+**Migration CI gate** (still active): `.github/workflows/migration-smoke.yml` runs `supabase start && supabase db reset --local` on every PR and `main` push that touches migration files. This is the PR-time validator; `production-deploy.yml` is the production pusher. Both must stay in sync on Supabase CLI version (currently `2.95.4`).
 
 ## Self-hosting
 
@@ -196,6 +207,8 @@ Production runs on Vercel via `@sveltejs/adapter-vercel`. To self-host on Node.j
    In your project's Dashboard → Project Settings → JWT signing keys → "new standby key", paste the JWK. Set `LIBRITO_JWT_PRIVATE_KEY_JWK` in your env to the same JWK JSON.
 
 Env vars required regardless of host: see [Environment Variables](#environment-variables). Supabase, Upstash Redis, and the JWT signing key are platform-agnostic; only the SvelteKit adapter is Vercel-specific.
+
+Self-hosters do **not** need `.github/workflows/production-deploy.yml` — it is Vercel-specific. Run `supabase db push` manually against your own Supabase project after each schema-touching deploy.
 
 ## PR & Commit Convention
 

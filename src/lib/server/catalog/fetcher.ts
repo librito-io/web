@@ -5,17 +5,20 @@ import { stripMarketingCruft } from "./cleanup";
 import {
   fetchOpenLibraryByIsbn,
   searchOpenLibraryByIsbn,
+  searchOpenLibraryByTitleAuthor,
   fetchOpenLibraryWork,
   fetchOpenLibraryCoverBytes,
 } from "./openlibrary";
 import {
   fetchGoogleBooksByIsbn,
+  fetchGoogleBooksByTitleAuthor,
   fetchGoogleBooksCoverBytes,
 } from "./googlebooks";
 import {
   extractOpenLibraryMetadata,
   extractGoogleBooksMetadata,
 } from "./extract";
+import { normalizeTitleAuthor } from "./title-author";
 import type {
   BookCatalogRow,
   CatalogMetadata,
@@ -302,4 +305,173 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(d)]
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+export class InvalidTitleAuthorError extends Error {
+  constructor() {
+    super("InvalidTitleAuthor");
+  }
+}
+
+export async function resolveTitleAuthor(
+  supabase: SupabaseClient,
+  title: string,
+  author: string,
+  deps: ResolveDeps,
+): Promise<ResolveResult> {
+  const key = normalizeTitleAuthor(title, author);
+  if (!key) throw new InvalidTitleAuthorError();
+  const now = (deps.now ?? (() => new Date()))();
+  const upload = deps.coverStorage?.uploadCover ?? defaultUploadCover;
+
+  const { data: existing, error: selErr } = await supabase
+    .from("book_catalog")
+    .select("*")
+    .is("isbn", null)
+    .eq("normalized_title_author", key)
+    .maybeSingle();
+  if (selErr) throw new Error(`book_catalog select: ${selErr.message}`);
+
+  const e = existing as Partial<BookCatalogRow> | null;
+  if (e && (e.storage_path || isFreshNegative(e, now))) {
+    return { cached: true, rateLimited: false, row: e };
+  }
+
+  const olOk = await tryAcquire(deps.rateLimiters.openLibrary);
+  if (!olOk) {
+    return {
+      cached: false,
+      rateLimited: true,
+      row: e ?? { normalized_title_author: key },
+    };
+  }
+
+  let search: Awaited<ReturnType<typeof searchOpenLibraryByTitleAuthor>> = null;
+  try {
+    search = await searchOpenLibraryByTitleAuthor(title, author, {
+      fetchFn: deps.fetchFn,
+    });
+  } catch (err) {
+    console.warn("catalog_openlibrary_search_failed", {
+      title,
+      author,
+      error: String(err),
+    });
+  }
+  const metadata: CatalogMetadata = {};
+  let coverBytes: { bytes: Uint8Array; mime: string } | null = null;
+  let coverSource: CoverSource | undefined;
+
+  if (search?.cover_i) {
+    try {
+      coverBytes = await fetchOpenLibraryCoverBytes(search.cover_i, {
+        fetchFn: deps.fetchFn,
+      });
+    } catch (err) {
+      console.warn("catalog_openlibrary_cover_failed", {
+        title,
+        author,
+        coverId: search.cover_i,
+        error: String(err),
+      });
+      coverBytes = null;
+    }
+    if (search.title) metadata.title = search.title;
+    if (search.author_name?.length)
+      metadata.author = search.author_name.join(", ");
+    coverSource = "openlibrary_search_title";
+  }
+
+  if (!metadata.description) {
+    const gbOk = await tryAcquire(deps.rateLimiters.googleBooks);
+    if (gbOk) {
+      try {
+        const gb = await fetchGoogleBooksByTitleAuthor(title, author, {
+          fetchFn: deps.fetchFn,
+          apiKey: deps.googleBooksApiKey,
+        });
+        if (gb) {
+          const m = extractGoogleBooksMetadata(gb);
+          if (m.description) {
+            metadata.description_raw = m.description;
+            metadata.description = stripMarketingCruft(m.description);
+            metadata.description_provider = "google_books";
+            metadata.google_volume_id = m.google_volume_id;
+          }
+          if (!coverBytes) {
+            const link =
+              gb.volumeInfo?.imageLinks?.large ??
+              gb.volumeInfo?.imageLinks?.thumbnail;
+            if (link) {
+              try {
+                coverBytes = await fetchGoogleBooksCoverBytes(link, {
+                  fetchFn: deps.fetchFn,
+                });
+              } catch (err) {
+                console.warn("catalog_googlebooks_cover_failed", {
+                  title,
+                  author,
+                  error: String(err),
+                });
+                coverBytes = null;
+              }
+              if (coverBytes) coverSource = "google_books";
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("catalog_googlebooks_failed", {
+          title,
+          author,
+          error: String(err),
+        });
+      }
+    }
+  }
+
+  let storage: {
+    storage_path: string;
+    backend: CoverStorageBackend;
+    image_sha256: string;
+  } | null = null;
+  if (coverBytes) {
+    const sha = await sha256Hex(coverBytes.bytes);
+    const dedup = await selectBySha(supabase, sha);
+    storage = dedup
+      ? {
+          storage_path: dedup.storage_path,
+          backend: dedup.cover_storage_backend,
+          image_sha256: sha,
+        }
+      : await upload(coverBytes.bytes, coverBytes.mime, {});
+  }
+
+  const upsertRow = {
+    isbn: null as string | null,
+    normalized_title_author: key,
+    storage_path: storage?.storage_path ?? null,
+    cover_storage_backend: storage?.backend ?? null,
+    image_sha256: storage?.image_sha256 ?? null,
+    cover_source: coverSource ?? null,
+    title: metadata.title ?? null,
+    author: metadata.author ?? null,
+    description: metadata.description ?? null,
+    description_raw: metadata.description_raw ?? null,
+    description_provider: metadata.description_provider ?? null,
+    google_volume_id: metadata.google_volume_id ?? null,
+    fetched_at: storage
+      ? now.toISOString()
+      : (e?.fetched_at ?? now.toISOString()),
+    last_attempted_at: now.toISOString(),
+    attempt_count: (e?.attempt_count ?? 0) + 1,
+  };
+
+  // Same partial-index reason as resolveIsbn — route via RPC.
+  const { error: upErr } = await supabase.rpc(
+    "upsert_book_catalog_by_title_author",
+    { p_row: upsertRow },
+  );
+  if (upErr) throw new Error(`book_catalog upsert: ${upErr.message}`);
+
+  return { cached: false, rateLimited: false, row: upsertRow };
 }

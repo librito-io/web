@@ -12,7 +12,10 @@ vi.mock("$env/static/public", () => ({
   PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc",
 }));
 
-import { resolveIsbn } from "../../../src/lib/server/catalog/fetcher";
+import {
+  resolveIsbn,
+  resolveTitleAuthor,
+} from "../../../src/lib/server/catalog/fetcher";
 
 const NEG_TTL_DAYS = 30;
 const fakeOk = { kind: "ok" as const, result: { success: true } as never };
@@ -136,5 +139,37 @@ describe("resolveIsbn", () => {
     await expect(resolveIsbn(supabase as never, "00000", d)).rejects.toThrow(
       /InvalidIsbn/,
     );
+  });
+});
+
+describe("resolveTitleAuthor", () => {
+  it("rejects empty title or author", async () => {
+    const supabase = createMockSupabase();
+    await expect(
+      resolveTitleAuthor(supabase as never, "", "x", deps()),
+    ).rejects.toThrow(/InvalidTitleAuthor/);
+  });
+
+  it("returns cached row keyed on normalized_title_author", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: null,
+          normalized_title_author: "the great gatsby|f scott fitzgerald",
+          storage_path: "x/y.jpg",
+        },
+      ],
+      error: null,
+    });
+    const d = deps();
+    const r = await resolveTitleAuthor(
+      supabase as never,
+      "The Great Gatsby",
+      "F. Scott Fitzgerald",
+      d,
+    );
+    expect(r.cached).toBe(true);
+    expect(d.fetchFn).not.toHaveBeenCalled();
   });
 });

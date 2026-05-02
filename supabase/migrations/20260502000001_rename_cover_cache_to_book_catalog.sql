@@ -235,11 +235,16 @@ BEGIN
     attempt_count          = EXCLUDED.attempt_count;
 END $$;
 
--- Service-role bypasses RLS so it can call these. authenticated/anon
--- can also EXECUTE the functions (SECURITY INVOKER), but the underlying
--- INSERT will fail because book_catalog has no INSERT/UPDATE policies
--- for non-service roles. That's intentional — only the fetcher writes.
+-- Service-role bypasses RLS so it can call these. Defense in depth:
+-- explicitly revoke from PUBLIC and from anon/authenticated (Supabase
+-- grants EXECUTE on public-schema functions to anon/authenticated by
+-- default, and REVOKE FROM PUBLIC does NOT strip those per-role grants).
+-- Without these explicit revokes, a future INSERT policy on book_catalog
+-- for `authenticated` would silently turn these RPCs into a write surface
+-- for any logged-in user. Only the fetcher (service-role) writes.
 REVOKE EXECUTE ON FUNCTION public.upsert_book_catalog_by_isbn(jsonb) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.upsert_book_catalog_by_title_author(jsonb) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.upsert_book_catalog_by_isbn(jsonb) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.upsert_book_catalog_by_title_author(jsonb) FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.upsert_book_catalog_by_isbn(jsonb) TO service_role;
 GRANT EXECUTE ON FUNCTION public.upsert_book_catalog_by_title_author(jsonb) TO service_role;

@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v2
         with:
           # Pinned to match the local + production push-context CLI version.
           # Bumping requires a coordinated bump of every contributor's local CLI

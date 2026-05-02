@@ -295,11 +295,56 @@ Tables (see `supabase/migrations/` for full DDL):
 - `highlights` — device-created highlights (soft-delete via `deleted_at`)
 - `notes` — web-created notes (one per highlight)
 - `book_transfers` — EPUB upload queue (48 h pending TTL; downloaded rows PII-scrubbed 24 h post-delivery, hard-deleted 24 h after scrub; expired rows scrubbed 49 h post-upload)
-- `cover_cache` — shared cover library (deduplicated by ISBN, permanent)
+- `book_catalog` — shared per-ISBN book data (covers + textual metadata: title, author, blurb, publisher, page count, subjects, series). Deduplicated across users; renamed from `cover_cache` in `20260502000001`.
 
 **Sync hot path indexes**: `(user_id, updated_at)` on highlights and notes. The `updated_at` trigger fires on every row change, making `WHERE updated_at > :lastSyncedAt` pick up all changes including soft-deletes.
 
 **Token lookup index**: `devices.api_token_hash` indexed for O(1) device authentication.
+
+## Book catalog (covers + metadata)
+
+Shared per-ISBN library backing the highlight viewer. Schema lives in
+`book_catalog` (renamed from `cover_cache` in `20260502000001`). Logic is
+split into:
+
+- `src/lib/server/catalog/` — pure helpers (`isbn`, `title-author`,
+  `cleanup`, `extract`), HTTP clients (`openlibrary`, `googlebooks`), and
+  the `resolveIsbn` / `resolveTitleAuthor` orchestrators (`fetcher.ts`).
+- `src/lib/server/cover-storage.ts` — backend abstraction. `librito.io`
+  uses Cloudflare Images (`COVER_STORAGE_BACKEND=cloudflare-images`).
+  Self-hosters use Supabase Storage's `cover-cache` bucket.
+- `src/lib/server/wait-until.ts` — `runInBackground(event, work)` shim
+  over `event.platform.context.waitUntil` with a local-dev fallback.
+
+Population paths:
+
+1. **Lazy on viewer first-render** — `runInBackground(event, resolveIsbn)`
+   from the book detail loader (`src/routes/app/book/[bookHash]/+page.server.ts`)
+   and `GET /api/book-catalog/[isbn]`. Cold miss returns
+   `/cover-placeholder.svg`; cover materialises on next reload.
+2. **Weekly warmup cron** — `POST /api/cron/catalog-warmup`, scheduled
+   `0 8 * * 1` in `vercel.ts`. Authenticated via `CRON_SECRET`. Gated on
+   `CATALOG_WARMUP_ENABLED=true` (default `false` for self-hosters).
+   Default candidate source: NYT bestseller lists (requires
+   `NYT_BOOKS_API_KEY`).
+3. **Bulk seed (operator-triggered)** — same cron endpoint accepts an
+   optional `{ "isbns": [...] }` JSON body to override the NYT default.
+   Operator workflow in `scripts/data/README.md` (curl with `CRON_SECRET`).
+   `MAX_PER_RUN=100` per invocation; rate-limit pacing means large lists
+   need chunked invocations.
+
+RPCs `upsert_book_catalog_by_isbn` / `upsert_book_catalog_by_title_author`
+wrap the partial-unique-index upsert (supabase-js `.upsert()` doesn't
+thread `WHERE` predicates through). Granted to `service_role` only;
+explicitly revoked from `anon` and `authenticated`.
+
+Rate limits: `catalogOpenLibraryLimiter` (80 req / 5 min, fail-open),
+`catalogGoogleBooksLimiter` (800 req / day, fail-open) — both in
+`src/lib/server/ratelimit.ts`.
+
+Self-hosters: leave `COVER_STORAGE_BACKEND` unset (defaults to `supabase`).
+The cron is opt-in (`CATALOG_WARMUP_ENABLED=false`); without it, the
+catalog populates entirely lazily as users open books.
 
 ## Environment Variables
 

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 180" role="img" aria-label="Cover placeholder">
+  <rect width="120" height="180" fill="#e5e1d8"/>
+  <rect x="6" y="6" width="108" height="168" fill="none" stroke="#b9b1a3" stroke-width="2"/>
+  <text x="60" y="98" text-anchor="middle" font-family="Georgia, serif" font-size="14" fill="#7a7163">cover</text>
+</svg>

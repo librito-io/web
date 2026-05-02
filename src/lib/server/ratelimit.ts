@@ -365,3 +365,20 @@ export const realtimeTokenUserLimiter = createLimiter({
   prefix: "rl:realtime:token:user",
   failMode: "closed",
 });
+
+// 80 req / 5 min — 10 % safety margin under Open Library's 100/5min unauth limit.
+// Global key (single shared bucket across all server instances). Fail-open:
+// upstash outage → fetch attempted, upstream's own 429 is the next backstop.
+export const catalogOpenLibraryLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(80, "5 m"),
+  prefix: "rl:catalog-openlibrary",
+  failMode: "open",
+});
+
+// 800 req / day — 20 % safety margin under Google Books' 1k/day free-tier limit.
+// Per-day single global bucket. Fail-open for the same reason.
+export const catalogGoogleBooksLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(800, "1 d"),
+  prefix: "rl:catalog-googlebooks",
+  failMode: "open",
+});

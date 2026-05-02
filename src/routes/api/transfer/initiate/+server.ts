@@ -38,11 +38,12 @@ export const POST: RequestHandler = async ({
 
   const safeFilename = sanitizeFilename(filename);
 
-  const filenameError = validateTransferFilename(safeFilename);
-  if (filenameError) return jsonError(400, "invalid_filename", filenameError);
+  const filenameResult = validateTransferFilename(safeFilename);
+  if (!filenameResult.ok)
+    return jsonError(400, "invalid_filename", filenameResult.error);
 
-  const sizeError = validateTransferSize(fileSize);
-  if (sizeError) return jsonError(400, "file_too_large", sizeError);
+  const sizeResult = validateTransferSize(fileSize);
+  if (!sizeResult.ok) return jsonError(400, "file_too_large", sizeResult.error);
 
   if (typeof sha256 !== "string" || !SHA256_RE.test(sha256)) {
     return jsonError(

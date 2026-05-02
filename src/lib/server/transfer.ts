@@ -97,20 +97,22 @@ export function sanitizeFilename(filename: string): string {
   return basename(filename);
 }
 
-export function validateTransferFilename(filename: string): string | null {
-  if (!filename.toLowerCase().endsWith(".epub")) {
-    return "Only EPUB files are accepted";
-  }
-  if (filename.length > MAX_FILENAME_LENGTH) {
-    return "Filename exceeds 255 character limit";
-  }
-  return null;
+export type ValidationResult = { ok: true } | { ok: false; error: string };
+
+export function validateTransferFilename(filename: string): ValidationResult {
+  if (!filename.toLowerCase().endsWith(".epub"))
+    return { ok: false, error: "Only EPUB files are accepted" };
+  if (filename.length > MAX_FILENAME_LENGTH)
+    return { ok: false, error: "Filename exceeds 255 character limit" };
+  return { ok: true };
 }
 
-export function validateTransferSize(size: number): string | null {
-  if (size <= 0) return "File size must be greater than 0";
-  if (size > MAX_FILE_SIZE) return "File exceeds 20MB limit";
-  return null;
+export function validateTransferSize(size: number): ValidationResult {
+  if (size <= 0)
+    return { ok: false, error: "File size must be greater than 0" };
+  if (size > MAX_FILE_SIZE)
+    return { ok: false, error: "File exceeds 20MB limit" };
+  return { ok: true };
 }
 
 export function buildStoragePath(

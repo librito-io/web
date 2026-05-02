@@ -39,7 +39,11 @@ export const DELETE: RequestHandler = async ({
   }
 
   // Best-effort delete from Storage (don't fail if file doesn't exist)
-  await supabase.storage.from("book-transfers").remove([transfer.storage_path]);
+  if (transfer.storage_path) {
+    await supabase.storage
+      .from("book-transfers")
+      .remove([transfer.storage_path]);
+  }
 
   // Delete the database row
   const { error: deleteError } = await supabase

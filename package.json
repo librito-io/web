@@ -8,7 +8,8 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "prepare": "svelte-kit sync"
+    "prepare": "svelte-kit sync",
+    "generate-types": "supabase gen types typescript --linked 2>/dev/null > src/lib/types/database.ts"
   },
   "devDependencies": {
     "@sveltejs/adapter-vercel": "^6.3.3",

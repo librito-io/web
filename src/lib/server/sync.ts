@@ -401,13 +401,12 @@ export async function processSync(
   // 2. Query notes, deleted highlights, and pending transfers in parallel.
   //
   // Join queries on `notes!inner` / `books!inner` resolve to nested objects at
-  // runtime (`n.highlights.books.book_hash`) but PostgREST's generic inference
-  // widens them to arrays without a generated `Database` type. We use
+  // runtime (`n.highlights.books.book_hash`) but PostgREST's join inference
+  // widens them to arrays even with a generated `Database` type. We use
   // `.overrideTypes<XRow[], { merge: false }>()` — Supabase's first-class type
   // override — to bind each query's `.data` to the runtime shape declared
   // below. This eliminates the `as unknown as XRow[]` casts at the use sites
   // and keeps the count-query `.count` accessor on a properly typed envelope.
-  // Replace once L6 ships generated types via `supabase gen types typescript`.
   const transferReadPromise = supabase
     .from("book_transfers")
     .select("id, filename, file_size, storage_path, sha256")

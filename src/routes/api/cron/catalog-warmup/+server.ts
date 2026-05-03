@@ -76,20 +76,11 @@ export const POST: RequestHandler = async ({ request }) => {
     ? bodyIsbns
     : await fetchNytBestsellerIsbns(NYT_BOOKS_API_KEY, fetch);
 
-  const { data: known } = await supabase
-    .from("book_catalog")
-    .select("isbn")
-    .in("isbn", candidates);
-  const knownSet = new Set(
-    ((known ?? []) as { isbn: string }[]).map((r) => r.isbn),
-  );
-  const fresh = candidates
-    .filter((i) => !knownSet.has(i))
-    .slice(0, MAX_PER_RUN);
+  const toResolve = candidates.slice(0, MAX_PER_RUN);
 
   let resolved = 0;
   let rateLimited = 0;
-  for (const isbn of fresh) {
+  for (const isbn of toResolve) {
     try {
       const r = await resolveIsbn(supabase, isbn, {
         rateLimiters: {

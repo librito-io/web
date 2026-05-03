@@ -118,4 +118,61 @@ describe("POST /api/cron/catalog-warmup", () => {
     expect(res.status).toBe(200);
     expect(body.source).toBe("nyt");
   });
+
+  it("passes all body ISBNs through to resolveIsbn even when they already exist in book_catalog (negative-cache rows)", async () => {
+    // Seed book_catalog.select to return BOTH ISBNs as "known" rows — simulating
+    // negative-cache rows (storage_path IS NULL) already present in the catalog.
+    // Before the fix, the knownSet filter excluded them and resolveIsbn was
+    // never called (spy count = 0). After the fix, no SELECT pre-filter runs
+    // and resolveIsbn is called for both ISBNs (spy count = 2).
+    supabase._results.set("book_catalog.select", {
+      data: [{ isbn: "9780743273565" }, { isbn: "9780451524935" }],
+      error: null,
+    });
+    const event = {
+      request: new Request("http://x/api/cron/catalog-warmup", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          isbns: ["9780743273565", "9780451524935"],
+        }),
+      }),
+    } as unknown as Parameters<typeof POST>[0];
+    const res = await POST(event);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.source).toBe("body");
+    // Both ISBNs must reach resolveIsbn — the cron must not pre-filter by catalog presence.
+    expect(resolveIsbnSpy.mock.calls.length).toBe(2);
+  });
+
+  it("passes both stale-negative and fresh-negative ISBNs through to resolveIsbn", async () => {
+    // Same invariant with a different set of ISBNs to confirm generality.
+    // Both ISBNs are seeded as "known" (catalog already has rows for them),
+    // which is what a negative-cache row looks like from the SELECT's perspective.
+    supabase._results.set("book_catalog.select", {
+      data: [{ isbn: "9780316769174" }, { isbn: "9780062316097" }],
+      error: null,
+    });
+    const event = {
+      request: new Request("http://x/api/cron/catalog-warmup", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          isbns: ["9780316769174", "9780062316097"],
+        }),
+      }),
+    } as unknown as Parameters<typeof POST>[0];
+    const res = await POST(event);
+    expect(res.status).toBe(200);
+    // resolveIsbn decides whether to short-circuit based on TTL; the cron
+    // must hand all candidates to it regardless of catalog presence.
+    expect(resolveIsbnSpy.mock.calls.length).toBe(2);
+  });
 });

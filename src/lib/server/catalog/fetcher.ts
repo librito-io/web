@@ -195,10 +195,11 @@ export async function resolveIsbn(
   }
 
   // 3. Google Books fallback for description (and cover if needed)
-  // Skip entirely when the publisher-takedown flag is set on the existing row.
-  if (existing?.do_not_refetch_description === true) {
-    // Takedown rows: no GB fetch, no description, no GB cover fallback.
-  } else if (!metadata.description || !coverBytes) {
+  // The do_not_refetch_description flag gates description text only (publisher
+  // takedowns target marketing copy, not cover images). Cover fallback proceeds
+  // unconditionally so a takedown'd ISBN with no OL cover doesn't end up
+  // permanently coverless.
+  if (!metadata.description || !coverBytes) {
     const gbOk = await tryAcquire(deps.rateLimiters.googleBooks);
     if (gbOk) {
       try {
@@ -208,7 +209,11 @@ export async function resolveIsbn(
         });
         if (gb) {
           const gbMeta = extractGoogleBooksMetadata(gb);
-          if (!metadata.description && gbMeta.description) {
+          if (
+            !metadata.description &&
+            gbMeta.description &&
+            !existing?.do_not_refetch_description
+          ) {
             metadata.description_raw = gbMeta.description;
             metadata.description = stripMarketingCruft(gbMeta.description);
             metadata.description_provider = "google_books";
@@ -385,10 +390,13 @@ export async function resolveTitleAuthor(
     coverSource = "openlibrary_search_title";
   }
 
-  // Skip Google Books entirely when the publisher-takedown flag is set.
-  if (e?.do_not_refetch_description === true) {
-    // Takedown rows: no GB fetch, no description, no GB cover fallback.
-  } else if (!metadata.description) {
+  // Google Books fallback for description (and cover if needed).
+  // The do_not_refetch_description flag gates description text only — same
+  // reasoning as resolveIsbn: takedowns target marketing copy, not covers.
+  // Outer condition broadened from `!metadata.description` to include
+  // `!coverBytes` so the cover fallback runs even when description is
+  // intentionally being skipped due to the flag.
+  if (!metadata.description || !coverBytes) {
     const gbOk = await tryAcquire(deps.rateLimiters.googleBooks);
     if (gbOk) {
       try {
@@ -398,7 +406,7 @@ export async function resolveTitleAuthor(
         });
         if (gb) {
           const m = extractGoogleBooksMetadata(gb);
-          if (m.description) {
+          if (m.description && !e?.do_not_refetch_description) {
             metadata.description_raw = m.description;
             metadata.description = stripMarketingCruft(m.description);
             metadata.description_provider = "google_books";

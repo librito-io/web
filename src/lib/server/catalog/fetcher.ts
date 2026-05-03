@@ -132,8 +132,8 @@ async function tryAcquire(
   limiter: Pick<RateLimiter, "limit">,
 ): Promise<boolean> {
   try {
-    const r = (await limiter.limit("catalog")) as LimitResult;
-    return r.success;
+    const limitResult = (await limiter.limit("catalog")) as LimitResult;
+    return limitResult.success;
   } catch {
     return true; // fail-open per limiter policy
   }

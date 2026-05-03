@@ -3,6 +3,7 @@ import { createAdminClient } from "$lib/server/supabase";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { canonicalizeIsbn } from "$lib/server/catalog/isbn";
 import { resolveIsbn } from "$lib/server/catalog/fetcher";
+import { constantTimeEqualString } from "$lib/server/cron-auth";
 import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
@@ -14,13 +15,6 @@ import {
 } from "$env/static/private";
 
 const MAX_PER_RUN = 100;
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
-}
 
 async function fetchNytBestsellerIsbns(
   apiKey: string,
@@ -55,7 +49,7 @@ async function fetchNytBestsellerIsbns(
 
 export const POST: RequestHandler = async ({ request }) => {
   const auth = request.headers.get("authorization") ?? "";
-  if (!timingSafeEqual(auth, `Bearer ${CRON_SECRET}`)) {
+  if (!constantTimeEqualString(auth, `Bearer ${CRON_SECRET}`)) {
     return jsonError(401, "unauthorized", "Cron secret mismatch");
   }
   if (CATALOG_WARMUP_ENABLED !== "true") {

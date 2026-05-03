@@ -13,12 +13,9 @@ import {
   catalogUserLimiter,
   safeLimit,
 } from "$lib/server/ratelimit";
-import { coverUrl } from "$lib/server/cover-storage";
 import { runInBackground } from "$lib/server/wait-until";
-import {
-  hasCoverStorage,
-  type BookCatalogRow,
-} from "$lib/server/catalog/types";
+import { getCatalogForBrowser } from "$lib/server/catalog/view";
+import { getCatalogMutex } from "$lib/server/catalog/mutex";
 
 export const load: PageServerLoad = async (event) => {
   const {
@@ -86,40 +83,16 @@ export const load: PageServerLoad = async (event) => {
   };
 
   if (isbn) {
-    const { data: rawCat, error: catError } = await supabase
-      .from("book_catalog")
-      .select(
-        "storage_path, cover_storage_backend, description, description_provider, " +
-          "publisher, page_count, subjects, published_date",
-      )
-      .eq("isbn", isbn)
-      .maybeSingle();
-    // Cast at the boundary: the projected select returns a structural subset
-    // of the row. `Pick<BookCatalogRow, ...>` distributes across the
-    // discriminated union (`Pick<A | B, K>` ≡ `Pick<A, K> | Pick<B, K>`),
-    // so the storage discriminant is preserved and `hasCoverStorage`
-    // narrows cleanly into the positive variant. Keep this Pick key list
-    // in sync with the SELECT projection above — TS will error if a
-    // non-projected column is accessed below.
-    type BookDetailCatalogView = Pick<
-      BookCatalogRow,
-      | "storage_path"
-      | "cover_storage_backend"
-      | "description"
-      | "description_provider"
-      | "publisher"
-      | "page_count"
-      | "subjects"
-      | "published_date"
-    >;
-    const cat = (rawCat as BookDetailCatalogView | null) ?? null;
-    if (!catError && cat && hasCoverStorage(cat)) {
+    let cat = null;
+    let catFailed = false;
+    try {
+      cat = await getCatalogForBrowser(supabase, isbn, "large");
+    } catch {
+      catFailed = true;
+    }
+    if (!catFailed && cat && cat.cover_url !== null) {
       catalog = {
-        cover_url: coverUrl(
-          cat.storage_path,
-          cat.cover_storage_backend,
-          "large",
-        ),
+        cover_url: cat.cover_url,
         description: cat.description ?? null,
         description_provider: cat.description_provider ?? null,
         publisher: cat.publisher ?? null,
@@ -127,7 +100,7 @@ export const load: PageServerLoad = async (event) => {
         subjects: cat.subjects ?? null,
         published_date: cat.published_date ?? null,
       };
-    } else {
+    } else if (!catFailed) {
       // Per-user budget on cold-miss work-scheduling. Page loader treats
       // any non-allowed outcome (denied, failClosed) as "skip schedule"
       // and renders the existing placeholder catalog state — returning
@@ -137,12 +110,14 @@ export const load: PageServerLoad = async (event) => {
       const allowed = outcome.kind === "ok" && outcome.result.success;
       if (allowed) {
         const admin = createAdminClient();
+        const mutex = await getCatalogMutex();
         runInBackground(event, () =>
           resolveIsbn(admin, isbn, {
             rateLimiters: {
               openLibrary: catalogOpenLibraryLimiter,
               googleBooks: catalogGoogleBooksLimiter,
             },
+            mutex,
           }).then(() => undefined),
         );
       }

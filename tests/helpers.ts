@@ -208,11 +208,23 @@ export function createMockRedis() {
   const store = new Map<string, { value: string; expiresAt: number }>();
 
   return {
-    set: vi.fn(async (key: string, value: string, opts?: { ex?: number }) => {
-      const expiresAt = opts?.ex ? Date.now() + opts.ex * 1000 : Infinity;
-      store.set(key, { value, expiresAt });
-      return "OK";
-    }),
+    set: vi.fn(
+      async (
+        key: string,
+        value: string,
+        opts?: { ex?: number; nx?: boolean },
+      ) => {
+        // Mirror Upstash REST: when nx:true and the key already exists
+        // (and hasn't expired), return null without overwriting.
+        if (opts?.nx) {
+          const entry = store.get(key);
+          if (entry && Date.now() <= entry.expiresAt) return null;
+        }
+        const expiresAt = opts?.ex ? Date.now() + opts.ex * 1000 : Infinity;
+        store.set(key, { value, expiresAt });
+        return "OK";
+      },
+    ),
     get: vi.fn(async (key: string) => {
       const entry = store.get(key);
       if (!entry) return null;

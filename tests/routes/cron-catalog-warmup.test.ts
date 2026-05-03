@@ -1,5 +1,5 @@
 // tests/routes/cron-catalog-warmup.test.ts
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { createMockSupabase } from "../helpers";
 
 vi.mock("$env/static/private", () => ({
@@ -33,6 +33,12 @@ const resolveIsbnSpy = vi.fn(async () => ({
 }));
 vi.mock("$lib/server/catalog/fetcher", () => ({ resolveIsbn: resolveIsbnSpy }));
 
+// Default fetch spy: returns an empty NYT books response so tests that don't
+// care about the NYT path still get a deterministic, non-network result.
+function makeFetchSpy(): Mock {
+  return vi.fn(async () => Response.json({ results: { books: [] } }));
+}
+
 beforeEach(() => {
   supabase._results.clear();
   resolveIsbnSpy.mockClear();
@@ -41,12 +47,16 @@ beforeEach(() => {
 const { POST } =
   await import("../../src/routes/api/cron/catalog-warmup/+server");
 
-function buildEvent(headers: Record<string, string> = {}) {
+function buildEvent(
+  headers: Record<string, string> = {},
+  fetchFn: typeof fetch = makeFetchSpy() as unknown as typeof fetch,
+) {
   return {
     request: new Request("http://x/api/cron/catalog-warmup", {
       method: "POST",
       headers,
     }),
+    fetch: fetchFn,
   } as unknown as Parameters<typeof POST>[0];
 }
 
@@ -101,6 +111,7 @@ describe("POST /api/cron/catalog-warmup", () => {
           isbns: ["9780743273565", "9780451524935"],
         }),
       }),
+      fetch: makeFetchSpy(),
     } as unknown as Parameters<typeof POST>[0];
     const res = await POST(event);
     const body = await res.json();
@@ -120,6 +131,7 @@ describe("POST /api/cron/catalog-warmup", () => {
         },
         body: JSON.stringify({ isbns: "not-an-array" }),
       }),
+      fetch: makeFetchSpy(),
     } as unknown as Parameters<typeof POST>[0];
     const res = await POST(event);
     const body = await res.json();
@@ -148,6 +160,7 @@ describe("POST /api/cron/catalog-warmup", () => {
           isbns: ["9780743273565", "9780451524935"],
         }),
       }),
+      fetch: makeFetchSpy(),
     } as unknown as Parameters<typeof POST>[0];
     const res = await POST(event);
     const body = await res.json();
@@ -176,11 +189,29 @@ describe("POST /api/cron/catalog-warmup", () => {
           isbns: ["9780316769174", "9780062316097"],
         }),
       }),
+      fetch: makeFetchSpy(),
     } as unknown as Parameters<typeof POST>[0];
     const res = await POST(event);
     expect(res.status).toBe(200);
     // resolveIsbn decides whether to short-circuit based on TTL; the cron
     // must hand all candidates to it regardless of catalog presence.
     expect(resolveIsbnSpy.mock.calls.length).toBe(2);
+  });
+
+  it("uses injected event.fetch (not global fetch) when calling NYT API", async () => {
+    // Locks the DI contract: a future change that reverts to global fetch
+    // would bypass this spy and the assertion would fail.
+    const fetchSpy = makeFetchSpy();
+    const res = await POST(
+      buildEvent(
+        { Authorization: "Bearer secret" },
+        fetchSpy as unknown as typeof fetch,
+      ),
+    );
+    expect(res.status).toBe(200);
+    // The spy must have been called with the NYT bestseller list URL.
+    expect(fetchSpy).toHaveBeenCalled();
+    const calledUrl = (fetchSpy.mock.calls[0] as [string, ...unknown[]])[0];
+    expect(calledUrl).toContain("api.nytimes.com/svc/books/v3/lists/current/");
   });
 });

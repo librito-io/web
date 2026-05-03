@@ -5,6 +5,7 @@ import { COVER_STORAGE_BACKEND } from "$env/static/private";
 import { env as privateEnv } from "$env/dynamic/private";
 import { env as publicEnv } from "$env/dynamic/public";
 import type { CoverStorageBackend, CoverVariant } from "./catalog/types";
+import { sha256Hex } from "./catalog/sha";
 
 // Supabase backend serves the full-size object at every variant (no
 // runtime resize — Image Transformation is Pro-tier only and self-hosters
@@ -27,16 +28,6 @@ function activeBackend(): CoverStorageBackend {
   return (COVER_STORAGE_BACKEND as CoverStorageBackend) === "cloudflare-images"
     ? "cloudflare-images"
     : "supabase";
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    bytes as Uint8Array<ArrayBuffer>,
-  );
-  return [...new Uint8Array(digest)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function extFromMime(mime: string): string {

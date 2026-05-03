@@ -3,7 +3,7 @@ import { error } from "@sveltejs/kit";
 import { parseSort, SORT_COOKIE } from "$lib/feed/sort";
 import { encodeCursor } from "$lib/feed/cursor";
 import { parseFeedRows } from "$lib/feed/types";
-import type { FeedRow, Sort } from "$lib/feed/types";
+import type { FeedItem, Sort } from "$lib/feed/types";
 import { createAdminClient } from "$lib/server/supabase";
 import { canonicalizeIsbn } from "$lib/server/catalog/isbn";
 import { resolveIsbn } from "$lib/server/catalog/fetcher";
@@ -124,7 +124,7 @@ export const load: PageServerLoad = async (event) => {
     return {
       book: bookRow,
       catalog,
-      rows: [] as FeedRow[],
+      items: [] as FeedItem[],
       nextCursor: null,
       sort: effectiveSort,
     };
@@ -133,10 +133,14 @@ export const load: PageServerLoad = async (event) => {
   const rows = parseFeedRows(feedRes.data);
   const last = rows.at(-1);
   const nextCursor = last?.next_cursor ? encodeCursor(last.next_cursor) : null;
+  // Book detail does not batch-resolve per-card covers — the book's cover is
+  // already rendered at the top of the page and cards below it are
+  // book-grouped, so a per-card thumbnail would be redundant.
+  const items: FeedItem[] = rows.map((r) => ({ ...r, coverUrl: null }));
   return {
     book: bookRow,
     catalog,
-    rows,
+    items,
     nextCursor,
     sort: effectiveSort,
   };

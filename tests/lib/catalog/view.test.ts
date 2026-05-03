@@ -14,7 +14,7 @@ vi.mock("$env/dynamic/public", () => ({
   env: {},
 }));
 
-const { getCatalogForBrowser } =
+const { getCatalogForBrowser, getCoverUrlsByIsbns } =
   await import("../../../src/lib/server/catalog/view");
 
 const ISBN = "9780743273565";
@@ -186,5 +186,168 @@ describe("getCatalogForBrowser", () => {
 
     expect(result).not.toBeNull();
     expect(result!.cover_url).toContain("ab/cd.jpg");
+  });
+});
+
+const ISBN_A = "9780743273565";
+const ISBN_B = "9780062316097";
+const ISBN_C = "9780525559474";
+
+describe("getCoverUrlsByIsbns", () => {
+  it("returns an empty Map without hitting the DB when input is empty", async () => {
+    const supabase = createMockSupabase();
+    // Booby-trap: if the helper does query, this would surface in the result.
+    supabase._results.set("book_catalog.select", {
+      data: [
+        { isbn: "wrong", storage_path: "x", cover_storage_backend: "supabase" },
+      ],
+      error: null,
+    });
+
+    const result = await getCoverUrlsByIsbns(supabase, []);
+
+    expect(result.size).toBe(0);
+  });
+
+  it("returns Map entries only for ISBNs with a positive (cover-bearing) row", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        // positive
+        {
+          isbn: ISBN_A,
+          storage_path: "ab/a.jpg",
+          cover_storage_backend: "supabase",
+        },
+        // positive
+        {
+          isbn: ISBN_B,
+          storage_path: "cd/b.jpg",
+          cover_storage_backend: "supabase",
+        },
+        // negative-cache row — must be omitted from the Map
+        {
+          isbn: ISBN_C,
+          storage_path: null,
+          cover_storage_backend: null,
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getCoverUrlsByIsbns(supabase, [
+      ISBN_A,
+      ISBN_B,
+      ISBN_C,
+    ]);
+
+    expect(result.size).toBe(2);
+    expect(result.get(ISBN_A)).toContain("ab/a.jpg");
+    expect(result.get(ISBN_B)).toContain("cd/b.jpg");
+    expect(result.has(ISBN_C)).toBe(false);
+  });
+
+  it("handles duplicate input ISBNs without producing duplicated entries", async () => {
+    // Behavioural contract: duplicates in input do not corrupt the result.
+    // The helper's `Array.from(new Set(...))` dedupe before the query is the
+    // implementation that satisfies this; pinning behaviour rather than
+    // poking the chain shape keeps the test robust against future query
+    // refactors.
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: ISBN_A,
+          storage_path: "ab/a.jpg",
+          cover_storage_backend: "supabase",
+        },
+        {
+          isbn: ISBN_B,
+          storage_path: "cd/b.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getCoverUrlsByIsbns(supabase, [
+      ISBN_A,
+      ISBN_A,
+      ISBN_B,
+      ISBN_A,
+    ]);
+
+    expect(result.size).toBe(2);
+    expect(result.get(ISBN_A)).toContain("ab/a.jpg");
+    expect(result.get(ISBN_B)).toContain("cd/b.jpg");
+  });
+
+  it("returns no entry for ISBNs with no catalog row at all (cold-miss)", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: ISBN_A,
+          storage_path: "ab/a.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getCoverUrlsByIsbns(supabase, [
+      ISBN_A,
+      ISBN_B,
+      ISBN_C,
+    ]);
+
+    expect(result.size).toBe(1);
+    expect(result.has(ISBN_A)).toBe(true);
+    expect(result.has(ISBN_B)).toBe(false);
+    expect(result.has(ISBN_C)).toBe(false);
+  });
+
+  it("threads the variant param through to coverUrl()", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: ISBN_A,
+          storage_path: "ab/cd.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+
+    // Default variant ("thumbnail") and an explicit override should both
+    // resolve to a URL containing the storage path. (Supabase backend
+    // ignores the variant; the assertion is that the URL still resolves.)
+    const thumb = await getCoverUrlsByIsbns(supabase, [ISBN_A]);
+    expect(thumb.get(ISBN_A)).toContain("ab/cd.jpg");
+
+    const supabase2 = createMockSupabase();
+    supabase2._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: ISBN_A,
+          storage_path: "ab/cd.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+    const large = await getCoverUrlsByIsbns(supabase2, [ISBN_A], "large");
+    expect(large.get(ISBN_A)).toContain("ab/cd.jpg");
+  });
+
+  it("throws when the Supabase query returns an error", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: null,
+      error: { message: "DB connection failed", code: "500" },
+    });
+
+    await expect(getCoverUrlsByIsbns(supabase, [ISBN_A])).rejects.toBeTruthy();
   });
 });

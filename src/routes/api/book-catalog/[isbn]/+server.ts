@@ -11,6 +11,7 @@ import {
 } from "$lib/server/ratelimit";
 import { runInBackground } from "$lib/server/wait-until";
 import { getCatalogForBrowser } from "$lib/server/catalog/view";
+import { getCatalogMutex } from "$lib/server/catalog/mutex";
 import type { CoverVariant } from "$lib/server/catalog/types";
 
 const PLACEHOLDER_URL = "/cover-placeholder.svg";
@@ -44,12 +45,14 @@ export const GET: RequestHandler = async (event) => {
       "Catalog lookup rate limit exceeded",
     );
     if (limited) return limited;
+    const mutex = await getCatalogMutex();
     runInBackground(event, () =>
       resolveIsbn(supabase, isbn, {
         rateLimiters: {
           openLibrary: catalogOpenLibraryLimiter,
           googleBooks: catalogGoogleBooksLimiter,
         },
+        mutex,
       }).then(() => undefined),
     );
     return jsonSuccess({

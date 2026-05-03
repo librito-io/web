@@ -342,9 +342,30 @@ wrap the partial-unique-index upsert (supabase-js `.upsert()` doesn't
 thread `WHERE` predicates through). Granted to `service_role` only;
 explicitly revoked from `anon` and `authenticated`.
 
-Rate limits: `catalogOpenLibraryLimiter` (80 req / 5 min, fail-open),
-`catalogGoogleBooksLimiter` (800 req / day, fail-open) — both in
-`src/lib/server/ratelimit.ts`.
+Rate limits are layered three-deep so a misbehaving user, a healthy-but-bursty
+fleet, and an Upstash blip each have a distinct mitigation:
+
+1. **Per-user, fail-CLOSED** — `catalogUserLimiter` (10 req / min,
+   `src/lib/server/ratelimit.ts`) at the API handler / page loader entry
+   point. Caps a single user's parallel cover-resolve fan-out (e.g. 500
+   newly-synced ISBNs opened in tabs) so they cannot monopolize the
+   per-deployment budget.
+2. **Per-ISBN / per-(title,author) mutex, fail-OPEN** —
+   `src/lib/server/catalog/mutex.ts`, threaded through `ResolveDeps`.
+   `SETNX catalog:lock:isbn:${isbn}` (or `catalog:lock:ta:${key}`) with a
+   30 s TTL. Two simultaneous resolves of the same uncached ISBN dedup —
+   loser short-circuits with `rateLimited: true` and consumes neither
+   per-source budget nor an `attempt_count` increment. Distinct
+   namespaces (`isbn:` vs `ta:`) keep ISBN-keyed and title/author-keyed
+   locks for the same physical book independent. Acquire failures
+   fail-OPEN to match the per-source posture (an Upstash blip must not
+   collapse all callers to placeholder); the byte-level sha dedup in
+   `persistCover` is the remaining backstop against duplicated uploads.
+3. **Per-deployment per-source, fail-OPEN** — `catalogOpenLibraryLimiter`
+   (80 req / 5 min) and `catalogGoogleBooksLimiter` (800 req / day),
+   both in `src/lib/server/ratelimit.ts`. Protects upstreams from us
+   when Upstash is unhealthy (10 % / 20 % safety margin under each
+   provider's published cap).
 
 Self-hosters: leave `COVER_STORAGE_BACKEND` unset (defaults to `supabase`).
 The cron is opt-in (`CATALOG_WARMUP_ENABLED=false`); without it, the

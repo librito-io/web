@@ -9,6 +9,7 @@ import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
 } from "$lib/server/ratelimit";
+import { getCatalogMutex } from "$lib/server/catalog/mutex";
 import { CRON_SECRET, CATALOG_WARMUP_ENABLED } from "$env/static/private";
 import { env as privateEnv } from "$env/dynamic/private";
 
@@ -46,6 +47,8 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
 
   const toResolve = candidates.slice(0, MAX_PER_RUN);
 
+  const mutex = await getCatalogMutex();
+
   let resolved = 0;
   let rateLimited = 0;
   for (const isbn of toResolve) {
@@ -55,6 +58,7 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
           openLibrary: catalogOpenLibraryLimiter,
           googleBooks: catalogGoogleBooksLimiter,
         },
+        mutex,
       });
       if (r.rateLimited) {
         rateLimited += 1;

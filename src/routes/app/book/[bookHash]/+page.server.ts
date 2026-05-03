@@ -15,6 +15,7 @@ import {
 } from "$lib/server/ratelimit";
 import { runInBackground } from "$lib/server/wait-until";
 import { getCatalogForBrowser } from "$lib/server/catalog/view";
+import { getCatalogMutex } from "$lib/server/catalog/mutex";
 
 export const load: PageServerLoad = async (event) => {
   const {
@@ -109,12 +110,14 @@ export const load: PageServerLoad = async (event) => {
       const allowed = outcome.kind === "ok" && outcome.result.success;
       if (allowed) {
         const admin = createAdminClient();
+        const mutex = await getCatalogMutex();
         runInBackground(event, () =>
           resolveIsbn(admin, isbn, {
             rateLimiters: {
               openLibrary: catalogOpenLibraryLimiter,
               googleBooks: catalogGoogleBooksLimiter,
             },
+            mutex,
           }).then(() => undefined),
         );
       }

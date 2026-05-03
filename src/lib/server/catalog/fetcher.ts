@@ -29,6 +29,7 @@ import {
 } from "./types";
 import { uploadCover as defaultUploadCover } from "$lib/server/cover-storage";
 import { sha256Hex } from "./sha";
+import { type CatalogMutex, noopMutex } from "./mutex";
 
 export class InvalidIsbnError extends Error {
   constructor(raw: string) {
@@ -47,6 +48,14 @@ export interface ResolveDeps {
   coverStorage?: { uploadCover: typeof defaultUploadCover };
   googleBooksApiKey?: string;
   now?: () => Date;
+  /**
+   * Per-key mutex used to dedupe concurrent resolves of the same ISBN /
+   * (title, author) across server instances. Optional — defaults to
+   * `noopMutex`, which always wins. Production call sites pass a real
+   * Upstash-backed mutex; unit tests that don't exercise concurrency may
+   * omit it. See `./mutex.ts` for the contract.
+   */
+  mutex?: CatalogMutex;
 }
 
 export interface ResolveResult {
@@ -358,88 +367,110 @@ export async function resolveIsbn(
 
   const now = (deps.now ?? (() => new Date()))();
   const upload = deps.coverStorage?.uploadCover ?? defaultUploadCover;
+  const mutex = deps.mutex ?? noopMutex;
 
   const existing = await selectByIsbn(supabase, isbn);
   if (existing && (existing.storage_path || isFreshNegative(existing, now))) {
     return { cached: true, rateLimited: false, row: existing };
   }
 
-  const olOk = await tryAcquire(deps.rateLimiters.openLibrary);
-  if (!olOk) {
+  // Per-ISBN mutex (audit #12): two concurrent resolves of the same ISBN
+  // (two tabs, tab + cron, two cron runs across overlapping cadences)
+  // would otherwise each fire full upstream pipelines and burn per-source
+  // rate-limit tokens for naught — `persistCover` dedups identical bytes
+  // post-fetch but the upstream calls already happened. Lock check sits
+  // AFTER the cache guards (no point coordinating cached hits) and BEFORE
+  // the per-source `tryAcquire` (loser must not consume per-source budget
+  // either). Loser short-circuits with `rateLimited: true` so callers
+  // (API handler, page loader, cron) treat it identically to "skip this
+  // round" — same external semantics as the existing per-source deny path.
+  const lockKey = `catalog:lock:isbn:${isbn}`;
+  const acquired = await mutex.acquire(lockKey);
+  if (!acquired) {
     return { cached: false, rateLimited: true, row: existing ?? { isbn } };
   }
 
-  // 1. Open Library data + work
-  const { olData, olWork } = await loadOpenLibraryData(isbn, deps);
-  const metadata: CatalogMetadata = extractOpenLibraryMetadata(
-    olData as never,
-    olWork as never,
-  );
+  try {
+    const olOk = await tryAcquire(deps.rateLimiters.openLibrary);
+    if (!olOk) {
+      return { cached: false, rateLimited: true, row: existing ?? { isbn } };
+    }
 
-  // 2. Open Library cover (data → search-by-isbn fallback)
-  const ol = await resolveOpenLibraryCover(olData, isbn, metadata, deps);
-  let coverBytes = ol.coverBytes;
-  let coverSource = ol.coverSource;
+    // 1. Open Library data + work
+    const { olData, olWork } = await loadOpenLibraryData(isbn, deps);
+    const metadata: CatalogMetadata = extractOpenLibraryMetadata(
+      olData as never,
+      olWork as never,
+    );
 
-  // 3. Google Books fallback (description and/or cover)
-  const gbResult = await enrichWithGoogleBooks(
-    metadata,
-    coverBytes,
-    () =>
-      fetchGoogleBooksByIsbn(isbn, {
-        fetchFn: deps.fetchFn,
-        apiKey: deps.googleBooksApiKey,
-      }),
-    {
-      deps,
-      do_not_refetch_description: existing?.do_not_refetch_description ?? false,
-      logCtx: { isbn },
-    },
-  );
-  coverBytes = gbResult.coverBytes;
-  if (gbResult.coverSource) coverSource = gbResult.coverSource;
+    // 2. Open Library cover (data → search-by-isbn fallback)
+    const ol = await resolveOpenLibraryCover(olData, isbn, metadata, deps);
+    let coverBytes = ol.coverBytes;
+    let coverSource = ol.coverSource;
 
-  // 4. Persist cover bytes (with byte-level dedup)
-  const storage = await persistCover(supabase, coverBytes, upload);
+    // 3. Google Books fallback (description and/or cover)
+    const gbResult = await enrichWithGoogleBooks(
+      metadata,
+      coverBytes,
+      () =>
+        fetchGoogleBooksByIsbn(isbn, {
+          fetchFn: deps.fetchFn,
+          apiKey: deps.googleBooksApiKey,
+        }),
+      {
+        deps,
+        do_not_refetch_description:
+          existing?.do_not_refetch_description ?? false,
+        logCtx: { isbn },
+      },
+    );
+    coverBytes = gbResult.coverBytes;
+    if (gbResult.coverSource) coverSource = gbResult.coverSource;
 
-  // 5. Build upsert payload + write
-  const upsertRow = {
-    isbn,
-    storage_path: storage?.storage_path ?? null,
-    cover_storage_backend: storage?.backend ?? null,
-    image_sha256: storage?.image_sha256 ?? null,
-    cover_source: coverSource ?? null,
-    openlibrary_cover_id: metadata.openlibrary_cover_id ?? null,
-    google_volume_id: metadata.google_volume_id ?? null,
-    source_url: metadata.source_url ?? null,
-    title: metadata.title ?? null,
-    author: metadata.author ?? null,
-    description: metadata.description ?? null,
-    description_raw: metadata.description_raw ?? null,
-    description_provider: metadata.description_provider ?? null,
-    published_date: metadata.published_date ?? null,
-    publisher: metadata.publisher ?? null,
-    page_count: metadata.page_count ?? null,
-    language: metadata.language ?? null,
-    subjects: metadata.subjects ?? null,
-    series_name: metadata.series_name ?? null,
-    series_position: metadata.series_position ?? null,
-    isbn_10: metadata.isbn_10 ?? null,
-    fetched_at: storage
-      ? now.toISOString()
-      : (existing?.fetched_at ?? now.toISOString()),
-    last_attempted_at: now.toISOString(),
-    attempt_count: (existing?.attempt_count ?? 0) + 1,
-  };
+    // 4. Persist cover bytes (with byte-level dedup)
+    const storage = await persistCover(supabase, coverBytes, upload);
 
-  // Partial unique index requires `INSERT ... ON CONFLICT (col) WHERE pred`.
-  // supabase-js .upsert() does not pass the WHERE through; route via RPC.
-  const { error } = await supabase.rpc("upsert_book_catalog_by_isbn", {
-    p_row: upsertRow,
-  });
-  if (error) throw new Error(`book_catalog upsert: ${error.message}`);
+    // 5. Build upsert payload + write
+    const upsertRow = {
+      isbn,
+      storage_path: storage?.storage_path ?? null,
+      cover_storage_backend: storage?.backend ?? null,
+      image_sha256: storage?.image_sha256 ?? null,
+      cover_source: coverSource ?? null,
+      openlibrary_cover_id: metadata.openlibrary_cover_id ?? null,
+      google_volume_id: metadata.google_volume_id ?? null,
+      source_url: metadata.source_url ?? null,
+      title: metadata.title ?? null,
+      author: metadata.author ?? null,
+      description: metadata.description ?? null,
+      description_raw: metadata.description_raw ?? null,
+      description_provider: metadata.description_provider ?? null,
+      published_date: metadata.published_date ?? null,
+      publisher: metadata.publisher ?? null,
+      page_count: metadata.page_count ?? null,
+      language: metadata.language ?? null,
+      subjects: metadata.subjects ?? null,
+      series_name: metadata.series_name ?? null,
+      series_position: metadata.series_position ?? null,
+      isbn_10: metadata.isbn_10 ?? null,
+      fetched_at: storage
+        ? now.toISOString()
+        : (existing?.fetched_at ?? now.toISOString()),
+      last_attempted_at: now.toISOString(),
+      attempt_count: (existing?.attempt_count ?? 0) + 1,
+    };
 
-  return { cached: false, rateLimited: false, row: upsertRow };
+    // Partial unique index requires `INSERT ... ON CONFLICT (col) WHERE pred`.
+    // supabase-js .upsert() does not pass the WHERE through; route via RPC.
+    const { error } = await supabase.rpc("upsert_book_catalog_by_isbn", {
+      p_row: upsertRow,
+    });
+    if (error) throw new Error(`book_catalog upsert: ${error.message}`);
+
+    return { cached: false, rateLimited: false, row: upsertRow };
+  } finally {
+    await mutex.release(lockKey);
+  }
 }
 
 export class InvalidTitleAuthorError extends Error {
@@ -458,6 +489,7 @@ export async function resolveTitleAuthor(
   if (!key) throw new InvalidTitleAuthorError();
   const now = (deps.now ?? (() => new Date()))();
   const upload = deps.coverStorage?.uploadCover ?? defaultUploadCover;
+  const mutex = deps.mutex ?? noopMutex;
 
   const { data: existingRaw, error: selErr } = await supabase
     .from("book_catalog")
@@ -472,8 +504,14 @@ export async function resolveTitleAuthor(
     return { cached: true, rateLimited: false, row: existing };
   }
 
-  const olOk = await tryAcquire(deps.rateLimiters.openLibrary);
-  if (!olOk) {
+  // Per-(title,author) mutex. Distinct namespace from `isbn:` so an
+  // ISBN-keyed and a title/author-keyed lock for the same physical book
+  // do NOT collide — they're independently resolved (different DB rows,
+  // different upstream queries). See `resolveIsbn` for the full design
+  // rationale.
+  const lockKey = `catalog:lock:ta:${key}`;
+  const acquired = await mutex.acquire(lockKey);
+  if (!acquired) {
     return {
       cached: false,
       rateLimited: true,
@@ -481,92 +519,107 @@ export async function resolveTitleAuthor(
     };
   }
 
-  // 1. Open Library search by title/author
-  let search: Awaited<ReturnType<typeof searchOpenLibraryByTitleAuthor>> = null;
   try {
-    search = await searchOpenLibraryByTitleAuthor(title, author, {
-      fetchFn: deps.fetchFn,
-    });
-  } catch (err) {
-    console.warn("catalog_openlibrary_search_failed", {
-      title,
-      author,
-      error: String(err),
-    });
-  }
+    const olOk = await tryAcquire(deps.rateLimiters.openLibrary);
+    if (!olOk) {
+      return {
+        cached: false,
+        rateLimited: true,
+        row: existing ?? { normalized_title_author: key },
+      };
+    }
 
-  const metadata: CatalogMetadata = {};
-  let coverBytes: CoverBytes | null = null;
-  let coverSource: CoverSource | undefined;
-
-  if (search?.cover_i) {
+    // 1. Open Library search by title/author
+    let search: Awaited<ReturnType<typeof searchOpenLibraryByTitleAuthor>> =
+      null;
     try {
-      coverBytes = await fetchOpenLibraryCoverBytes(search.cover_i, {
+      search = await searchOpenLibraryByTitleAuthor(title, author, {
         fetchFn: deps.fetchFn,
       });
     } catch (err) {
-      console.warn("catalog_openlibrary_cover_failed", {
+      console.warn("catalog_openlibrary_search_failed", {
         title,
         author,
-        coverId: search.cover_i,
         error: String(err),
       });
-      coverBytes = null;
     }
-    if (search.title) metadata.title = search.title;
-    if (search.author_name?.length)
-      metadata.author = search.author_name.join(", ");
-    coverSource = "openlibrary_search_title";
+
+    const metadata: CatalogMetadata = {};
+    let coverBytes: CoverBytes | null = null;
+    let coverSource: CoverSource | undefined;
+
+    if (search?.cover_i) {
+      try {
+        coverBytes = await fetchOpenLibraryCoverBytes(search.cover_i, {
+          fetchFn: deps.fetchFn,
+        });
+      } catch (err) {
+        console.warn("catalog_openlibrary_cover_failed", {
+          title,
+          author,
+          coverId: search.cover_i,
+          error: String(err),
+        });
+        coverBytes = null;
+      }
+      if (search.title) metadata.title = search.title;
+      if (search.author_name?.length)
+        metadata.author = search.author_name.join(", ");
+      coverSource = "openlibrary_search_title";
+    }
+
+    // 2. Google Books fallback (description and/or cover)
+    const gbResult = await enrichWithGoogleBooks(
+      metadata,
+      coverBytes,
+      () =>
+        fetchGoogleBooksByTitleAuthor(title, author, {
+          fetchFn: deps.fetchFn,
+          apiKey: deps.googleBooksApiKey,
+        }),
+      {
+        deps,
+        do_not_refetch_description:
+          existing?.do_not_refetch_description ?? false,
+        logCtx: { title, author },
+      },
+    );
+    coverBytes = gbResult.coverBytes;
+    if (gbResult.coverSource) coverSource = gbResult.coverSource;
+
+    // 3. Persist cover bytes (with byte-level dedup)
+    const storage = await persistCover(supabase, coverBytes, upload);
+
+    // 4. Build upsert payload + write
+    const upsertRow = {
+      isbn: null as string | null,
+      normalized_title_author: key,
+      storage_path: storage?.storage_path ?? null,
+      cover_storage_backend: storage?.backend ?? null,
+      image_sha256: storage?.image_sha256 ?? null,
+      cover_source: coverSource ?? null,
+      title: metadata.title ?? null,
+      author: metadata.author ?? null,
+      description: metadata.description ?? null,
+      description_raw: metadata.description_raw ?? null,
+      description_provider: metadata.description_provider ?? null,
+      google_volume_id: metadata.google_volume_id ?? null,
+      fetched_at: storage
+        ? now.toISOString()
+        : (existing?.fetched_at ?? now.toISOString()),
+      last_attempted_at: now.toISOString(),
+      attempt_count: (existing?.attempt_count ?? 0) + 1,
+    };
+
+    // Same partial-index reason as resolveIsbn — route via RPC.
+    const { error: upErr } = await supabase.rpc(
+      "upsert_book_catalog_by_title_author",
+      { p_row: upsertRow },
+    );
+    if (upErr) throw new Error(`book_catalog upsert: ${upErr.message}`);
+
+    return { cached: false, rateLimited: false, row: upsertRow };
+  } finally {
+    await mutex.release(lockKey);
   }
-
-  // 2. Google Books fallback (description and/or cover)
-  const gbResult = await enrichWithGoogleBooks(
-    metadata,
-    coverBytes,
-    () =>
-      fetchGoogleBooksByTitleAuthor(title, author, {
-        fetchFn: deps.fetchFn,
-        apiKey: deps.googleBooksApiKey,
-      }),
-    {
-      deps,
-      do_not_refetch_description: existing?.do_not_refetch_description ?? false,
-      logCtx: { title, author },
-    },
-  );
-  coverBytes = gbResult.coverBytes;
-  if (gbResult.coverSource) coverSource = gbResult.coverSource;
-
-  // 3. Persist cover bytes (with byte-level dedup)
-  const storage = await persistCover(supabase, coverBytes, upload);
-
-  // 4. Build upsert payload + write
-  const upsertRow = {
-    isbn: null as string | null,
-    normalized_title_author: key,
-    storage_path: storage?.storage_path ?? null,
-    cover_storage_backend: storage?.backend ?? null,
-    image_sha256: storage?.image_sha256 ?? null,
-    cover_source: coverSource ?? null,
-    title: metadata.title ?? null,
-    author: metadata.author ?? null,
-    description: metadata.description ?? null,
-    description_raw: metadata.description_raw ?? null,
-    description_provider: metadata.description_provider ?? null,
-    google_volume_id: metadata.google_volume_id ?? null,
-    fetched_at: storage
-      ? now.toISOString()
-      : (existing?.fetched_at ?? now.toISOString()),
-    last_attempted_at: now.toISOString(),
-    attempt_count: (existing?.attempt_count ?? 0) + 1,
-  };
-
-  // Same partial-index reason as resolveIsbn — route via RPC.
-  const { error: upErr } = await supabase.rpc(
-    "upsert_book_catalog_by_title_author",
-    { p_row: upsertRow },
-  );
-  if (upErr) throw new Error(`book_catalog upsert: ${upErr.message}`);
-
-  return { cached: false, rateLimited: false, row: upsertRow };
 }

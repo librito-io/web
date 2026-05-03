@@ -9,7 +9,11 @@ import {
 } from "$lib/server/ratelimit";
 import { coverUrl } from "$lib/server/cover-storage";
 import { runInBackground } from "$lib/server/wait-until";
-import type { BookCatalogRow, CoverVariant } from "$lib/server/catalog/types";
+import {
+  hasCoverStorage,
+  type BookCatalogRow,
+  type CoverVariant,
+} from "$lib/server/catalog/types";
 
 const PLACEHOLDER_URL = "/cover-placeholder.svg";
 
@@ -34,9 +38,13 @@ export const GET: RequestHandler = async (event) => {
     .eq("isbn", isbn)
     .maybeSingle();
   if (error) return jsonError(500, "server_error", "catalog lookup failed");
-  const data = rawData as Partial<BookCatalogRow> | null;
+  // Cast at the boundary to the discriminated union (not `Partial<...>`) so
+  // `hasCoverStorage` narrows cleanly. The projected select must list every
+  // field accessed below — TypeScript no longer guards against missing
+  // columns under this cast.
+  const data = rawData as BookCatalogRow | null;
 
-  if (!data || !data.storage_path) {
+  if (!data || !hasCoverStorage(data)) {
     runInBackground(event, () =>
       resolveIsbn(supabase, isbn, {
         rateLimiters: {
@@ -65,11 +73,7 @@ export const GET: RequestHandler = async (event) => {
 
   return jsonSuccess({
     isbn,
-    cover_url: coverUrl(
-      data.storage_path,
-      data.cover_storage_backend!,
-      variant,
-    ),
+    cover_url: coverUrl(data.storage_path, data.cover_storage_backend, variant),
     title: data.title,
     author: data.author,
     description: data.description,

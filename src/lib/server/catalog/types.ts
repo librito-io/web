@@ -86,7 +86,21 @@ export interface CatalogMetadata {
 // (`cover_storage_backend`, `description_provider`, `cover_source`) to
 // `string | null`; we override those three fields back to their literal
 // unions so call sites keep narrow types.
-export type BookCatalogRow = Omit<
+//
+// The row is then split into a discriminated union mirroring the DB-level
+// CHECK constraint `book_catalog_storage_consistency` (migration
+// `20260503000001`): either both `storage_path` and `cover_storage_backend`
+// are NULL (negative cache row — lookup attempted, no cover available) or
+// both are non-null (positive row with stored cover). Single-side NULL is
+// rejected by the DB and is therefore unrepresentable in TypeScript.
+// Pre-discriminant shape — fields independently nullable, mirroring the
+// generated row before the `book_catalog_storage_consistency` CHECK is
+// lifted into TypeScript. Use this for in-flight upsert payloads where the
+// discriminant pairing is enforced by construction (e.g. the
+// `storage_path` / `cover_storage_backend` pair both fall through the same
+// `storage?` null check) rather than by type. Reads from the DB should
+// always go through the discriminated `BookCatalogRow` instead.
+export type BookCatalogRowFields = Omit<
   Database["public"]["Tables"]["book_catalog"]["Row"],
   "cover_storage_backend" | "description_provider" | "cover_source"
 > & {
@@ -94,3 +108,40 @@ export type BookCatalogRow = Omit<
   description_provider: DescriptionProvider | null;
   cover_source: CoverSource | null;
 };
+
+export type PositiveBookCatalogRow = Omit<
+  BookCatalogRowFields,
+  "storage_path" | "cover_storage_backend"
+> & {
+  storage_path: string;
+  cover_storage_backend: CoverStorageBackend;
+};
+
+export type NegativeBookCatalogRow = Omit<
+  BookCatalogRowFields,
+  "storage_path" | "cover_storage_backend"
+> & {
+  storage_path: null;
+  cover_storage_backend: null;
+};
+
+export type BookCatalogRow = PositiveBookCatalogRow | NegativeBookCatalogRow;
+
+// Type guard narrowing a row (or any structural subset carrying the storage
+// discriminant) into the positive variant. Accepts the structural shape so
+// it composes with column-projected selects (`Partial<BookCatalogRow>`,
+// pick-style projections) without forcing call sites to cast up to the full
+// row first.
+export function hasCoverStorage<
+  T extends {
+    storage_path?: string | null | undefined;
+    cover_storage_backend?: CoverStorageBackend | null | undefined;
+  },
+>(
+  row: T,
+): row is T & {
+  storage_path: string;
+  cover_storage_backend: CoverStorageBackend;
+} {
+  return row.storage_path != null && row.cover_storage_backend != null;
+}

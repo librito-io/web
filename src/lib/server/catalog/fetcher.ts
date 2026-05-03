@@ -19,11 +19,12 @@ import {
   extractGoogleBooksMetadata,
 } from "./extract";
 import { normalizeTitleAuthor } from "./title-author";
-import type {
-  BookCatalogRow,
-  CatalogMetadata,
-  CoverSource,
-  CoverStorageBackend,
+import {
+  hasCoverStorage,
+  type BookCatalogRowFields,
+  type CatalogMetadata,
+  type CoverSource,
+  type CoverStorageBackend,
 } from "./types";
 import { uploadCover as defaultUploadCover } from "$lib/server/cover-storage";
 
@@ -49,20 +50,20 @@ export interface ResolveDeps {
 export interface ResolveResult {
   cached: boolean;
   rateLimited: boolean;
-  row: Partial<BookCatalogRow>;
+  row: Partial<BookCatalogRowFields>;
 }
 
 async function selectByIsbn(
   supabase: SupabaseClient,
   isbn: string,
-): Promise<Partial<BookCatalogRow> | null> {
+): Promise<Partial<BookCatalogRowFields> | null> {
   const { data, error } = await supabase
     .from("book_catalog")
     .select("*")
     .eq("isbn", isbn)
     .maybeSingle();
   if (error) throw new Error(`book_catalog select: ${error.message}`);
-  return (data as Partial<BookCatalogRow> | null) ?? null;
+  return (data as Partial<BookCatalogRowFields> | null) ?? null;
 }
 
 async function selectBySha(
@@ -80,10 +81,27 @@ async function selectBySha(
     .limit(1)
     .maybeSingle();
   if (error) return null;
-  return (data as never) ?? null;
+  // The `.not("storage_path", "is", null)` filter combined with the DB-level
+  // `book_catalog_storage_consistency` CHECK (`storage_path` and
+  // `cover_storage_backend` are coupled — both NULL or both non-null)
+  // guarantees both fields are non-null at runtime. The Supabase row type
+  // still types them as nullable, so narrow via `hasCoverStorage` rather
+  // than a `!` assertion.
+  const row = data as {
+    storage_path: string | null;
+    cover_storage_backend: CoverStorageBackend | null;
+  } | null;
+  if (!row || !hasCoverStorage(row)) return null;
+  return {
+    storage_path: row.storage_path,
+    cover_storage_backend: row.cover_storage_backend,
+  };
 }
 
-function isFreshNegative(row: Partial<BookCatalogRow>, now: Date): boolean {
+function isFreshNegative(
+  row: Partial<BookCatalogRowFields>,
+  now: Date,
+): boolean {
   if (row.storage_path) return false;
   if (!row.last_attempted_at) return false;
   const last = new Date(row.last_attempted_at).getTime();
@@ -340,7 +358,7 @@ export async function resolveTitleAuthor(
     .maybeSingle();
   if (selErr) throw new Error(`book_catalog select: ${selErr.message}`);
 
-  const e = existing as Partial<BookCatalogRow> | null;
+  const e = existing as Partial<BookCatalogRowFields> | null;
   if (e && (e.storage_path || isFreshNegative(e, now))) {
     return { cached: true, rateLimited: false, row: e };
   }

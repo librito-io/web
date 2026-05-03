@@ -13,7 +13,10 @@ import {
 } from "$lib/server/ratelimit";
 import { coverUrl } from "$lib/server/cover-storage";
 import { runInBackground } from "$lib/server/wait-until";
-import type { BookCatalogRow } from "$lib/server/catalog/types";
+import {
+  hasCoverStorage,
+  type BookCatalogRow,
+} from "$lib/server/catalog/types";
 
 export const load: PageServerLoad = async (event) => {
   const {
@@ -89,12 +92,19 @@ export const load: PageServerLoad = async (event) => {
       )
       .eq("isbn", isbn)
       .maybeSingle();
-    const cat = (rawCat as Partial<BookCatalogRow> | null) ?? null;
-    if (!catError && cat?.storage_path) {
+    // Cast at the boundary: the projected select returns a structural subset
+    // of the row. We cast up to the discriminated union (rather than
+    // `Partial<BookCatalogRow>`) so `hasCoverStorage` narrows cleanly into
+    // PositiveBookCatalogRow with all non-discriminant fields preserved as
+    // required. The select string above must list every field accessed
+    // below — TypeScript no longer guards against missing columns under
+    // this cast, so colocate select + access sites.
+    const cat = (rawCat as BookCatalogRow | null) ?? null;
+    if (!catError && cat && hasCoverStorage(cat)) {
       catalog = {
         cover_url: coverUrl(
           cat.storage_path,
-          cat.cover_storage_backend!,
+          cat.cover_storage_backend,
           "large",
         ),
         description: cat.description ?? null,

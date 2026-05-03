@@ -80,7 +80,7 @@ async function selectBySha(
     .not("storage_path", "is", null)
     .limit(1)
     .maybeSingle();
-  if (error) return null;
+  if (error) throw new Error(`book_catalog selectBySha: ${error.message}`);
   // The `.not("storage_path", "is", null)` filter combined with the DB-level
   // `book_catalog_storage_consistency` CHECK (`storage_path` and
   // `cover_storage_backend` are coupled — both NULL or both non-null)

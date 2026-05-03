@@ -10,6 +10,8 @@ import { resolveIsbn } from "$lib/server/catalog/fetcher";
 import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
+  catalogUserLimiter,
+  safeLimit,
 } from "$lib/server/ratelimit";
 import { coverUrl } from "$lib/server/cover-storage";
 import { runInBackground } from "$lib/server/wait-until";
@@ -126,15 +128,24 @@ export const load: PageServerLoad = async (event) => {
         published_date: cat.published_date ?? null,
       };
     } else {
-      const admin = createAdminClient();
-      runInBackground(event, () =>
-        resolveIsbn(admin, isbn, {
-          rateLimiters: {
-            openLibrary: catalogOpenLibraryLimiter,
-            googleBooks: catalogGoogleBooksLimiter,
-          },
-        }).then(() => undefined),
-      );
+      // Per-user budget on cold-miss work-scheduling. Page loader treats
+      // any non-allowed outcome (denied, failClosed) as "skip schedule"
+      // and renders the existing placeholder catalog state — returning
+      // 429/503 from a load function would render an error page over
+      // already-readable data. See catalogUserLimiter doc in ratelimit.ts.
+      const outcome = await safeLimit(catalogUserLimiter, user.id);
+      const allowed = outcome.kind === "ok" && outcome.result.success;
+      if (allowed) {
+        const admin = createAdminClient();
+        runInBackground(event, () =>
+          resolveIsbn(admin, isbn, {
+            rateLimiters: {
+              openLibrary: catalogOpenLibraryLimiter,
+              googleBooks: catalogGoogleBooksLimiter,
+            },
+          }).then(() => undefined),
+        );
+      }
     }
   }
 

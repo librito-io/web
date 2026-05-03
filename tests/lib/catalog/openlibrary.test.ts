@@ -100,4 +100,47 @@ describe("fetchOpenLibraryCoverBytes", () => {
     );
     expect(await fetchOpenLibraryCoverBytes(0, { fetchFn })).toBeNull();
   });
+
+  it("returns null when Content-Length header exceeds 5 MB cap", async () => {
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(new Uint8Array(512).fill(0xff), {
+          status: 200,
+          headers: {
+            "content-type": "image/jpeg",
+            "content-length": "6000000",
+          },
+        }),
+    );
+    expect(await fetchOpenLibraryCoverBytes(12345, { fetchFn })).toBeNull();
+  });
+
+  it("returns null when body exceeds 5 MB cap with no Content-Length header (post-buffer backstop)", async () => {
+    const oversizeBody = new Uint8Array(6 * 1024 * 1024).fill(0xff);
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(oversizeBody, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        }),
+    );
+    // Verify our test fixture has no content-length (Node Response doesn't auto-set it for Uint8Array)
+    const testRes = await fetchFn();
+    expect(testRes.headers.get("content-length")).toBeNull();
+    expect(await fetchOpenLibraryCoverBytes(12345, { fetchFn })).toBeNull();
+  });
+
+  it("returns bytes for a realistic-size cover (200 KB) — cap does not false-positive", async () => {
+    const realisticCover = new Uint8Array(200 * 1024).fill(0xff);
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(realisticCover, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        }),
+    );
+    const r = await fetchOpenLibraryCoverBytes(12345, { fetchFn });
+    expect(r).not.toBeNull();
+    expect(r?.bytes.byteLength).toBe(200 * 1024);
+  });
 });

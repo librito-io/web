@@ -47,6 +47,7 @@ export async function fetchGoogleBooksByTitleAuthor(
 }
 
 const COVER_MIN_BYTES = 512;
+const COVER_MAX_BYTES = 5 * 1024 * 1024;
 
 export async function fetchGoogleBooksCoverBytes(
   rawUrl: string,
@@ -56,7 +57,10 @@ export async function fetchGoogleBooksCoverBytes(
   const url = rawUrl.replace(/^http:/, "https:");
   const res = await f(url, { headers: { "user-agent": UA } });
   if (!res.ok) return null;
+  const contentLength = res.headers.get("content-length");
+  if (contentLength && Number(contentLength) > COVER_MAX_BYTES) return null;
   const buf = new Uint8Array(await res.arrayBuffer());
   if (buf.byteLength < COVER_MIN_BYTES) return null;
+  if (buf.byteLength > COVER_MAX_BYTES) return null;
   return { bytes: buf, mime: res.headers.get("content-type") ?? "image/jpeg" };
 }

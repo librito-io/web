@@ -1,6 +1,6 @@
 // Upstream API response shapes — shared across catalog modules
 
-import type { Database } from "$lib/db.types";
+import type { Database } from "$lib/types/database";
 
 export interface OpenLibraryAuthor {
   name?: string;

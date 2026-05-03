@@ -42,8 +42,8 @@ jobs:
 
       - name: Verify generated DB types are up to date
         run: |
-          if ! git diff --exit-code src/lib/db.types.ts; then
-            echo "::error::src/lib/db.types.ts is out of date relative to migrations."
+          if ! git diff --exit-code src/lib/types/database.ts; then
+            echo "::error::src/lib/types/database.ts is out of date relative to migrations."
             echo "Run 'npm run gen:types' locally and commit the result."
             exit 1
           fi

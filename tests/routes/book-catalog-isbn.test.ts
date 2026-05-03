@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockSupabase } from "../helpers";
+import { FAIL_CLOSED_RETRY_AFTER_SEC } from "$lib/server/ratelimit.constants";
 
 vi.mock("$env/static/private", () => ({
   COVER_STORAGE_BACKEND: "supabase",
@@ -24,12 +25,32 @@ vi.mock("$lib/server/wait-until", () => ({
   runInBackground: runInBackgroundSpy,
 }));
 
+const userLimitMock = vi.fn();
+vi.mock("$lib/server/ratelimit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
+  return {
+    ...actual,
+    catalogUserLimiter: {
+      ...actual.catalogUserLimiter,
+      limit: (...args: unknown[]) => userLimitMock(...args),
+    },
+  };
+});
+
 const { GET } =
   await import("../../src/routes/api/book-catalog/[isbn]/+server");
 
 beforeEach(() => {
   supabase._results.clear();
   runInBackgroundSpy.mockClear();
+  userLimitMock.mockReset();
+  userLimitMock.mockResolvedValue({
+    success: true,
+    reset: Date.now() + 60_000,
+    limit: 10,
+    remaining: 9,
+    pending: Promise.resolve(),
+  });
 });
 
 function buildEvent(isbn: string, session: unknown = { user: { id: "u1" } }) {
@@ -83,5 +104,81 @@ describe("GET /api/book-catalog/[isbn]", () => {
     expect(res.status).toBe(200);
     expect(body.cover_url).toBe("/cover-placeholder.svg");
     expect(runInBackgroundSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("429 with Retry-After when per-user limiter denies on cold miss", async () => {
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+    userLimitMock.mockResolvedValueOnce({
+      success: false,
+      reset: Date.now() + 30_000,
+      limit: 10,
+      remaining: 0,
+      pending: Promise.resolve(),
+    });
+    const res = await GET(buildEvent("9780743273565"));
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBeTruthy();
+    expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
+    const body = await res.json();
+    expect(body.error).toBe("rate_limited");
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not call per-user limiter on hit path (warm catalog row)", async () => {
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: "9780743273565",
+          title: "Gatsby",
+          author: "Fitzgerald",
+          storage_path: "ab/cd.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+    // Configure limiter to deny — must be irrelevant on the hit path.
+    userLimitMock.mockResolvedValue({
+      success: false,
+      reset: Date.now() + 30_000,
+      limit: 10,
+      remaining: 0,
+      pending: Promise.resolve(),
+    });
+    const res = await GET(buildEvent("9780743273565"));
+    expect(res.status).toBe(200);
+    expect(userLimitMock).not.toHaveBeenCalled();
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+  });
+
+  it("schedules runInBackground when limiter allows on cold miss", async () => {
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+    userLimitMock.mockResolvedValueOnce({
+      success: true,
+      reset: Date.now() + 60_000,
+      limit: 10,
+      remaining: 9,
+      pending: Promise.resolve(),
+    });
+    const res = await GET(buildEvent("9780743273565"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.cold_miss).toBe(true);
+    expect(userLimitMock).toHaveBeenCalledTimes(1);
+    expect(userLimitMock).toHaveBeenCalledWith("u1");
+    expect(runInBackgroundSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("503 when per-user limiter fail-closes on Upstash outage", async () => {
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+    userLimitMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await GET(buildEvent("9780743273565"));
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe(
+      String(FAIL_CLOSED_RETRY_AFTER_SEC),
+    );
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });

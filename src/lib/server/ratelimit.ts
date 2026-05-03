@@ -366,6 +366,26 @@ export const realtimeTokenUserLimiter = createLimiter({
   failMode: "closed",
 });
 
+// Per-user budget on catalog cold-miss work-scheduling. Caps a single
+// user's parallel cover-resolve fan-out (e.g. 500 newly-synced ISBNs
+// opened in tabs) so they cannot monopolize the per-deployment budget.
+// 10/min covers normal interactive browsing (open a few book pages,
+// hit the API a few times) with headroom; bulk patterns are gated.
+//
+// Layered with the per-deployment fail-OPEN limiters
+// (catalogOpenLibraryLimiter / catalogGoogleBooksLimiter) inside
+// resolveIsbn:
+//   - per-deployment fail-open  → protects upstreams from us when
+//     Upstash is unhealthy (don't lock everyone out of catalog).
+//   - per-user fail-closed      → protects us from a single user;
+//     under Upstash outage we'd rather suppress one user's background
+//     fan-out than let them monopolize the global budget.
+export const catalogUserLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(10, "1 m"),
+  prefix: "rl:catalog:user",
+  failMode: "closed",
+});
+
 // 80 req / 5 min — 10 % safety margin under Open Library's 100/5min unauth limit.
 // Global key (single shared bucket across all server instances). Fail-open:
 // upstash outage → fetch attempted, upstream's own 429 is the next backstop.

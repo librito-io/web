@@ -6,6 +6,8 @@ import { resolveIsbn } from "$lib/server/catalog/fetcher";
 import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
+  catalogUserLimiter,
+  enforceRateLimit,
 } from "$lib/server/ratelimit";
 import { coverUrl } from "$lib/server/cover-storage";
 import { runInBackground } from "$lib/server/wait-until";
@@ -64,6 +66,16 @@ export const GET: RequestHandler = async (event) => {
   > | null;
 
   if (!data || !hasCoverStorage(data)) {
+    // Per-user budget on cold-miss work-scheduling. Layered with the
+    // per-deployment fail-open limiters inside resolveIsbn — see
+    // catalogUserLimiter doc in ratelimit.ts. Hit path (above) does not
+    // run the limiter; users reading already-cached data never see 429.
+    const limited = await enforceRateLimit(
+      catalogUserLimiter,
+      user.id,
+      "Catalog lookup rate limit exceeded",
+    );
+    if (limited) return limited;
     runInBackground(event, () =>
       resolveIsbn(supabase, isbn, {
         rateLimiters: {

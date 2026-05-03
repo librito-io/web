@@ -609,3 +609,56 @@ describe("resolveTitleAuthor – do_not_refetch_description", () => {
     expect(r.row.description).toBeNull();
   });
 });
+
+// ─── selectBySha dedup error handling ────────────────────────────────────────
+
+describe("resolveIsbn – selectBySha dedup", () => {
+  it("selectBySha throws when supabase returns DB error", async () => {
+    const supabase = createMockSupabase();
+    // Queue two book_catalog.select results:
+    //   1st → selectByIsbn: no existing row (miss, resolver proceeds)
+    //   2nd → selectBySha: DB error (should throw, not silently return null)
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null },
+      { data: null, error: { message: "transient db error" } },
+    ]);
+
+    // Provide an OL cover so coverBytes is set and selectBySha is reached.
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(
+          JSON.stringify({
+            "ISBN:9780743273565": {
+              title: "Gatsby",
+              cover: {
+                large: "https://covers.openlibrary.org/b/id/99999-L.jpg",
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("covers.openlibrary.org")) {
+        return new Response(new Uint8Array(2048), {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn })),
+    ).rejects.toThrow(/selectBySha/);
+  });
+});

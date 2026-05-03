@@ -1,5 +1,7 @@
 // Upstream API response shapes — shared across catalog modules
 
+import type { Database } from "$lib/db.types";
+
 export interface OpenLibraryAuthor {
   name?: string;
 }
@@ -77,32 +79,18 @@ export interface CatalogMetadata {
   source_url?: string;
 }
 
-export interface BookCatalogRow {
-  id: string;
-  isbn: string | null;
-  normalized_title_author: string | null;
-  storage_path: string | null;
+// Derived from the generated `Database` row type (`npm run gen:types`) so
+// migrations and TypeScript stay in lockstep — adding a column without
+// regenerating types fails typecheck instead of drifting silently. The
+// generated type widens project-specific literal unions
+// (`cover_storage_backend`, `description_provider`, `cover_source`) to
+// `string | null`; we override those three fields back to their literal
+// unions so call sites keep narrow types.
+export type BookCatalogRow = Omit<
+  Database["public"]["Tables"]["book_catalog"]["Row"],
+  "cover_storage_backend" | "description_provider" | "cover_source"
+> & {
   cover_storage_backend: CoverStorageBackend | null;
-  image_sha256: string | null;
-  cover_source: CoverSource | null;
-  openlibrary_cover_id: number | null;
-  google_volume_id: string | null;
-  source_url: string | null;
-  fetched_at: string;
-  last_attempted_at: string;
-  attempt_count: number;
-  title: string | null;
-  author: string | null;
-  description: string | null;
-  description_raw: string | null;
   description_provider: DescriptionProvider | null;
-  published_date: string | null;
-  publisher: string | null;
-  page_count: number | null;
-  language: string | null;
-  subjects: string[] | null;
-  series_name: string | null;
-  series_position: number | null;
-  isbn_10: string | null;
-  do_not_refetch_description: boolean;
-}
+  cover_source: CoverSource | null;
+};

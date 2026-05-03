@@ -30,5 +30,23 @@ jobs:
 
       - run: supabase start
       - run: supabase db reset --local
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run gen:types
+
+      - name: Verify generated DB types are up to date
+        run: |
+          if ! git diff --exit-code src/lib/db.types.ts; then
+            echo "::error::src/lib/db.types.ts is out of date relative to migrations."
+            echo "Run 'npm run gen:types' locally and commit the result."
+            exit 1
+          fi
+
       - if: always()
         run: supabase stop

@@ -58,6 +58,7 @@ describe("downloadCover", () => {
     minBytes: 512,
     maxBytes: 5 * 1024 * 1024,
     source: "testprovider",
+    allowedHosts: ["example.com"],
   };
 
   it("returns { bytes, mime } on success", async () => {
@@ -151,5 +152,64 @@ describe("downloadCover", () => {
       fetchFn,
     });
     expect(r?.mime).toBe("image/jpeg");
+  });
+
+  // SSRF host whitelist tests (audit #8)
+
+  it("fetches successfully when host is in allowedHosts (positive control)", async () => {
+    const imageData = new Uint8Array(1024).fill(0xff);
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(imageData, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        }),
+    );
+    const r = await downloadCover("https://books.google.com/cover.jpg", {
+      ...baseOpts,
+      allowedHosts: ["books.google.com"],
+      fetchFn,
+    });
+    expect(r).not.toBeNull();
+    expect(r?.bytes.byteLength).toBe(1024);
+  });
+
+  it("returns null and never invokes fetchFn when host is not in allowedHosts", async () => {
+    const fetchFn = vi.fn();
+    const r = await downloadCover("https://169.254.169.254/latest/meta-data/", {
+      ...baseOpts,
+      allowedHosts: ["books.google.com"],
+      fetchFn,
+    });
+    expect(r).toBeNull();
+    expect(fetchFn.mock.calls.length).toBe(0);
+  });
+
+  it("matches allowedHosts case-insensitively", async () => {
+    const imageData = new Uint8Array(1024).fill(0xff);
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(imageData, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        }),
+    );
+    const r = await downloadCover("https://BOOKS.GOOGLE.COM/cover.jpg", {
+      ...baseOpts,
+      allowedHosts: ["books.google.com"],
+      fetchFn,
+    });
+    expect(r).not.toBeNull();
+  });
+
+  it("returns null and never invokes fetchFn for a malformed URL", async () => {
+    const fetchFn = vi.fn();
+    const r = await downloadCover("not-a-valid-url", {
+      ...baseOpts,
+      allowedHosts: ["example.com"],
+      fetchFn,
+    });
+    expect(r).toBeNull();
+    expect(fetchFn.mock.calls.length).toBe(0);
   });
 });

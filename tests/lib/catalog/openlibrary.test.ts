@@ -77,6 +77,7 @@ describe("fetchOpenLibraryCoverBytes", () => {
           headers: { "content-type": "image/jpeg" },
         }),
     );
+    // coverId is baked into the URL (covers.openlibrary.org), which is in the allowedHosts list.
     const r = await fetchOpenLibraryCoverBytes(12345, { fetchFn });
     expect(r?.bytes.byteLength).toBe(2048);
     expect(r?.mime).toBe("image/jpeg");

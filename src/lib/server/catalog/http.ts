@@ -4,8 +4,6 @@
 
 const LIBRITO_UA = "librito-catalog/1.0 (+https://librito.io)";
 
-// PR 4 audit #8: SSRF whitelist parameter (allowedHosts) lands here.
-
 export interface FetchCatalogJsonDeps {
   fetchFn?: typeof fetch;
 }
@@ -34,10 +32,17 @@ export interface DownloadCoverOptions {
   minBytes: number;
   maxBytes: number;
   source: string;
+  // SSRF guard: only hosts in this list (lowercase) are allowed.
+  // Checked before fetch so a spoofed/MitM upstream URL never reaches the network.
+  allowedHosts: readonly string[];
 }
 
 /**
- * Download a cover image, enforcing size bounds.
+ * Download a cover image, enforcing size bounds and an SSRF host whitelist.
+ *
+ * Returns null (never throws) on host rejection or malformed URL so the
+ * resolver's per-source try/catch posture is preserved — same as non-ok
+ * response, oversize, or undersize returns below.
  *
  * Two-layer size guard (PR 2 fix #9):
  *   1. Content-Length pre-check — rejects without buffering when upstream
@@ -51,6 +56,15 @@ export async function downloadCover(
   url: string,
   opts: DownloadCoverOptions,
 ): Promise<{ bytes: Uint8Array; mime: string } | null> {
+  // SSRF guard: parse and whitelist-check the URL before any network call.
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!opts.allowedHosts.includes(parsed.hostname.toLowerCase())) return null;
+
   const f = opts.fetchFn ?? fetch;
   const res = await f(url, { headers: { "user-agent": LIBRITO_UA } });
   if (!res.ok) return null;

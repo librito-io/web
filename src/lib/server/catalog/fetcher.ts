@@ -25,6 +25,7 @@ import {
   type CatalogMetadata,
   type CoverSource,
   type CoverStorageBackend,
+  type GoogleBooksItem,
 } from "./types";
 import { uploadCover as defaultUploadCover } from "$lib/server/cover-storage";
 
@@ -52,6 +53,13 @@ export interface ResolveResult {
   rateLimited: boolean;
   row: Partial<BookCatalogRowFields>;
 }
+
+type CoverBytes = { bytes: Uint8Array; mime: string };
+type StorageRecord = {
+  storage_path: string;
+  backend: CoverStorageBackend;
+  image_sha256: string;
+};
 
 async function selectByIsbn(
   supabase: SupabaseClient,
@@ -119,6 +127,236 @@ async function tryAcquire(
   }
 }
 
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const d = await crypto.subtle.digest(
+    "SHA-256",
+    bytes as Uint8Array<ArrayBuffer>,
+  );
+  return [...new Uint8Array(d)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * Materialize cover bytes into the storage backend, deduping by sha256.
+ *
+ * The dedup check pairs with the DB-level `image_sha256` index: if any
+ * existing row already references the same bytes, reuse its storage_path
+ * instead of uploading again. This collapses identical covers across
+ * editions (paperback / hardcover / reprints) to one stored object.
+ *
+ * Returns `null` when there are no bytes to persist (negative-cache row).
+ */
+async function persistCover(
+  supabase: SupabaseClient,
+  coverBytes: CoverBytes | null,
+  upload: typeof defaultUploadCover,
+): Promise<StorageRecord | null> {
+  if (!coverBytes) return null;
+  const sha = await sha256Hex(coverBytes.bytes);
+  const dedup = await selectBySha(supabase, sha);
+  if (dedup) {
+    return {
+      storage_path: dedup.storage_path,
+      backend: dedup.cover_storage_backend,
+      image_sha256: sha,
+    };
+  }
+  return upload(coverBytes.bytes, coverBytes.mime, {});
+}
+
+/**
+ * Run the Google Books fallback for description and/or cover.
+ *
+ * Both resolvers (`resolveIsbn`, `resolveTitleAuthor`) consult Google
+ * Books only when the Open Library pass left description or cover bytes
+ * unfilled. The shared semantics:
+ *
+ *   - Per-source rate-limit budget is checked here (fail-open via
+ *     `tryAcquire`); helper short-circuits silently if exhausted.
+ *   - `do_not_refetch_description` flag gates description text ONLY.
+ *     Cover fallback runs regardless — publisher takedowns target
+ *     marketing copy, not cover images, so a takedown'd ISBN with no OL
+ *     cover must not end up permanently coverless.
+ *   - All upstream errors are caught and logged via `console.warn` with
+ *     a stable code (`catalog_googlebooks_failed`,
+ *     `catalog_googlebooks_cover_failed`). Failures degrade to the
+ *     pre-helper state of `metadata` + `coverBytes`.
+ *
+ * The caller supplies `fetchVolume` (closes over isbn vs title/author),
+ * `logCtx` (used in warn payloads), and a mutable `metadata` object.
+ * Returns the (possibly updated) cover bytes and source.
+ */
+async function enrichWithGoogleBooks(
+  metadata: CatalogMetadata,
+  coverBytes: CoverBytes | null,
+  fetchVolume: () => Promise<GoogleBooksItem | null>,
+  opts: {
+    deps: ResolveDeps;
+    do_not_refetch_description: boolean;
+    logCtx: Record<string, unknown>;
+  },
+): Promise<{ coverBytes: CoverBytes | null; coverSource?: CoverSource }> {
+  if (metadata.description && coverBytes) {
+    return { coverBytes };
+  }
+  const gbOk = await tryAcquire(opts.deps.rateLimiters.googleBooks);
+  if (!gbOk) return { coverBytes };
+
+  let coverSource: CoverSource | undefined;
+  try {
+    const gb = await fetchVolume();
+    if (gb) {
+      const gbMeta = extractGoogleBooksMetadata(gb);
+      if (
+        !metadata.description &&
+        gbMeta.description &&
+        !opts.do_not_refetch_description
+      ) {
+        metadata.description_raw = gbMeta.description;
+        metadata.description = stripMarketingCruft(gbMeta.description);
+        metadata.description_provider = "google_books";
+        metadata.google_volume_id = gbMeta.google_volume_id;
+      }
+      if (!coverBytes) {
+        const link =
+          gb.volumeInfo?.imageLinks?.large ??
+          gb.volumeInfo?.imageLinks?.thumbnail;
+        if (link) {
+          try {
+            coverBytes = await fetchGoogleBooksCoverBytes(link, {
+              fetchFn: opts.deps.fetchFn,
+            });
+          } catch (err) {
+            console.warn("catalog_googlebooks_cover_failed", {
+              ...opts.logCtx,
+              error: String(err),
+            });
+            coverBytes = null;
+          }
+          if (coverBytes) coverSource = "google_books";
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("catalog_googlebooks_failed", {
+      ...opts.logCtx,
+      error: String(err),
+    });
+  }
+  return { coverBytes, coverSource };
+}
+
+/**
+ * Fetch the Open Library data document and (if linked) its work record.
+ *
+ * The work fetch is best-effort — it adds description and subjects but
+ * is not required for a positive resolution.
+ */
+async function loadOpenLibraryData(
+  isbn: string,
+  deps: ResolveDeps,
+): Promise<{
+  olData: ReturnType<typeof extractOpenLibraryMetadata> extends infer _
+    ?
+        | (Awaited<ReturnType<typeof fetchOpenLibraryByIsbn>> & {
+            cover?: { large?: string };
+          })
+        | null
+    : never;
+  olWork: Awaited<ReturnType<typeof fetchOpenLibraryWork>> | null;
+}> {
+  const olData = (await fetchOpenLibraryByIsbn(isbn, {
+    fetchFn: deps.fetchFn,
+  })) as
+    | (Awaited<ReturnType<typeof fetchOpenLibraryByIsbn>> & {
+        cover?: { large?: string };
+      })
+    | null;
+  let olWork: Awaited<ReturnType<typeof fetchOpenLibraryWork>> | null = null;
+  const workKey = olData?.works?.[0]?.key;
+  const id = workKey?.replace(/^\/works\//, "");
+  if (id) {
+    try {
+      olWork = await fetchOpenLibraryWork(id, { fetchFn: deps.fetchFn });
+    } catch {
+      /* tolerate work fetch errors */
+    }
+  }
+  return { olData, olWork };
+}
+
+/**
+ * Resolve the Open Library cover for an ISBN.
+ *
+ * First checks the data document's `cover.large` URL for an embedded
+ * cover_id. If absent, falls back to the search-by-isbn endpoint which
+ * also yields cover_i + title/author hints. Mutates `metadata` with
+ * search-derived title/author when found.
+ *
+ * Returns the resolved coverBytes (if any), the cover source label, and
+ * the cover_id used (for upsert payload archival).
+ */
+async function resolveOpenLibraryCover(
+  olData: { cover?: { large?: string } } | null,
+  isbn: string,
+  metadata: CatalogMetadata,
+  deps: ResolveDeps,
+): Promise<{
+  coverBytes: CoverBytes | null;
+  coverSource: CoverSource | undefined;
+  coverId: number | undefined;
+}> {
+  let coverId: number | undefined;
+  let coverSource: CoverSource | undefined;
+
+  const coverLargeUrl = olData?.cover?.large;
+  if (coverLargeUrl) {
+    const match = coverLargeUrl.match(/\/id\/(\d+)-/);
+    if (match) coverId = Number(match[1]);
+  }
+  if (coverId) {
+    coverSource = "openlibrary_isbn";
+  } else {
+    let search: Awaited<ReturnType<typeof searchOpenLibraryByIsbn>> = null;
+    try {
+      search = await searchOpenLibraryByIsbn(isbn, { fetchFn: deps.fetchFn });
+    } catch (err) {
+      console.warn("catalog_openlibrary_search_failed", {
+        isbn,
+        error: String(err),
+      });
+    }
+    if (search?.cover_i) {
+      coverId = search.cover_i;
+      if (!metadata.title && search.title) metadata.title = search.title;
+      if (!metadata.author && search.author_name?.length) {
+        metadata.author = search.author_name.join(", ");
+      }
+      coverSource = "openlibrary_search_isbn";
+    }
+  }
+
+  let coverBytes: CoverBytes | null = null;
+  if (coverId) {
+    try {
+      coverBytes = await fetchOpenLibraryCoverBytes(coverId, {
+        fetchFn: deps.fetchFn,
+      });
+    } catch (err) {
+      console.warn("catalog_openlibrary_cover_failed", {
+        isbn,
+        coverId,
+        error: String(err),
+      });
+      coverBytes = null;
+    }
+    metadata.openlibrary_cover_id = coverId;
+  }
+
+  return { coverBytes, coverSource, coverId };
+}
+
 export async function resolveIsbn(
   supabase: SupabaseClient,
   rawIsbn: string,
@@ -140,150 +378,40 @@ export async function resolveIsbn(
     return { cached: false, rateLimited: true, row: existing ?? { isbn } };
   }
 
-  // 1. Open Library by ISBN
-  const olData = (await fetchOpenLibraryByIsbn(isbn, {
-    fetchFn: deps.fetchFn,
-  })) as { works?: { key: string }[]; cover?: { large?: string } } | null;
-  let olWork: unknown = null;
-  if (
-    olData &&
-    Array.isArray((olData as { works?: { key: string }[] }).works)
-  ) {
-    const wk = (olData as { works: { key: string }[] }).works[0]?.key;
-    const id = wk?.replace(/^\/works\//, "");
-    if (id) {
-      try {
-        olWork = await fetchOpenLibraryWork(id, { fetchFn: deps.fetchFn });
-      } catch {
-        /* tolerate work fetch errors */
-      }
-    }
-  }
-
-  let metadata: CatalogMetadata = extractOpenLibraryMetadata(
+  // 1. Open Library data + work
+  const { olData, olWork } = await loadOpenLibraryData(isbn, deps);
+  const metadata: CatalogMetadata = extractOpenLibraryMetadata(
     olData as never,
     olWork as never,
   );
-  let coverSource: CoverSource | undefined;
-  let coverBytes: { bytes: Uint8Array; mime: string } | null = null;
 
-  // 2. Cover from data → search-by-isbn
-  let olCoverId: number | undefined;
-  const coverLargeUrl = (olData as { cover?: { large?: string } } | null)?.cover
-    ?.large;
-  if (coverLargeUrl) {
-    const m = coverLargeUrl.match(/\/id\/(\d+)-/);
-    if (m) olCoverId = Number(m[1]);
-  }
-  if (!olCoverId) {
-    let search: Awaited<ReturnType<typeof searchOpenLibraryByIsbn>> = null;
-    try {
-      search = await searchOpenLibraryByIsbn(isbn, { fetchFn: deps.fetchFn });
-    } catch (err) {
-      console.warn("catalog_openlibrary_search_failed", {
-        isbn,
-        error: String(err),
-      });
-    }
-    if (search?.cover_i) {
-      olCoverId = search.cover_i;
-      if (!metadata.title && search.title) metadata.title = search.title;
-      if (!metadata.author && search.author_name?.length) {
-        metadata.author = search.author_name.join(", ");
-      }
-      coverSource = "openlibrary_search_isbn";
-    }
-  } else {
-    coverSource = "openlibrary_isbn";
-  }
-  if (olCoverId) {
-    try {
-      coverBytes = await fetchOpenLibraryCoverBytes(olCoverId, {
+  // 2. Open Library cover (data → search-by-isbn fallback)
+  const ol = await resolveOpenLibraryCover(olData, isbn, metadata, deps);
+  let coverBytes = ol.coverBytes;
+  let coverSource = ol.coverSource;
+
+  // 3. Google Books fallback (description and/or cover)
+  const gbResult = await enrichWithGoogleBooks(
+    metadata,
+    coverBytes,
+    () =>
+      fetchGoogleBooksByIsbn(isbn, {
         fetchFn: deps.fetchFn,
-      });
-    } catch (err) {
-      console.warn("catalog_openlibrary_cover_failed", {
-        isbn,
-        coverId: olCoverId,
-        error: String(err),
-      });
-      coverBytes = null;
-    }
-    metadata.openlibrary_cover_id = olCoverId;
-  }
+        apiKey: deps.googleBooksApiKey,
+      }),
+    {
+      deps,
+      do_not_refetch_description: existing?.do_not_refetch_description ?? false,
+      logCtx: { isbn },
+    },
+  );
+  coverBytes = gbResult.coverBytes;
+  if (gbResult.coverSource) coverSource = gbResult.coverSource;
 
-  // 3. Google Books fallback for description (and cover if needed)
-  // The do_not_refetch_description flag gates description text only (publisher
-  // takedowns target marketing copy, not cover images). Cover fallback proceeds
-  // unconditionally so a takedown'd ISBN with no OL cover doesn't end up
-  // permanently coverless.
-  if (!metadata.description || !coverBytes) {
-    const gbOk = await tryAcquire(deps.rateLimiters.googleBooks);
-    if (gbOk) {
-      try {
-        const gb = await fetchGoogleBooksByIsbn(isbn, {
-          fetchFn: deps.fetchFn,
-          apiKey: deps.googleBooksApiKey,
-        });
-        if (gb) {
-          const gbMeta = extractGoogleBooksMetadata(gb);
-          if (
-            !metadata.description &&
-            gbMeta.description &&
-            !existing?.do_not_refetch_description
-          ) {
-            metadata.description_raw = gbMeta.description;
-            metadata.description = stripMarketingCruft(gbMeta.description);
-            metadata.description_provider = "google_books";
-            metadata.google_volume_id = gbMeta.google_volume_id;
-          }
-          if (!coverBytes) {
-            const link =
-              gb.volumeInfo?.imageLinks?.large ??
-              gb.volumeInfo?.imageLinks?.thumbnail;
-            if (link) {
-              try {
-                coverBytes = await fetchGoogleBooksCoverBytes(link, {
-                  fetchFn: deps.fetchFn,
-                });
-              } catch (err) {
-                console.warn("catalog_googlebooks_cover_failed", {
-                  isbn,
-                  error: String(err),
-                });
-                coverBytes = null;
-              }
-              if (coverBytes) coverSource = "google_books";
-            }
-          }
-        }
-      } catch (err) {
-        console.warn("catalog_googlebooks_failed", {
-          isbn,
-          error: String(err),
-        });
-      }
-    }
-  }
+  // 4. Persist cover bytes (with byte-level dedup)
+  const storage = await persistCover(supabase, coverBytes, upload);
 
-  // Storage (with byte-level dedup)
-  let storage: {
-    storage_path: string;
-    backend: CoverStorageBackend;
-    image_sha256: string;
-  } | null = null;
-  if (coverBytes) {
-    const sha = await sha256Hex(coverBytes.bytes);
-    const dedup = await selectBySha(supabase, sha);
-    storage = dedup
-      ? {
-          storage_path: dedup.storage_path,
-          backend: dedup.cover_storage_backend,
-          image_sha256: sha,
-        }
-      : await upload(coverBytes.bytes, coverBytes.mime, {});
-  }
-
+  // 5. Build upsert payload + write
   const upsertRow = {
     isbn,
     storage_path: storage?.storage_path ?? null,
@@ -323,16 +451,6 @@ export async function resolveIsbn(
   return { cached: false, rateLimited: false, row: upsertRow };
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const d = await crypto.subtle.digest(
-    "SHA-256",
-    bytes as Uint8Array<ArrayBuffer>,
-  );
-  return [...new Uint8Array(d)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 export class InvalidTitleAuthorError extends Error {
   constructor() {
     super("InvalidTitleAuthor");
@@ -350,7 +468,7 @@ export async function resolveTitleAuthor(
   const now = (deps.now ?? (() => new Date()))();
   const upload = deps.coverStorage?.uploadCover ?? defaultUploadCover;
 
-  const { data: existing, error: selErr } = await supabase
+  const { data: existingRaw, error: selErr } = await supabase
     .from("book_catalog")
     .select("*")
     .is("isbn", null)
@@ -358,9 +476,9 @@ export async function resolveTitleAuthor(
     .maybeSingle();
   if (selErr) throw new Error(`book_catalog select: ${selErr.message}`);
 
-  const e = existing as Partial<BookCatalogRowFields> | null;
-  if (e && (e.storage_path || isFreshNegative(e, now))) {
-    return { cached: true, rateLimited: false, row: e };
+  const existing = existingRaw as Partial<BookCatalogRowFields> | null;
+  if (existing && (existing.storage_path || isFreshNegative(existing, now))) {
+    return { cached: true, rateLimited: false, row: existing };
   }
 
   const olOk = await tryAcquire(deps.rateLimiters.openLibrary);
@@ -368,10 +486,11 @@ export async function resolveTitleAuthor(
     return {
       cached: false,
       rateLimited: true,
-      row: e ?? { normalized_title_author: key },
+      row: existing ?? { normalized_title_author: key },
     };
   }
 
+  // 1. Open Library search by title/author
   let search: Awaited<ReturnType<typeof searchOpenLibraryByTitleAuthor>> = null;
   try {
     search = await searchOpenLibraryByTitleAuthor(title, author, {
@@ -384,8 +503,9 @@ export async function resolveTitleAuthor(
       error: String(err),
     });
   }
+
   const metadata: CatalogMetadata = {};
-  let coverBytes: { bytes: Uint8Array; mime: string } | null = null;
+  let coverBytes: CoverBytes | null = null;
   let coverSource: CoverSource | undefined;
 
   if (search?.cover_i) {
@@ -408,76 +528,28 @@ export async function resolveTitleAuthor(
     coverSource = "openlibrary_search_title";
   }
 
-  // Google Books fallback for description (and cover if needed).
-  // The do_not_refetch_description flag gates description text only — same
-  // reasoning as resolveIsbn: takedowns target marketing copy, not covers.
-  // Outer condition broadened from `!metadata.description` to include
-  // `!coverBytes` so the cover fallback runs even when description is
-  // intentionally being skipped due to the flag.
-  if (!metadata.description || !coverBytes) {
-    const gbOk = await tryAcquire(deps.rateLimiters.googleBooks);
-    if (gbOk) {
-      try {
-        const gb = await fetchGoogleBooksByTitleAuthor(title, author, {
-          fetchFn: deps.fetchFn,
-          apiKey: deps.googleBooksApiKey,
-        });
-        if (gb) {
-          const m = extractGoogleBooksMetadata(gb);
-          if (m.description && !e?.do_not_refetch_description) {
-            metadata.description_raw = m.description;
-            metadata.description = stripMarketingCruft(m.description);
-            metadata.description_provider = "google_books";
-            metadata.google_volume_id = m.google_volume_id;
-          }
-          if (!coverBytes) {
-            const link =
-              gb.volumeInfo?.imageLinks?.large ??
-              gb.volumeInfo?.imageLinks?.thumbnail;
-            if (link) {
-              try {
-                coverBytes = await fetchGoogleBooksCoverBytes(link, {
-                  fetchFn: deps.fetchFn,
-                });
-              } catch (err) {
-                console.warn("catalog_googlebooks_cover_failed", {
-                  title,
-                  author,
-                  error: String(err),
-                });
-                coverBytes = null;
-              }
-              if (coverBytes) coverSource = "google_books";
-            }
-          }
-        }
-      } catch (err) {
-        console.warn("catalog_googlebooks_failed", {
-          title,
-          author,
-          error: String(err),
-        });
-      }
-    }
-  }
+  // 2. Google Books fallback (description and/or cover)
+  const gbResult = await enrichWithGoogleBooks(
+    metadata,
+    coverBytes,
+    () =>
+      fetchGoogleBooksByTitleAuthor(title, author, {
+        fetchFn: deps.fetchFn,
+        apiKey: deps.googleBooksApiKey,
+      }),
+    {
+      deps,
+      do_not_refetch_description: existing?.do_not_refetch_description ?? false,
+      logCtx: { title, author },
+    },
+  );
+  coverBytes = gbResult.coverBytes;
+  if (gbResult.coverSource) coverSource = gbResult.coverSource;
 
-  let storage: {
-    storage_path: string;
-    backend: CoverStorageBackend;
-    image_sha256: string;
-  } | null = null;
-  if (coverBytes) {
-    const sha = await sha256Hex(coverBytes.bytes);
-    const dedup = await selectBySha(supabase, sha);
-    storage = dedup
-      ? {
-          storage_path: dedup.storage_path,
-          backend: dedup.cover_storage_backend,
-          image_sha256: sha,
-        }
-      : await upload(coverBytes.bytes, coverBytes.mime, {});
-  }
+  // 3. Persist cover bytes (with byte-level dedup)
+  const storage = await persistCover(supabase, coverBytes, upload);
 
+  // 4. Build upsert payload + write
   const upsertRow = {
     isbn: null as string | null,
     normalized_title_author: key,
@@ -493,9 +565,9 @@ export async function resolveTitleAuthor(
     google_volume_id: metadata.google_volume_id ?? null,
     fetched_at: storage
       ? now.toISOString()
-      : (e?.fetched_at ?? now.toISOString()),
+      : (existing?.fetched_at ?? now.toISOString()),
     last_attempted_at: now.toISOString(),
-    attempt_count: (e?.attempt_count ?? 0) + 1,
+    attempt_count: (existing?.attempt_count ?? 0) + 1,
   };
 
   // Same partial-index reason as resolveIsbn — route via RPC.

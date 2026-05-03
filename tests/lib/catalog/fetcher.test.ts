@@ -608,6 +608,86 @@ describe("resolveTitleAuthor – do_not_refetch_description", () => {
     expect(gbJsonCalls.length).toBeGreaterThan(0);
     expect(r.row.description).toBeNull();
   });
+
+  it("flag set + no OL cover → GB cover fallback applied (description still null)", async () => {
+    // Drift-risk regression test for the enrichWithGoogleBooks helper
+    // (audit fix #14): the do_not_refetch_description flag must gate
+    // description text only — GB cover fallback runs regardless. A
+    // helper extraction that incorrectly hoists the flag check above the
+    // cover branch would silently regress takedown'd ISBNs to coverless.
+    const supabase = createMockSupabase();
+    // Queue two select results: first for the title/author cache lookup
+    // (stale row), second for selectBySha dedup (no match → upload runs).
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [makeStaleRow(true)], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+
+    const GB_COVER_URL = "https://books.google.com/books/cover-fallback.jpg";
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/search.json")) {
+        // No OL cover available
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          JSON.stringify({
+            kind: "books#volumes",
+            totalItems: 1,
+            items: [
+              {
+                id: "gbid_ta_cover",
+                volumeInfo: {
+                  title: "The Great Gatsby",
+                  description: "Marketing blurb to be ignored.",
+                  imageLinks: { thumbnail: GB_COVER_URL },
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url === GB_COVER_URL) {
+        return new Response(new Uint8Array(2048), {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveTitleAuthor(
+      supabase as never,
+      "The Great Gatsby",
+      "F. Scott Fitzgerald",
+      deps({ fetchFn }),
+    );
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_title_author",
+    );
+    expect(upsertCall).toBeDefined();
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+
+    // Flag respected: description still null
+    expect(p_row.description).toBeNull();
+    // Cover came from GB fallback even with flag set
+    expect(p_row.storage_path).not.toBeNull();
+    expect(p_row.cover_source).toBe("google_books");
+  });
 });
 
 // ─── selectBySha dedup error handling ────────────────────────────────────────

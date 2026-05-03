@@ -173,3 +173,221 @@ describe("resolveTitleAuthor", () => {
     expect(d.fetchFn).not.toHaveBeenCalled();
   });
 });
+
+// ─── do_not_refetch_description flag ────────────────────────────────────────
+
+describe("resolveIsbn – do_not_refetch_description", () => {
+  // Existing row that is past the negative-cache TTL so the resolver runs,
+  // but has the takedown flag set.
+  function makeStaleRow(flag: boolean) {
+    return {
+      isbn: "9780743273565",
+      storage_path: null,
+      description: null,
+      do_not_refetch_description: flag,
+      // > 30 days before "now" (2026-05-02), so NOT a fresh negative-cache hit.
+      last_attempted_at: "2026-03-01T00:00:00Z",
+      attempt_count: 1,
+    };
+  }
+
+  function makeFetchFn(respondToOl = true) {
+    return vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org")) {
+        if (url.includes("/api/books")) {
+          return new Response(JSON.stringify({}), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("/search.json")) {
+          return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("/works/")) {
+          return new Response(JSON.stringify({}), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (respondToOl && url.includes("covers.openlibrary.org")) {
+          return new Response(new Uint8Array(2048), {
+            status: 200,
+            headers: { "content-type": "image/jpeg" },
+          });
+        }
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          JSON.stringify({
+            kind: "books#volumes",
+            totalItems: 1,
+            items: [
+              {
+                id: "gbid1",
+                volumeInfo: {
+                  title: "The Great Gatsby",
+                  description: "A story about the American dream.",
+                  imageLinks: {
+                    thumbnail: "https://books.google.com/cover.jpg",
+                  },
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      // Default: empty image bytes for cover fetches
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  it("honors flag: skips Google Books when do_not_refetch_description=true", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [makeStaleRow(true)],
+      error: null,
+    });
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+
+    const fetchFn = makeFetchFn();
+    const r = await resolveIsbn(
+      supabase as never,
+      "9780743273565",
+      deps({ fetchFn }),
+    );
+
+    const gbCalls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => String(args[0]).includes("googleapis.com/books"),
+    );
+    expect(gbCalls).toHaveLength(0);
+    expect(r.row.description).toBeNull();
+  });
+
+  it("no flag: hits Google Books normally when do_not_refetch_description=false", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [makeStaleRow(false)],
+      error: null,
+    });
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+
+    const fetchFn = makeFetchFn();
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const gbCalls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => String(args[0]).includes("googleapis.com/books"),
+    );
+    expect(gbCalls.length).toBeGreaterThan(0);
+  });
+
+  it("flag preserves null description in the upsert RPC payload", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [makeStaleRow(true)],
+      error: null,
+    });
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+
+    const fetchFn = makeFetchFn();
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    expect(upsertCall).toBeDefined();
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.description).toBeNull();
+  });
+});
+
+describe("resolveTitleAuthor – do_not_refetch_description", () => {
+  function makeStaleRow(flag: boolean) {
+    return {
+      isbn: null,
+      normalized_title_author: "the great gatsby|f scott fitzgerald",
+      storage_path: null,
+      description: null,
+      do_not_refetch_description: flag,
+      last_attempted_at: "2026-03-01T00:00:00Z",
+      attempt_count: 1,
+    };
+  }
+
+  function makeFetchFn() {
+    return vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          JSON.stringify({
+            kind: "books#volumes",
+            totalItems: 1,
+            items: [
+              {
+                id: "gbid2",
+                volumeInfo: {
+                  title: "The Great Gatsby",
+                  description: "A story about the American dream.",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  it("honors flag: skips Google Books when do_not_refetch_description=true", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [makeStaleRow(true)],
+      error: null,
+    });
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+
+    const fetchFn = makeFetchFn();
+    const r = await resolveTitleAuthor(
+      supabase as never,
+      "The Great Gatsby",
+      "F. Scott Fitzgerald",
+      deps({ fetchFn }),
+    );
+
+    const gbCalls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => String(args[0]).includes("googleapis.com/books"),
+    );
+    expect(gbCalls).toHaveLength(0);
+    expect(r.row.description).toBeNull();
+  });
+});

@@ -195,7 +195,10 @@ export async function resolveIsbn(
   }
 
   // 3. Google Books fallback for description (and cover if needed)
-  if (!metadata.description || !coverBytes) {
+  // Skip entirely when the publisher-takedown flag is set on the existing row.
+  if (existing?.do_not_refetch_description === true) {
+    // Takedown rows: no GB fetch, no description, no GB cover fallback.
+  } else if (!metadata.description || !coverBytes) {
     const gbOk = await tryAcquire(deps.rateLimiters.googleBooks);
     if (gbOk) {
       try {
@@ -382,7 +385,10 @@ export async function resolveTitleAuthor(
     coverSource = "openlibrary_search_title";
   }
 
-  if (!metadata.description) {
+  // Skip Google Books entirely when the publisher-takedown flag is set.
+  if (e?.do_not_refetch_description === true) {
+    // Takedown rows: no GB fetch, no description, no GB cover fallback.
+  } else if (!metadata.description) {
     const gbOk = await tryAcquire(deps.rateLimiters.googleBooks);
     if (gbOk) {
       try {

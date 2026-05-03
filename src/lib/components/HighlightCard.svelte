@@ -14,6 +14,7 @@
     showChapterHeading = true,
     showHighlightCount = true,
     linkBookText = true,
+    coverUrl = undefined,
   } = $props<{
     row: FeedRow;
     supabase: SupabaseClient;
@@ -32,6 +33,7 @@
     showChapterHeading?: boolean;
     showHighlightCount?: boolean;
     linkBookText?: boolean;
+    coverUrl?: string;
   }>();
 
   const bookHref = $derived(`/app/book/${encodeURIComponent(row.book_hash)}`);
@@ -81,13 +83,31 @@
 <div class="book-card expanded">
   <div class="book-header">
     {#if linkBookText}
-      <a
-        href={bookHref}
-        class="book-cover book-cover-placeholder"
-        aria-hidden="true"
-      >
-        {initial}
+      <a href={bookHref} class="book-cover-link" aria-hidden="true">
+        {#if coverUrl}
+          <img
+            class="book-cover"
+            src={coverUrl}
+            alt=""
+            width="67"
+            height="100"
+            loading="lazy"
+          />
+        {:else}
+          <div class="book-cover book-cover-placeholder">
+            {initial}
+          </div>
+        {/if}
       </a>
+    {:else if coverUrl}
+      <img
+        class="book-cover"
+        src={coverUrl}
+        alt=""
+        width="67"
+        height="100"
+        loading="lazy"
+      />
     {:else}
       <div class="book-cover book-cover-placeholder" aria-hidden="true">
         {initial}

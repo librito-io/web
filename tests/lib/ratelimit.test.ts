@@ -12,6 +12,8 @@ import {
   enforceRateLimit,
   enforceRateLimits,
   safeLimit,
+  catalogOpenLibraryLimiter,
+  catalogGoogleBooksLimiter,
   type RateLimiter,
   type LimitResult,
   type FailMode,
@@ -522,5 +524,16 @@ describe("enforceRateLimits — multi-limiter precedence", () => {
 
   it("throws on empty array", async () => {
     await expect(enforceRateLimits([], "msg")).rejects.toThrow(/non-empty/);
+  });
+});
+
+describe("catalog limiters policy", () => {
+  it("catalogOpenLibraryLimiter is fail-open with rl:catalog-openlibrary prefix", () => {
+    expect(catalogOpenLibraryLimiter.failMode).toBe("open");
+    expect(catalogOpenLibraryLimiter.label).toBe("catalog-openlibrary");
+  });
+  it("catalogGoogleBooksLimiter is fail-open with rl:catalog-googlebooks prefix", () => {
+    expect(catalogGoogleBooksLimiter.failMode).toBe("open");
+    expect(catalogGoogleBooksLimiter.label).toBe("catalog-googlebooks");
   });
 });

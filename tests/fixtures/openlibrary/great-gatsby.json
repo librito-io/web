@@ -1,0 +1,239 @@
+{
+  "url": "http://openlibrary.org/books/OL46773254M/The_Great_Gatsby",
+  "key": "/books/OL46773254M",
+  "title": "The Great Gatsby",
+  "authors": [
+    {
+      "url": "http://openlibrary.org/authors/OL27349A/F._Scott_Fitzgerald",
+      "name": "F. Scott Fitzgerald"
+    }
+  ],
+  "number_of_pages": 208,
+  "pagination": "134",
+  "weight": "6.4 ounces",
+  "identifiers": {
+    "isbn_13": [
+      "9780743273565"
+    ],
+    "openlibrary": [
+      "OL46773254M"
+    ]
+  },
+  "publishers": [
+    {
+      "name": "Independently Published"
+    }
+  ],
+  "publish_date": "2021",
+  "subjects": [
+    {
+      "name": "Modern fiction",
+      "url": "https://openlibrary.org/subjects/modern_fiction"
+    },
+    {
+      "name": "Traffic accidents",
+      "url": "https://openlibrary.org/subjects/traffic_accidents"
+    },
+    {
+      "name": "First loves",
+      "url": "https://openlibrary.org/subjects/first_loves"
+    },
+    {
+      "name": "Classics",
+      "url": "https://openlibrary.org/subjects/classics"
+    },
+    {
+      "name": "Literature",
+      "url": "https://openlibrary.org/subjects/literature"
+    },
+    {
+      "name": "Fiction",
+      "url": "https://openlibrary.org/subjects/fiction"
+    },
+    {
+      "name": "Manuscripts",
+      "url": "https://openlibrary.org/subjects/manuscripts"
+    },
+    {
+      "name": "Facsimiles",
+      "url": "https://openlibrary.org/subjects/facsimiles"
+    },
+    {
+      "name": "Rich people",
+      "url": "https://openlibrary.org/subjects/rich_people"
+    },
+    {
+      "name": "Mistresses",
+      "url": "https://openlibrary.org/subjects/mistresses"
+    },
+    {
+      "name": "Open library staff picks",
+      "url": "https://openlibrary.org/subjects/open_library_staff_picks"
+    },
+    {
+      "name": "Revenge",
+      "url": "https://openlibrary.org/subjects/revenge"
+    },
+    {
+      "name": "Man-woman relationships",
+      "url": "https://openlibrary.org/subjects/man-woman_relationships"
+    },
+    {
+      "name": "Wealth",
+      "url": "https://openlibrary.org/subjects/wealth"
+    },
+    {
+      "name": "Readers",
+      "url": "https://openlibrary.org/subjects/readers"
+    },
+    {
+      "name": "Economic conditions",
+      "url": "https://openlibrary.org/subjects/economic_conditions"
+    },
+    {
+      "name": "American fiction",
+      "url": "https://openlibrary.org/subjects/american_fiction"
+    },
+    {
+      "name": "Upper class",
+      "url": "https://openlibrary.org/subjects/upper_class"
+    },
+    {
+      "name": "Social life and customs",
+      "url": "https://openlibrary.org/subjects/social_life_and_customs"
+    },
+    {
+      "name": "American manuscripts",
+      "url": "https://openlibrary.org/subjects/american_manuscripts"
+    },
+    {
+      "name": "Married women",
+      "url": "https://openlibrary.org/subjects/married_women"
+    },
+    {
+      "name": "Long now manual for civilization",
+      "url": "https://openlibrary.org/subjects/long_now_manual_for_civilization"
+    },
+    {
+      "name": "Fictional works publication type",
+      "url": "https://openlibrary.org/subjects/fictional_works_publication_type"
+    },
+    {
+      "name": "Man-woman relationship",
+      "url": "https://openlibrary.org/subjects/man-woman_relationship"
+    },
+    {
+      "name": "Rich people -- fiction",
+      "url": "https://openlibrary.org/subjects/rich_people_--_fiction"
+    },
+    {
+      "name": "Romance fiction",
+      "url": "https://openlibrary.org/subjects/romance_fiction"
+    },
+    {
+      "name": "Long island (n.y.) -- fiction",
+      "url": "https://openlibrary.org/subjects/long_island_(n.y.)_--_fiction"
+    },
+    {
+      "name": "Psychological fiction",
+      "url": "https://openlibrary.org/subjects/psychological_fiction"
+    },
+    {
+      "name": "Love stories",
+      "url": "https://openlibrary.org/subjects/love_stories"
+    },
+    {
+      "name": "Novela",
+      "url": "https://openlibrary.org/subjects/novela"
+    },
+    {
+      "name": "Relaciones hombre-mujer",
+      "url": "https://openlibrary.org/subjects/relaciones_hombre-mujer"
+    },
+    {
+      "name": "Spanish language materials",
+      "url": "https://openlibrary.org/subjects/spanish_language_materials"
+    },
+    {
+      "name": "Literary",
+      "url": "https://openlibrary.org/subjects/literary"
+    },
+    {
+      "name": "Nouveau riche",
+      "url": "https://openlibrary.org/subjects/nouveau_riche"
+    },
+    {
+      "name": "Reading level-grade 11",
+      "url": "https://openlibrary.org/subjects/reading_level-grade_11"
+    },
+    {
+      "name": "Reading level-grade 12",
+      "url": "https://openlibrary.org/subjects/reading_level-grade_12"
+    },
+    {
+      "name": "Fiction / general",
+      "url": "https://openlibrary.org/subjects/fiction_/_general"
+    },
+    {
+      "name": "Moral conditions",
+      "url": "https://openlibrary.org/subjects/moral_conditions"
+    },
+    {
+      "name": "Manners and customs",
+      "url": "https://openlibrary.org/subjects/manners_and_customs"
+    },
+    {
+      "name": "American fiction (fictional works by one author)",
+      "url": "https://openlibrary.org/subjects/american_fiction_(fictional_works_by_one_author)"
+    },
+    {
+      "name": "New york (n.y.), fiction",
+      "url": "https://openlibrary.org/subjects/new_york_(n.y.),_fiction"
+    },
+    {
+      "name": "Long island (n.y.), fiction",
+      "url": "https://openlibrary.org/subjects/long_island_(n.y.),_fiction"
+    },
+    {
+      "name": "Married people, fiction",
+      "url": "https://openlibrary.org/subjects/married_people,_fiction"
+    },
+    {
+      "name": "Fiction, psychological",
+      "url": "https://openlibrary.org/subjects/fiction,_psychological"
+    },
+    {
+      "name": "Fiction, general",
+      "url": "https://openlibrary.org/subjects/fiction,_general"
+    },
+    {
+      "name": "Fitzgerald, f. scott (francis scott), 1896-1940",
+      "url": "https://openlibrary.org/subjects/fitzgerald,_f._scott_(francis_scott),_1896-1940"
+    },
+    {
+      "name": "Man-woman relationships, fiction",
+      "url": "https://openlibrary.org/subjects/man-woman_relationships,_fiction"
+    },
+    {
+      "name": "Large type books",
+      "url": "https://openlibrary.org/subjects/large_type_books"
+    },
+    {
+      "name": "Nineteen twenties",
+      "url": "https://openlibrary.org/subjects/nineteen_twenties"
+    },
+    {
+      "name": "English fiction",
+      "url": "https://openlibrary.org/subjects/english_fiction"
+    },
+    {
+      "name": "Rich",
+      "url": "https://openlibrary.org/subjects/rich"
+    }
+  ],
+  "cover": {
+    "small": "https://covers.openlibrary.org/b/id/14314120-S.jpg",
+    "medium": "https://covers.openlibrary.org/b/id/14314120-M.jpg",
+    "large": "https://covers.openlibrary.org/b/id/14314120-L.jpg"
+  }
+}

@@ -1,16 +1,8 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
+import { constantTimeEqualString } from "$lib/server/cron-auth";
 import { CRON_SECRET } from "$env/static/private";
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) {
-    out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return out === 0;
-}
 
 const BUCKET = "book-transfers";
 const PASS_A_BATCH = 500;
@@ -18,7 +10,7 @@ const PASS_A_BATCH = 500;
 export const POST: RequestHandler = async ({ request }) => {
   const auth = request.headers.get("authorization") ?? "";
   const expected = `Bearer ${CRON_SECRET}`;
-  if (!timingSafeEqual(auth, expected)) {
+  if (!constantTimeEqualString(auth, expected)) {
     return jsonError(401, "unauthorized", "Cron secret mismatch");
   }
 

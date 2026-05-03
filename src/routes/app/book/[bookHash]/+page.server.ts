@@ -14,7 +14,10 @@ import {
   safeLimit,
 } from "$lib/server/ratelimit";
 import { runInBackground } from "$lib/server/wait-until";
-import { getCatalogForBrowser } from "$lib/server/catalog/view";
+import {
+  getCatalogForBrowser,
+  type BookDetailCatalog,
+} from "$lib/server/catalog/view";
 import { getCatalogMutex } from "$lib/server/catalog/mutex";
 
 export const load: PageServerLoad = async (event) => {
@@ -64,15 +67,7 @@ export const load: PageServerLoad = async (event) => {
   };
   const isbn = canonicalizeIsbn(bookRow.isbn);
 
-  let catalog: {
-    cover_url: string;
-    description: string | null;
-    description_provider: string | null;
-    publisher: string | null;
-    page_count: number | null;
-    subjects: string[] | null;
-    published_date: string | null;
-  } = {
+  let catalog: BookDetailCatalog = {
     cover_url: "/cover-placeholder.svg",
     description: null,
     description_provider: null,

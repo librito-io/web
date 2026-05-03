@@ -235,6 +235,62 @@ This implies a clean separation:
   ```
 - A new `.github/pull_request_template.md` populates the PR body — keep it slim and follow its structure.
 
+### Length & shape
+
+Commit bodies should be **tight**. The standard:
+
+- **Subject**: ≤50 chars, imperative mood, conventional-commits prefix (`feat(scope):`, `fix(scope):`, etc.).
+- **Body**: 3–7 lines default. Explains WHY the change is non-obvious, not WHAT changed (the diff shows that).
+- **Up to ~15 lines** when the change has rejected alternatives worth recording, security implications, subtle constraints, or numbered design decisions that future contributors would otherwise re-litigate.
+- **Beyond 15 lines is a smell.** If the body is longer, the substance probably belongs in a spec, audit doc, plan, or code comment instead — and the commit should reference it (`See docs/audits-wip/<name>.md issue #N` / `Per spec §"Foo"`).
+
+What to omit from commit bodies:
+
+- **Verification sections** (`vitest passes, typecheck clean`) — table stakes, every commit is verified before push.
+- **File lists** — `git show --stat` produces them on demand.
+- **Restating linked archaeology** — if the audit/spec/plan already documents the rationale, link to it by issue number rather than copy-pasting.
+- **Co-Authored-By per-commit** when multiple commits in a branch share the same author — collapse to a single trailer at the end of the squash body when tidying for merge.
+
+What to keep, even if longer than 7 lines:
+
+- **Rejected alternatives** ("considered X, ruled out because Y").
+- **Cross-cutting policy decisions** that a single-file diff doesn't communicate (e.g., layered rate-limit policy, fail-OPEN vs fail-CLOSED choice).
+- **Security implications** — explicit threat-model framing future contributors must respect.
+- **Refs to commits being amended or partially reverted** — `Preserves the amend at <sha>` / `Supersedes <sha> approach`.
+
+When tidying squash bodies (per `gh pr merge --squash --body ...`), apply the same rules — strip per-commit verification sections, file lists, and redundant audit-doc restatements; preserve the load-bearing rationale.
+
+The bias is toward **"future-self skims and finds the gem fast"**, not toward exhaustive documentation. Spec docs, audit trackers, and CLAUDE.md itself carry the long-form story.
+
+### Where design rationale lives
+
+When a commit body is long because it carries design rationale, that rationale probably belongs in **code comments**, not the commit. Two different artifacts for two different audiences:
+
+- **Commit message** → answers "why is this change happening?" Frozen at write time. Read mostly at `git blame` / `git log` archeology time.
+- **Code comment** → answers "why does this code look this way?" Lives next to the code. Read every time someone modifies the affected lines.
+
+Heuristic for picking:
+
+| Rationale type                                                            | Home                                                                             |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Why this algorithm or data structure                                      | Code comment at the implementation                                               |
+| Why this change is happening now                                          | Commit message                                                                   |
+| Rejected alternatives                                                     | Spec / audit doc; one-line summary in commit                                     |
+| Concurrency model, lock ordering, mutex semantics                         | Code comment AT the lock acquire/release sites                                   |
+| Subtle invariants ("array must be sorted before this call")               | Code comment at the call site                                                    |
+| Security implications                                                     | Both — code comment to stop mistakes, commit to record the threat-model decision |
+| Workarounds for external bugs                                             | Code comment WITH the condition for removal (e.g. "remove once Postgres ≥ 17.2") |
+| Cross-cutting policy (e.g. fail-OPEN vs fail-CLOSED, rate-limit layering) | Code comment at the module top of the relevant primitive; reference from commits |
+
+**Comment maintenance discipline:**
+
+- Comments answer WHY, never WHAT. WHAT is the code's job.
+- Place comments at the point of decision (call site, lock site, branch site), not buried at the top of a 500-line file.
+- If a comment becomes wrong, delete it. Wrong comments are worse than missing ones.
+- Refactors must update the comments they pass through, or remove them.
+
+If you find yourself writing the same rationale in both the commit and a code comment, drop it from the commit. The commit can say "see JSDoc on `createUpstashMutex`" or similar.
+
 ## Project Structure
 
 ```

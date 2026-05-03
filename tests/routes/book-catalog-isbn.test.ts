@@ -151,6 +151,94 @@ describe("GET /api/book-catalog/[isbn]", () => {
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
   });
 
+  it("hit response includes all 12 metadata fields", async () => {
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: "9780743273565",
+          title: "The Great Gatsby",
+          author: "F. Scott Fitzgerald",
+          description: "A novel about the Jazz Age",
+          description_provider: "openlibrary",
+          publisher: "Scribner",
+          page_count: 180,
+          subjects: ["fiction", "classic"],
+          published_date: "1925-04-10",
+          language: "en",
+          series_name: null,
+          series_position: null,
+          storage_path: "ab/cd.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+    const res = await GET(buildEvent("9780743273565"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.isbn).toBe("9780743273565");
+    expect(body.title).toBe("The Great Gatsby");
+    expect(body.author).toBe("F. Scott Fitzgerald");
+    expect(body.description).toBe("A novel about the Jazz Age");
+    expect(body.description_provider).toBe("openlibrary");
+    expect(body.publisher).toBe("Scribner");
+    expect(body.page_count).toBe(180);
+    expect(body.subjects).toEqual(["fiction", "classic"]);
+    expect(body.published_date).toBe("1925-04-10");
+    expect(body.language).toBe("en");
+    expect(body.series_name).toBeNull();
+    expect(body.series_position).toBeNull();
+    expect(body.cold_miss).toBe(false);
+    expect(body.cover_url).toContain(
+      "storage/v1/object/public/cover-cache/ab/cd.jpg",
+    );
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+  });
+
+  it("cold-miss response includes all 12 metadata fields (negative-cache row)", async () => {
+    // Negative-cache row: exists in DB but has no cover stored yet.
+    // All metadata fields present; cover_url is null because storage_path is null.
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: "9780743273565",
+          title: "The Great Gatsby",
+          author: "F. Scott Fitzgerald",
+          description: "A novel about the Jazz Age",
+          description_provider: "openlibrary",
+          publisher: "Scribner",
+          page_count: 180,
+          subjects: ["fiction", "classic"],
+          published_date: "1925-04-10",
+          language: "en",
+          series_name: null,
+          series_position: null,
+          storage_path: null,
+          cover_storage_backend: null,
+        },
+      ],
+      error: null,
+    });
+    const res = await GET(buildEvent("9780743273565"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.isbn).toBe("9780743273565");
+    expect(body.title).toBe("The Great Gatsby");
+    expect(body.author).toBe("F. Scott Fitzgerald");
+    expect(body.description).toBe("A novel about the Jazz Age");
+    expect(body.description_provider).toBe("openlibrary");
+    expect(body.publisher).toBe("Scribner");
+    expect(body.page_count).toBe(180);
+    expect(body.subjects).toEqual(["fiction", "classic"]);
+    expect(body.published_date).toBe("1925-04-10");
+    expect(body.language).toBe("en");
+    expect(body.series_name).toBeNull();
+    expect(body.series_position).toBeNull();
+    expect(body.cold_miss).toBe(true);
+    expect(body.cover_url).toBe("/cover-placeholder.svg");
+    expect(runInBackgroundSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("schedules runInBackground when limiter allows on cold miss", async () => {
     supabase._results.set("book_catalog.select", { data: [], error: null });
     userLimitMock.mockResolvedValueOnce({

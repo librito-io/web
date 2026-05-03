@@ -1,7 +1,7 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
-import { canonicalizeIsbn } from "$lib/server/catalog/isbn";
+import { parseIsbnsFromBody } from "$lib/server/catalog/parse";
 import { resolveIsbn } from "$lib/server/catalog/fetcher";
 import { fetchNytBestsellerIsbns } from "$lib/server/catalog/nyt";
 import { constantTimeEqualString } from "$lib/server/cron-auth";
@@ -24,19 +24,7 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
     return jsonSuccess({ skipped: true });
   }
 
-  let bodyIsbns: string[] | null = null;
-  if (request.headers.get("content-type")?.includes("application/json")) {
-    try {
-      const body = (await request.json()) as { isbns?: unknown };
-      if (Array.isArray(body.isbns)) {
-        bodyIsbns = body.isbns
-          .map((s) => (typeof s === "string" ? canonicalizeIsbn(s) : null))
-          .filter((s): s is string => !!s);
-      }
-    } catch {
-      // Body parse failure — fall through to NYT default.
-    }
-  }
+  const bodyIsbns = await parseIsbnsFromBody(request);
 
   const supabase = createAdminClient();
   const start = Date.now();

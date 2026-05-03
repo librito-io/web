@@ -51,10 +51,14 @@ export async function fetchGoogleBooksCoverBytes(
   rawUrl: string,
   deps: GoogleBooksDeps = {},
 ): Promise<{ bytes: Uint8Array; mime: string } | null> {
+  // Host check runs on the post-replacement URL for consistency.
+  // books.google.com: primary cover CDN (fixture-confirmed).
+  // lh3.googleusercontent.com: observed serving covers while omitting Content-Length.
   return downloadCover(rawUrl.replace(/^http:/, "https:"), {
     fetchFn: deps.fetchFn,
     minBytes: COVER_MIN_BYTES,
     maxBytes: COVER_MAX_BYTES,
     source: "googlebooks",
+    allowedHosts: ["books.google.com", "lh3.googleusercontent.com"],
   });
 }

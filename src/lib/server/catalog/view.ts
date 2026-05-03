@@ -32,6 +32,34 @@ export type CatalogView = Pick<
   cover_url: string | null;
 };
 
+/**
+ * Catalog metadata projected for the book-detail page (`/app/book/[bookHash]`).
+ *
+ * Differs from CatalogView in two ways:
+ *   - cover_url is always a string (placeholder URL substituted for the
+ *     null negative-cache state) — the detail page renders an <img> tag
+ *     unconditionally rather than branching on null.
+ *   - Excludes columns the detail surface does not use (isbn / title /
+ *     author come from the `books` row, not book_catalog; storage
+ *     discriminants are internal-only).
+ *
+ * Deriving from CatalogView via Pick ensures new catalog columns
+ * automatically surface as a typecheck failure here (audit #21) — add
+ * a field to CatalogView and TypeScript will flag any call site that
+ * initialises a BookDetailCatalog without it.
+ */
+export type BookDetailCatalog = Pick<
+  CatalogView,
+  | "description"
+  | "description_provider"
+  | "publisher"
+  | "page_count"
+  | "subjects"
+  | "published_date"
+> & {
+  cover_url: string;
+};
+
 const CATALOG_SELECT =
   "isbn, title, author, description, description_provider, publisher, " +
   "page_count, subjects, published_date, language, series_name, series_position, " +

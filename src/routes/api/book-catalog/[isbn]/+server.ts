@@ -34,10 +34,30 @@ export const GET: RequestHandler = async (event) => {
     return jsonError(500, "server_error", "catalog lookup failed");
   }
 
+  // Build the shared metadata shape once. Works for both null catalogView
+  // (no DB row) and non-null with cover_url === null (negative-cache row).
+  // The ?? null is a no-op on the hit path — CatalogView fields are already
+  // nullable. Add new catalog columns here only; both branches pick them up
+  // via spread. Audit issue #18.
+  const baseFields = {
+    isbn,
+    title: catalogView?.title ?? null,
+    author: catalogView?.author ?? null,
+    description: catalogView?.description ?? null,
+    description_provider: catalogView?.description_provider ?? null,
+    publisher: catalogView?.publisher ?? null,
+    page_count: catalogView?.page_count ?? null,
+    subjects: catalogView?.subjects ?? null,
+    published_date: catalogView?.published_date ?? null,
+    language: catalogView?.language ?? null,
+    series_name: catalogView?.series_name ?? null,
+    series_position: catalogView?.series_position ?? null,
+  };
+
   if (!catalogView || catalogView.cover_url === null) {
     // Per-user budget on cold-miss work-scheduling. Layered with the
     // per-deployment fail-open limiters inside resolveIsbn — see
-    // catalogUserLimiter doc in ratelimit.ts. Hit path (above) does not
+    // catalogUserLimiter doc in ratelimit.ts. Hit path (below) does not
     // run the limiter; users reading already-cached data never see 429.
     const limited = await enforceRateLimit(
       catalogUserLimiter,
@@ -56,37 +76,15 @@ export const GET: RequestHandler = async (event) => {
       }).then(() => undefined),
     );
     return jsonSuccess({
-      isbn,
+      ...baseFields,
       cover_url: PLACEHOLDER_URL,
-      title: catalogView?.title ?? null,
-      author: catalogView?.author ?? null,
-      description: catalogView?.description ?? null,
-      description_provider: catalogView?.description_provider ?? null,
-      publisher: catalogView?.publisher ?? null,
-      page_count: catalogView?.page_count ?? null,
-      subjects: catalogView?.subjects ?? null,
-      published_date: catalogView?.published_date ?? null,
-      language: catalogView?.language ?? null,
-      series_name: catalogView?.series_name ?? null,
-      series_position: catalogView?.series_position ?? null,
       cold_miss: true,
     });
   }
 
   return jsonSuccess({
-    isbn,
+    ...baseFields,
     cover_url: catalogView.cover_url,
-    title: catalogView.title,
-    author: catalogView.author,
-    description: catalogView.description,
-    description_provider: catalogView.description_provider,
-    publisher: catalogView.publisher,
-    page_count: catalogView.page_count,
-    subjects: catalogView.subjects,
-    published_date: catalogView.published_date,
-    language: catalogView.language,
-    series_name: catalogView.series_name,
-    series_position: catalogView.series_position,
     cold_miss: false,
   });
 };

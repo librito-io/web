@@ -80,5 +80,6 @@ export async function fetchOpenLibraryCoverBytes(
     minBytes: COVER_MIN_BYTES,
     maxBytes: COVER_MAX_BYTES,
     source: "openlibrary",
+    allowedHosts: ["covers.openlibrary.org"],
   });
 }

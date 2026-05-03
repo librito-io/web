@@ -71,11 +71,12 @@ describe("fetchGoogleBooksCoverBytes", () => {
           headers: { "content-type": "image/jpeg" },
         }),
     );
-    const r = await fetchGoogleBooksCoverBytes("http://example.com/cover.jpg", {
-      fetchFn,
-    });
+    const r = await fetchGoogleBooksCoverBytes(
+      "http://books.google.com/cover.jpg",
+      { fetchFn },
+    );
     expect(fetchFn).toHaveBeenCalledWith(
-      "https://example.com/cover.jpg",
+      "https://books.google.com/cover.jpg",
       expect.any(Object),
     );
     expect(r?.bytes.byteLength).toBe(1024);
@@ -92,7 +93,7 @@ describe("fetchGoogleBooksCoverBytes", () => {
         }),
     );
     expect(
-      await fetchGoogleBooksCoverBytes("https://example.com/cover.jpg", {
+      await fetchGoogleBooksCoverBytes("https://books.google.com/cover.jpg", {
         fetchFn,
       }),
     ).toBeNull();
@@ -103,7 +104,7 @@ describe("fetchGoogleBooksCoverBytes", () => {
       async () => new Response(new Uint8Array(0), { status: 404 }),
     );
     expect(
-      await fetchGoogleBooksCoverBytes("https://example.com/cover.jpg", {
+      await fetchGoogleBooksCoverBytes("https://books.google.com/cover.jpg", {
         fetchFn,
       }),
     ).toBeNull();
@@ -121,7 +122,7 @@ describe("fetchGoogleBooksCoverBytes", () => {
         }),
     );
     expect(
-      await fetchGoogleBooksCoverBytes("https://example.com/cover.jpg", {
+      await fetchGoogleBooksCoverBytes("https://books.google.com/cover.jpg", {
         fetchFn,
       }),
     ).toBeNull();
@@ -140,9 +141,12 @@ describe("fetchGoogleBooksCoverBytes", () => {
     const testRes = await fetchFn();
     expect(testRes.headers.get("content-length")).toBeNull();
     expect(
-      await fetchGoogleBooksCoverBytes("https://example.com/cover.jpg", {
-        fetchFn,
-      }),
+      await fetchGoogleBooksCoverBytes(
+        "https://lh3.googleusercontent.com/cover.jpg",
+        {
+          fetchFn,
+        },
+      ),
     ).toBeNull();
   });
 
@@ -156,7 +160,7 @@ describe("fetchGoogleBooksCoverBytes", () => {
         }),
     );
     const r = await fetchGoogleBooksCoverBytes(
-      "https://example.com/cover.jpg",
+      "https://lh3.googleusercontent.com/cover.jpg",
       { fetchFn },
     );
     expect(r).not.toBeNull();

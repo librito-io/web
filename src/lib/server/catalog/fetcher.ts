@@ -26,6 +26,8 @@ import {
   type CoverSource,
   type CoverStorageBackend,
   type GoogleBooksItem,
+  type OpenLibraryDataDoc,
+  type OpenLibraryWork,
 } from "./types";
 import { uploadCover as defaultUploadCover } from "$lib/server/cover-storage";
 import { sha256Hex } from "./sha";
@@ -130,8 +132,8 @@ async function tryAcquire(
   limiter: Pick<RateLimiter, "limit">,
 ): Promise<boolean> {
   try {
-    const r = (await limiter.limit("catalog")) as LimitResult;
-    return r.success;
+    const limitResult = (await limiter.limit("catalog")) as LimitResult;
+    return limitResult.success;
   } catch {
     return true; // fail-open per limiter policy
   }
@@ -257,23 +259,11 @@ async function loadOpenLibraryData(
   isbn: string,
   deps: ResolveDeps,
 ): Promise<{
-  olData: ReturnType<typeof extractOpenLibraryMetadata> extends infer _
-    ?
-        | (Awaited<ReturnType<typeof fetchOpenLibraryByIsbn>> & {
-            cover?: { large?: string };
-          })
-        | null
-    : never;
-  olWork: Awaited<ReturnType<typeof fetchOpenLibraryWork>> | null;
+  olData: OpenLibraryDataDoc | null;
+  olWork: OpenLibraryWork | null;
 }> {
-  const olData = (await fetchOpenLibraryByIsbn(isbn, {
-    fetchFn: deps.fetchFn,
-  })) as
-    | (Awaited<ReturnType<typeof fetchOpenLibraryByIsbn>> & {
-        cover?: { large?: string };
-      })
-    | null;
-  let olWork: Awaited<ReturnType<typeof fetchOpenLibraryWork>> | null = null;
+  const olData = await fetchOpenLibraryByIsbn(isbn, { fetchFn: deps.fetchFn });
+  let olWork: OpenLibraryWork | null = null;
   const workKey = olData?.works?.[0]?.key;
   const id = workKey?.replace(/^\/works\//, "");
   if (id) {
@@ -399,8 +389,8 @@ export async function resolveIsbn(
     // 1. Open Library data + work
     const { olData, olWork } = await loadOpenLibraryData(isbn, deps);
     const metadata: CatalogMetadata = extractOpenLibraryMetadata(
-      olData as never,
-      olWork as never,
+      olData,
+      olWork,
     );
 
     // 2. Open Library cover (data → search-by-isbn fallback)

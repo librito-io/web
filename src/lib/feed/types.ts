@@ -5,6 +5,9 @@ export type FeedRow = {
   book_hash: string;
   book_title: string | null;
   book_author: string | null;
+  // RPC RETURNS TABLE drops column nullability — gen:types emits `string`,
+  // but books.isbn is nullable; normalized at parseFeedRows.
+  book_isbn: string | null;
   book_highlight_count: number;
   chapter_index: number;
   chapter_title: string | null;
@@ -35,7 +38,10 @@ export function parseFeedRows(data: unknown): FeedRow[] {
       typeof (r as { book_hash?: unknown }).book_hash === "string" &&
       typeof (r as { text?: unknown }).text === "string"
     ) {
-      rows.push(r as FeedRow);
+      const rawIsbn = (r as { book_isbn?: unknown }).book_isbn;
+      const book_isbn =
+        typeof rawIsbn === "string" && rawIsbn.length > 0 ? rawIsbn : null;
+      rows.push({ ...(r as FeedRow), book_isbn });
     }
   }
   return rows;

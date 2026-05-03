@@ -7,12 +7,12 @@
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import Toast from "$lib/components/Toast.svelte";
   import { FEED_SORT_OPTIONS, writeSortCookie } from "$lib/feed/sort";
-  import type { FeedRow, Sort } from "$lib/feed/types";
+  import type { FeedItem, Sort } from "$lib/feed/types";
 
   let { data } = $props();
 
   let sort = $state<Sort>(untrack(() => data.sort));
-  let items = $state<FeedRow[]>(untrack(() => data.rows));
+  let items = $state<FeedItem[]>(untrack(() => data.items));
   let cursor = $state<string | null>(untrack(() => data.nextCursor));
   let done = $state(untrack(() => data.nextCursor === null));
 
@@ -104,7 +104,7 @@
 
   $effect(() => {
     sort = data.sort;
-    items = data.rows;
+    items = data.items;
     cursor = data.nextCursor;
     done = data.nextCursor === null;
   });
@@ -131,13 +131,13 @@
       if (myGen !== fetchGen) return;
       if (!res.ok) throw new Error(`feed fetch ${res.status}`);
       const payload = (await res.json()) as {
-        rows: FeedRow[];
+        items: FeedItem[];
         nextCursor: string | null;
       };
       if (myGen !== fetchGen) return;
-      items = opts.replace ? payload.rows : [...items, ...payload.rows];
+      items = opts.replace ? payload.items : [...items, ...payload.items];
       cursor = payload.nextCursor;
-      if (!cursor || payload.rows.length === 0) done = true;
+      if (!cursor || payload.items.length === 0) done = true;
     } finally {
       inflight = false;
     }
@@ -164,9 +164,9 @@
     {#if items.length === 0}
       <div class="empty">{$_("noHighlights")}</div>
     {:else}
-      {#each items as row (row.highlight_id)}
+      {#each items as item (item.highlight_id)}
         <HighlightCard
-          {row}
+          {item}
           supabase={data.supabase}
           userId={data.user?.id ?? ""}
           {onHighlightMenu}

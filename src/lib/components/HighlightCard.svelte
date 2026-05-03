@@ -1,12 +1,12 @@
 <script lang="ts">
   import { _ } from "$lib/i18n";
-  import type { FeedRow } from "$lib/feed/types";
+  import type { FeedItem } from "$lib/feed/types";
   import type { SupabaseClient } from "@supabase/supabase-js";
   import HighlightBlock from "./HighlightBlock.svelte";
   import NoteEditor from "./NoteEditor.svelte";
 
   let {
-    row,
+    item,
     supabase,
     userId,
     onHighlightMenu,
@@ -14,9 +14,8 @@
     showChapterHeading = true,
     showHighlightCount = true,
     linkBookText = true,
-    coverUrl = undefined,
   } = $props<{
-    row: FeedRow;
+    item: FeedItem;
     supabase: SupabaseClient;
     userId: string;
     onHighlightMenu: (payload: {
@@ -33,21 +32,20 @@
     showChapterHeading?: boolean;
     showHighlightCount?: boolean;
     linkBookText?: boolean;
-    coverUrl?: string;
   }>();
 
-  const bookHref = $derived(`/app/book/${encodeURIComponent(row.book_hash)}`);
+  const bookHref = $derived(`/app/book/${encodeURIComponent(item.book_hash)}`);
   const initial = $derived(
-    row.book_title?.trim().charAt(0).toUpperCase() || "?",
+    item.book_title?.trim().charAt(0).toUpperCase() || "?",
   );
 
   let noteOverride = $state<{
     text: string | null;
     updatedAt: string | null;
   } | null>(null);
-  const noteText = $derived(noteOverride ? noteOverride.text : row.note_text);
+  const noteText = $derived(noteOverride ? noteOverride.text : item.note_text);
   const noteUpdatedAt = $derived(
-    noteOverride ? noteOverride.updatedAt : row.note_updated_at,
+    noteOverride ? noteOverride.updatedAt : item.note_updated_at,
   );
 
   async function saveNote(highlightId: string, text: string): Promise<void> {
@@ -84,10 +82,10 @@
   <div class="book-header">
     {#if linkBookText}
       <a href={bookHref} class="book-cover-link" aria-hidden="true">
-        {#if coverUrl}
+        {#if item.coverUrl}
           <img
             class="book-cover"
-            src={coverUrl}
+            src={item.coverUrl}
             alt=""
             width="67"
             height="100"
@@ -99,10 +97,10 @@
           </div>
         {/if}
       </a>
-    {:else if coverUrl}
+    {:else if item.coverUrl}
       <img
         class="book-cover"
-        src={coverUrl}
+        src={item.coverUrl}
         alt=""
         width="67"
         height="100"
@@ -116,23 +114,23 @@
     <div class="book-info">
       {#if linkBookText}
         <a href={bookHref} class="book-title book-link" dir="auto">
-          {row.book_title || $_("untitled")}
+          {item.book_title || $_("untitled")}
         </a>
         <a href={bookHref} class="book-author book-link" dir="auto">
-          {row.book_author || $_("unknownAuthor")}
+          {item.book_author || $_("unknownAuthor")}
         </a>
       {:else}
         <div class="book-title" dir="auto">
-          {row.book_title || $_("untitled")}
+          {item.book_title || $_("untitled")}
         </div>
         <div class="book-author" dir="auto">
-          {row.book_author || $_("unknownAuthor")}
+          {item.book_author || $_("unknownAuthor")}
         </div>
       {/if}
       {#if showHighlightCount}
         <a href={bookHref} class="book-meta book-link">
           {$_("highlightCount", {
-            values: { count: row.book_highlight_count },
+            values: { count: item.book_highlight_count },
           })}
         </a>
       {/if}
@@ -140,31 +138,31 @@
   </div>
 
   <div class="highlights-container">
-    {#if showChapterHeading && row.chapter_title}
-      <div class="chapter-heading" dir="auto">{row.chapter_title}</div>
+    {#if showChapterHeading && item.chapter_title}
+      <div class="chapter-heading" dir="auto">{item.chapter_title}</div>
     {/if}
     <HighlightBlock
       highlight={{
-        id: row.highlight_id,
-        text: row.text,
-        styles: row.styles,
+        id: item.highlight_id,
+        text: item.text,
+        styles: item.styles,
       }}
       onMenu={({ x, y, id }) =>
         onHighlightMenu({
           x,
           y,
           highlightId: id,
-          text: row.text,
+          text: item.text,
           hasNote: !!noteText,
         })}
     />
     <NoteEditor
-      highlightId={row.highlight_id}
+      highlightId={item.highlight_id}
       initialText={noteText}
       initialUpdatedAt={noteUpdatedAt}
-      save={(t) => saveNote(row.highlight_id, t)}
-      remove={() => removeNote(row.highlight_id)}
-      onReady={(api) => registerNoteEditor(row.highlight_id, api.handleDelete)}
+      save={(t) => saveNote(item.highlight_id, t)}
+      remove={() => removeNote(item.highlight_id)}
+      onReady={(api) => registerNoteEditor(item.highlight_id, api.handleDelete)}
     />
   </div>
 </div>

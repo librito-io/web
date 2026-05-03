@@ -143,3 +143,70 @@ export async function getCatalogForBrowser(
     cover_url: resolvedCoverUrl,
   };
 }
+
+/**
+ * Batch-resolve cover URLs for a list of ISBNs from `book_catalog`. Powers the
+ * highlight-feed card thumbnails: one round-trip for the whole feed page rather
+ * than N per-card lookups.
+ *
+ * Single SELECT projecting only the storage discriminant — no metadata,
+ * since callers only need the URL.
+ *
+ * @param supabase - Per-request Supabase client (RLS-bound or admin; caller
+ *   decides). Reads from `book_catalog` only — no privileged writes.
+ * @param isbns - Canonical ISBNs (caller's responsibility to canonicalize via
+ *   `canonicalizeIsbn`). Duplicates are deduped internally before the query.
+ * @param variant - Cover size variant passed to `coverUrl()`. Defaults to
+ *   "thumbnail" for the feed-card use case (200×300 @ q80, retina @3x for the
+ *   67×100 box). On the current Supabase Storage backend the variant is a
+ *   layout hint only; on Cloudflare Images it picks the rendered size.
+ * @returns Map keyed by canonical ISBN. Only ISBNs with a positive
+ *   (`storage_path` non-null) row produce an entry; negative-cache rows and
+ *   absent rows are both omitted, so the caller renders the placeholder for
+ *   any missing key.
+ *
+ *   Negative-cache rows (catalog tried, found nothing) get no Map entry —
+ *   caller renders placeholder. Catalog warmup cron is the retry path; cold-
+ *   miss scheduling here would burn budget on a known-failing resolve.
+ */
+export async function getCoverUrlsByIsbns(
+  supabase: SupabaseClient,
+  isbns: string[],
+  variant: CoverVariant = "thumbnail",
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (isbns.length === 0) return result;
+  const unique = Array.from(new Set(isbns));
+
+  const { data: rawData, error } = await supabase
+    .from("book_catalog")
+    .select("isbn, storage_path, cover_storage_backend")
+    .in("isbn", unique);
+
+  if (error) {
+    throw error;
+  }
+  if (!rawData) return result;
+
+  // Cast at the boundary — same pattern as getCatalogForBrowser. The
+  // Pick<> distributes across the discriminated union so hasCoverStorage()
+  // narrows cleanly without escaping to the full row type.
+  const rows = rawData as unknown as Pick<
+    BookCatalogRow,
+    "isbn" | "storage_path" | "cover_storage_backend"
+  >[];
+
+  for (const row of rows) {
+    // Skip rows whose isbn is null — book_catalog allows isbn-null rows
+    // keyed on (title, author) for ISBN-less books, but this helper's
+    // contract is "lookup by ISBN". A null-isbn row arriving here would
+    // imply a query bug; defensive skip.
+    if (row.isbn === null) continue;
+    if (!hasCoverStorage(row)) continue;
+    result.set(
+      row.isbn,
+      coverUrl(row.storage_path, row.cover_storage_backend, variant),
+    );
+  }
+  return result;
+}

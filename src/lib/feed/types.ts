@@ -27,6 +27,14 @@ export type FeedPage = {
   nextCursor: string | null;
 };
 
+/**
+ * Page-side view model. `FeedRow` is the RPC contract; `FeedItem` is what the
+ * loader / paginated API hands the page. `coverUrl` is server-resolved from
+ * `book_isbn` against `book_catalog` at request time; `null` means cold-miss,
+ * ISBN-less, or negative-cache — caller renders the placeholder.
+ */
+export type FeedItem = FeedRow & { coverUrl: string | null };
+
 export function parseFeedRows(data: unknown): FeedRow[] {
   if (!Array.isArray(data)) return [];
   const rows: FeedRow[] = [];

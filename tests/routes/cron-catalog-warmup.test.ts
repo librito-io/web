@@ -5,16 +5,22 @@ import { createMockSupabase } from "../helpers";
 vi.mock("$env/static/private", () => ({
   CRON_SECRET: "secret",
   CATALOG_WARMUP_ENABLED: "true",
-  NYT_BOOKS_API_KEY: "nyt",
   COVER_STORAGE_BACKEND: "supabase",
-  CLOUDFLARE_ACCOUNT_ID: "acct",
-  CLOUDFLARE_IMAGES_API_TOKEN: "tok",
   UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
   UPSTASH_REDIS_REST_TOKEN: "mock-token",
 }));
 vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_URL: "https://supabase.example.co",
-  PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc",
+}));
+vi.mock("$env/dynamic/private", () => ({
+  env: {
+    NYT_BOOKS_API_KEY: "nyt",
+    CLOUDFLARE_ACCOUNT_ID: "acct",
+    CLOUDFLARE_IMAGES_API_TOKEN: "tok",
+  },
+}));
+vi.mock("$env/dynamic/public", () => ({
+  env: { PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc" },
 }));
 
 const supabase = createMockSupabase();
@@ -60,9 +66,11 @@ describe("POST /api/cron/catalog-warmup", () => {
     vi.doMock("$env/static/private", () => ({
       CRON_SECRET: "secret",
       CATALOG_WARMUP_ENABLED: "false",
-      NYT_BOOKS_API_KEY: "nyt",
       UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
       UPSTASH_REDIS_REST_TOKEN: "mock-token",
+    }));
+    vi.doMock("$env/dynamic/private", () => ({
+      env: { NYT_BOOKS_API_KEY: "nyt" },
     }));
     const { POST: P2 } =
       await import("../../src/routes/api/cron/catalog-warmup/+server");

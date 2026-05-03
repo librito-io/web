@@ -3,13 +3,19 @@ import { createMockSupabase } from "../../helpers";
 
 vi.mock("$env/static/private", () => ({
   COVER_STORAGE_BACKEND: "supabase",
-  CLOUDFLARE_ACCOUNT_ID: "acct",
-  CLOUDFLARE_IMAGES_API_TOKEN: "tok",
-  NYT_BOOKS_API_KEY: "",
 }));
 vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_URL: "https://supabase.example.co",
-  PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc",
+}));
+vi.mock("$env/dynamic/private", () => ({
+  env: {
+    CLOUDFLARE_ACCOUNT_ID: "acct",
+    CLOUDFLARE_IMAGES_API_TOKEN: "tok",
+    NYT_BOOKS_API_KEY: "",
+  },
+}));
+vi.mock("$env/dynamic/public", () => ({
+  env: { PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc" },
 }));
 
 import {

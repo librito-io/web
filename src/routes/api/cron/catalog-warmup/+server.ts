@@ -8,11 +8,8 @@ import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
 } from "$lib/server/ratelimit";
-import {
-  CRON_SECRET,
-  CATALOG_WARMUP_ENABLED,
-  NYT_BOOKS_API_KEY,
-} from "$env/static/private";
+import { CRON_SECRET, CATALOG_WARMUP_ENABLED } from "$env/static/private";
+import { env as privateEnv } from "$env/dynamic/private";
 
 const MAX_PER_RUN = 100;
 
@@ -72,9 +69,10 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const supabase = createAdminClient();
   const start = Date.now();
+  const nytKey = privateEnv.NYT_BOOKS_API_KEY ?? "";
   const candidates = bodyIsbns
     ? bodyIsbns
-    : await fetchNytBestsellerIsbns(NYT_BOOKS_API_KEY, fetch);
+    : await fetchNytBestsellerIsbns(nytKey, fetch);
 
   const toResolve = candidates.slice(0, MAX_PER_RUN);
 

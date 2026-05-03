@@ -1,12 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "$lib/server/supabase";
 import { PUBLIC_SUPABASE_URL } from "$env/static/public";
-import { PUBLIC_CLOUDFLARE_IMAGES_HASH } from "$env/static/public";
-import {
-  COVER_STORAGE_BACKEND,
-  CLOUDFLARE_ACCOUNT_ID,
-  CLOUDFLARE_IMAGES_API_TOKEN,
-} from "$env/static/private";
+import { COVER_STORAGE_BACKEND } from "$env/static/private";
+import { env as privateEnv } from "$env/dynamic/private";
+import { env as publicEnv } from "$env/dynamic/public";
 import type { CoverStorageBackend, CoverVariant } from "./catalog/types";
 
 // Supabase backend serves the full-size object at every variant (no
@@ -72,6 +69,14 @@ async function uploadCloudflare(
   sha: string,
   deps: UploadDeps,
 ): Promise<UploadResult> {
+  const accountId = privateEnv.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = privateEnv.CLOUDFLARE_IMAGES_API_TOKEN;
+  if (!accountId || !apiToken) {
+    throw new Error(
+      "Cloudflare Images backend requires CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_IMAGES_API_TOKEN env vars. " +
+        "Set COVER_STORAGE_BACKEND=supabase to use Supabase Storage instead.",
+    );
+  }
   const f = deps.fetchFn ?? fetch;
   const form = new FormData();
   form.append(
@@ -80,10 +85,10 @@ async function uploadCloudflare(
     `${sha}.${extFromMime(mime)}`,
   );
   form.append("id", sha);
-  const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/images/v1`;
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1`;
   const res = await f(url, {
     method: "POST",
-    headers: { authorization: `Bearer ${CLOUDFLARE_IMAGES_API_TOKEN}` },
+    headers: { authorization: `Bearer ${apiToken}` },
     body: form,
   });
   if (!res.ok) {
@@ -119,7 +124,13 @@ export function coverUrl(
   variant: CoverVariant,
 ): string {
   if (backend === "cloudflare-images") {
-    return `https://imagedelivery.net/${PUBLIC_CLOUDFLARE_IMAGES_HASH}/${storagePath}/${variant}`;
+    const hash = publicEnv.PUBLIC_CLOUDFLARE_IMAGES_HASH;
+    if (!hash) {
+      throw new Error(
+        "Cloudflare Images backend requires PUBLIC_CLOUDFLARE_IMAGES_HASH env var.",
+      );
+    }
+    return `https://imagedelivery.net/${hash}/${storagePath}/${variant}`;
   }
   // Supabase backend: variant is a layout hint; the URL itself is the
   // full-size public object. Caller is responsible for sizing via

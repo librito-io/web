@@ -3,14 +3,17 @@ import { createMockSupabase } from "../helpers";
 
 vi.mock("$env/static/private", () => ({
   COVER_STORAGE_BACKEND: "supabase",
-  CLOUDFLARE_ACCOUNT_ID: "acct",
-  CLOUDFLARE_IMAGES_API_TOKEN: "tok",
   UPSTASH_REDIS_REST_URL: "https://mock-upstash.example.com",
   UPSTASH_REDIS_REST_TOKEN: "mock-token",
 }));
 vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_URL: "https://supabase.example.co",
-  PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc",
+}));
+vi.mock("$env/dynamic/private", () => ({
+  env: { CLOUDFLARE_ACCOUNT_ID: "acct", CLOUDFLARE_IMAGES_API_TOKEN: "tok" },
+}));
+vi.mock("$env/dynamic/public", () => ({
+  env: { PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc" },
 }));
 
 const supabase = createMockSupabase();

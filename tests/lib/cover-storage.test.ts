@@ -5,12 +5,15 @@ vi.mock("$env/static/private", () => ({
   get COVER_STORAGE_BACKEND() {
     return process.env.COVER_STORAGE_BACKEND;
   },
-  CLOUDFLARE_ACCOUNT_ID: "acct",
-  CLOUDFLARE_IMAGES_API_TOKEN: "tok",
 }));
 vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_URL: "https://supabase.example.co",
-  PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc",
+}));
+vi.mock("$env/dynamic/private", () => ({
+  env: { CLOUDFLARE_ACCOUNT_ID: "acct", CLOUDFLARE_IMAGES_API_TOKEN: "tok" },
+}));
+vi.mock("$env/dynamic/public", () => ({
+  env: { PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc" },
 }));
 
 beforeEach(() => {

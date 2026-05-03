@@ -9,13 +9,9 @@ import {
   catalogUserLimiter,
   enforceRateLimit,
 } from "$lib/server/ratelimit";
-import { coverUrl } from "$lib/server/cover-storage";
 import { runInBackground } from "$lib/server/wait-until";
-import {
-  hasCoverStorage,
-  type BookCatalogRow,
-  type CoverVariant,
-} from "$lib/server/catalog/types";
+import { getCatalogForBrowser } from "$lib/server/catalog/view";
+import type { CoverVariant } from "$lib/server/catalog/types";
 
 const PLACEHOLDER_URL = "/cover-placeholder.svg";
 
@@ -30,42 +26,14 @@ export const GET: RequestHandler = async (event) => {
   const variant = (event.url.searchParams.get("variant") ??
     "medium") as CoverVariant;
 
-  const { data: rawData, error } = await supabase
-    .from("book_catalog")
-    .select(
-      "isbn, title, author, description, description_provider, publisher, " +
-        "page_count, subjects, published_date, language, series_name, series_position, " +
-        "storage_path, cover_storage_backend",
-    )
-    .eq("isbn", isbn)
-    .maybeSingle();
-  if (error) return jsonError(500, "server_error", "catalog lookup failed");
-  // Cast at the boundary using `Pick<BookCatalogRow, ...>` so the cast
-  // matches the SELECT projection column-for-column. `Pick` distributes
-  // across the discriminated union (`Pick<A | B, K>` ≡
-  // `Pick<A, K> | Pick<B, K>`), so the storage discriminant is preserved
-  // and `hasCoverStorage` narrows cleanly into the positive variant. Keep
-  // the Pick key list in sync with the SELECT above — TS will error if a
-  // non-projected column is accessed below.
-  const data = rawData as Pick<
-    BookCatalogRow,
-    | "isbn"
-    | "title"
-    | "author"
-    | "description"
-    | "description_provider"
-    | "publisher"
-    | "page_count"
-    | "subjects"
-    | "published_date"
-    | "language"
-    | "series_name"
-    | "series_position"
-    | "storage_path"
-    | "cover_storage_backend"
-  > | null;
+  let catalogView;
+  try {
+    catalogView = await getCatalogForBrowser(supabase, isbn, variant);
+  } catch {
+    return jsonError(500, "server_error", "catalog lookup failed");
+  }
 
-  if (!data || !hasCoverStorage(data)) {
+  if (!catalogView || catalogView.cover_url === null) {
     // Per-user budget on cold-miss work-scheduling. Layered with the
     // per-deployment fail-open limiters inside resolveIsbn — see
     // catalogUserLimiter doc in ratelimit.ts. Hit path (above) does not
@@ -87,35 +55,35 @@ export const GET: RequestHandler = async (event) => {
     return jsonSuccess({
       isbn,
       cover_url: PLACEHOLDER_URL,
-      title: data?.title ?? null,
-      author: data?.author ?? null,
-      description: data?.description ?? null,
-      description_provider: data?.description_provider ?? null,
-      publisher: data?.publisher ?? null,
-      page_count: data?.page_count ?? null,
-      subjects: data?.subjects ?? null,
-      published_date: data?.published_date ?? null,
-      language: data?.language ?? null,
-      series_name: data?.series_name ?? null,
-      series_position: data?.series_position ?? null,
+      title: catalogView?.title ?? null,
+      author: catalogView?.author ?? null,
+      description: catalogView?.description ?? null,
+      description_provider: catalogView?.description_provider ?? null,
+      publisher: catalogView?.publisher ?? null,
+      page_count: catalogView?.page_count ?? null,
+      subjects: catalogView?.subjects ?? null,
+      published_date: catalogView?.published_date ?? null,
+      language: catalogView?.language ?? null,
+      series_name: catalogView?.series_name ?? null,
+      series_position: catalogView?.series_position ?? null,
       cold_miss: true,
     });
   }
 
   return jsonSuccess({
     isbn,
-    cover_url: coverUrl(data.storage_path, data.cover_storage_backend, variant),
-    title: data.title,
-    author: data.author,
-    description: data.description,
-    description_provider: data.description_provider,
-    publisher: data.publisher,
-    page_count: data.page_count,
-    subjects: data.subjects,
-    published_date: data.published_date,
-    language: data.language,
-    series_name: data.series_name,
-    series_position: data.series_position,
+    cover_url: catalogView.cover_url,
+    title: catalogView.title,
+    author: catalogView.author,
+    description: catalogView.description,
+    description_provider: catalogView.description_provider,
+    publisher: catalogView.publisher,
+    page_count: catalogView.page_count,
+    subjects: catalogView.subjects,
+    published_date: catalogView.published_date,
+    language: catalogView.language,
+    series_name: catalogView.series_name,
+    series_position: catalogView.series_position,
     cold_miss: false,
   });
 };

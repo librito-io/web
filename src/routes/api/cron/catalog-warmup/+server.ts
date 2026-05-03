@@ -14,7 +14,7 @@ import { env as privateEnv } from "$env/dynamic/private";
 
 const MAX_PER_RUN = 100;
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, fetch }) => {
   const auth = request.headers.get("authorization") ?? "";
   if (!constantTimeEqualString(auth, `Bearer ${CRON_SECRET}`)) {
     return jsonError(401, "unauthorized", "Cron secret mismatch");

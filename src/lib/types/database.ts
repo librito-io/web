@@ -472,6 +472,7 @@ export type Database = {
           book_author: string
           book_hash: string
           book_highlight_count: number
+          book_isbn: string
           book_title: string
           chapter_index: number
           chapter_title: string

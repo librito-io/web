@@ -93,13 +93,24 @@ export const load: PageServerLoad = async (event) => {
       .eq("isbn", isbn)
       .maybeSingle();
     // Cast at the boundary: the projected select returns a structural subset
-    // of the row. We cast up to the discriminated union (rather than
-    // `Partial<BookCatalogRow>`) so `hasCoverStorage` narrows cleanly into
-    // PositiveBookCatalogRow with all non-discriminant fields preserved as
-    // required. The select string above must list every field accessed
-    // below — TypeScript no longer guards against missing columns under
-    // this cast, so colocate select + access sites.
-    const cat = (rawCat as BookCatalogRow | null) ?? null;
+    // of the row. `Pick<BookCatalogRow, ...>` distributes across the
+    // discriminated union (`Pick<A | B, K>` ≡ `Pick<A, K> | Pick<B, K>`),
+    // so the storage discriminant is preserved and `hasCoverStorage`
+    // narrows cleanly into the positive variant. Keep this Pick key list
+    // in sync with the SELECT projection above — TS will error if a
+    // non-projected column is accessed below.
+    type BookDetailCatalogView = Pick<
+      BookCatalogRow,
+      | "storage_path"
+      | "cover_storage_backend"
+      | "description"
+      | "description_provider"
+      | "publisher"
+      | "page_count"
+      | "subjects"
+      | "published_date"
+    >;
+    const cat = (rawCat as BookDetailCatalogView | null) ?? null;
     if (!catError && cat && hasCoverStorage(cat)) {
       catalog = {
         cover_url: coverUrl(

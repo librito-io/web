@@ -38,11 +38,30 @@ export const GET: RequestHandler = async (event) => {
     .eq("isbn", isbn)
     .maybeSingle();
   if (error) return jsonError(500, "server_error", "catalog lookup failed");
-  // Cast at the boundary to the discriminated union (not `Partial<...>`) so
-  // `hasCoverStorage` narrows cleanly. The projected select must list every
-  // field accessed below — TypeScript no longer guards against missing
-  // columns under this cast.
-  const data = rawData as BookCatalogRow | null;
+  // Cast at the boundary using `Pick<BookCatalogRow, ...>` so the cast
+  // matches the SELECT projection column-for-column. `Pick` distributes
+  // across the discriminated union (`Pick<A | B, K>` ≡
+  // `Pick<A, K> | Pick<B, K>`), so the storage discriminant is preserved
+  // and `hasCoverStorage` narrows cleanly into the positive variant. Keep
+  // the Pick key list in sync with the SELECT above — TS will error if a
+  // non-projected column is accessed below.
+  const data = rawData as Pick<
+    BookCatalogRow,
+    | "isbn"
+    | "title"
+    | "author"
+    | "description"
+    | "description_provider"
+    | "publisher"
+    | "page_count"
+    | "subjects"
+    | "published_date"
+    | "language"
+    | "series_name"
+    | "series_position"
+    | "storage_path"
+    | "cover_storage_backend"
+  > | null;
 
   if (!data || !hasCoverStorage(data)) {
     runInBackground(event, () =>

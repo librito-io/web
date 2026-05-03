@@ -93,13 +93,21 @@ export interface CatalogMetadata {
 // are NULL (negative cache row — lookup attempted, no cover available) or
 // both are non-null (positive row with stored cover). Single-side NULL is
 // rejected by the DB and is therefore unrepresentable in TypeScript.
-// Pre-discriminant shape — fields independently nullable, mirroring the
-// generated row before the `book_catalog_storage_consistency` CHECK is
-// lifted into TypeScript. Use this for in-flight upsert payloads where the
-// discriminant pairing is enforced by construction (e.g. the
-// `storage_path` / `cover_storage_backend` pair both fall through the same
-// `storage?` null check) rather than by type. Reads from the DB should
-// always go through the discriminated `BookCatalogRow` instead.
+/**
+ * Pre-discriminant shape for upsert-payload construction only.
+ *
+ * Read paths must use `BookCatalogRow` (discriminated) and narrow via
+ * `hasCoverStorage()`. New uses outside upsert-payload construction
+ * should be reviewed — they likely indicate the discriminator is
+ * being escaped where it shouldn't be.
+ *
+ * Fields are independently nullable here, mirroring the generated row
+ * before the `book_catalog_storage_consistency` CHECK is lifted into
+ * TypeScript. Use this for in-flight upsert payloads where the
+ * discriminant pairing is enforced by construction (e.g. the
+ * `storage_path` / `cover_storage_backend` pair both fall through the
+ * same `storage?` null check) rather than by type.
+ */
 export type BookCatalogRowFields = Omit<
   Database["public"]["Tables"]["book_catalog"]["Row"],
   "cover_storage_backend" | "description_provider" | "cover_source"

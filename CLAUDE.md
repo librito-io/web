@@ -292,9 +292,11 @@ Audit docs (`docs/audits-wip/` → `docs/audits/`) keep their place for structur
 - Skip findings stay in doc only — no issue, skip rationale = record
 - Optional: set the same Workstream value on every issue spawned from one audit, for campaign-level Project view
 
-### Naming conventions for milestones / spec files / audit docs
+### Naming conventions for workstreams / spec files / audit docs
 
 Descriptive titles, 2–5 words. **No opaque codes** (`WS-*`, `Phase N`, `M1`, `Q3-2026`). Title Case for display, kebab-case for filenames. If scope can't be named in 5 words, decompose. Done historical phases (`Phase 1` … `Phase 6`) keep numbered names for accuracy — rule applies forward only.
+
+`Workstream` is the custom Project field used for cross-repo phase grouping; GitHub's built-in `Milestone` field is **not** used.
 
 ### Markdown follow-up trackers (deprecated)
 
@@ -557,7 +559,7 @@ The cloud sync system is built incrementally. Each phase has a spec and plan in 
 
 Forward-looking phases use descriptive Workstream names per the Issue tracking naming rule. Done phases (`Phase 1` … `Phase 6`) keep numbered names for historical accuracy.
 
-| Milestone                                          | Status  | Scope                                                                            |
+| Workstream                                         | Status  | Scope                                                                            |
 | -------------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
 | Phase 1                                            | Done    | Supabase setup (schema, auth, storage)                                           |
 | Phase 2                                            | Done    | Device pairing (API + web UI)                                                    |
@@ -569,4 +571,4 @@ Forward-looking phases use descriptive Workstream names per the Issue tracking n
 | Signed download URLs                               | Planned | Embed signed download URL + sha256 in sync response (spec ready)                 |
 | Firmware sync hardening                            | Planned | Firmware Range-resume, keep-alive, retry cadence, StatusBar + FileBrowser polish |
 | Transfer retry UI                                  | Planned | Populate `attempt_count` / `last_error`; retry UI; attempt-cap → `failed`        |
-| Realtime polish / Cover catalog / Highlight export | Planned | Decomposed from former "Phase 7" — three independent milestones                  |
+| Realtime polish / Cover catalog / Highlight export | Planned | Decomposed from former "Phase 7" — three independent workstreams                 |

@@ -210,6 +210,109 @@ Env vars required regardless of host: see [Environment Variables](#environment-v
 
 Self-hosters do **not** need `.github/workflows/production-deploy.yml` — it is Vercel-specific. Run `supabase db push` manually against your own Supabase project after each schema-touching deploy.
 
+## Issue tracking
+
+All work — bugs, features, chores, docs — is tracked in GitHub Issues under the `librito-io` org's "Librito" Project (`https://github.com/orgs/librito-io/projects/1`). The Project spans both `librito-io/web` and `librito-io/reader`. New issues from either repo auto-add to the Backlog column.
+
+### When to file
+
+- Incidental finds during a primary task — file immediately. Do not stash in markdown trackers.
+- Bug encountered, not fixing now — file.
+- Feature idea / tech-debt spotted — file.
+- Already covered by an open issue — comment, don't dupe.
+- Question with no clear answer — GitHub Discussions, not Issues.
+
+### How to file
+
+CLI (Claude default):
+
+```bash
+gh issue create --repo librito-io/web \
+  --title "<type>(<area>): <imperative summary>" \
+  --type "Bug" \
+  --label "area:<x>,needs-triage" \
+  --body "..."
+```
+
+Web UI: pick a template (Web bug / Feature request / Chore). Blank issues are disabled.
+
+### Title format
+
+`<type>(<area>): <imperative summary>` — Conventional Commits style.
+
+Examples:
+
+- `bug(catalog): NYT warmup leaks API key in logs`
+- `feat(feed): add highlight export to markdown`
+- `chore(ci): add database.ts to .prettierignore`
+
+### Body sections (required)
+
+1. **Problem** — what's wrong / what's needed
+2. **Proposed fix / solution** — concrete approach (mark optional for bugs without a known fix)
+3. **Discovery context** — which task/PR surfaced this (link the PR)
+4. **Acceptance criteria** — what does "done" look like
+
+Half-formed issues become ghosts. No exceptions.
+
+### Issue type (native, org-level)
+
+Set the **Issue Type** on every issue — `Bug`, `Feature`, `Chore`, or `Docs`. Issue Types are GitHub-native, org-level (cross-repo), filterable via `type:Bug` syntax. Templates set the type automatically; CLI uses `--type "Bug"`.
+
+Type labels (`bug`, `feat`, `chore`, `docs`) are **not** used — superseded by Issue Types.
+
+### Labels (this repo)
+
+**Area** (pick one or more): `area:sync` `area:auth` `area:catalog` `area:transfer` `area:realtime` `area:feed` `area:ui` `area:i18n` `area:docs` `area:db` `area:ci` `area:infra`
+
+**Status** (auto-applied / cross-cutting): `needs-triage`, `blocked`
+
+### Triage
+
+New issues auto-labeled `needs-triage` and added to Backlog. Triage at session start, or when Triage view has 3+ items. ~30 seconds per issue: confirm Issue Type, set area label(s), set Workstream if it fits a phase, remove `needs-triage`.
+
+### Working an issue
+
+Branch references the issue (`feat/highlights-export-md` for #42). PR body includes `Closes #42`. Project workflows handle Status transitions automatically (PR opened → In Progress, merged → Done).
+
+### Closing without merging
+
+Always close with a comment explaining why. No `wontfix` / `duplicate` / `invalid` labels — close-comment is the durable archeology.
+
+### Cross-repo issues
+
+Two issues, one per repo, same Workstream value, cross-link in bodies. Don't combine.
+
+### Audit doc hybrid
+
+Audit docs (`docs/audits-wip/` → `docs/audits/`) keep their place for structured campaigns but their role narrows: planner, not parallel backlog.
+
+- Audit doc enumerates findings + decisions (fix / skip / defer)
+- Each "fix" finding → file a GitHub issue, link from doc by issue number
+- Skip findings stay in doc only — no issue, skip rationale = record
+- Optional: set the same Workstream value on every issue spawned from one audit, for campaign-level Project view
+
+### Naming conventions for milestones / spec files / audit docs
+
+Descriptive titles, 2–5 words. **No opaque codes** (`WS-*`, `Phase N`, `M1`, `Q3-2026`). Title Case for display, kebab-case for filenames. If scope can't be named in 5 words, decompose. Done historical phases (`Phase 1` … `Phase 6`) keep numbered names for accuracy — rule applies forward only.
+
+### Markdown follow-up trackers (deprecated)
+
+Old `docs/` root trackers (`book-catalog-follow-ups.md`, `ws-rt-follow-ups.md`, `post-launch-followups.md`) and per-task follow-up docs are deprecated. Surviving items migrate to issues. **Do not create new follow-up `.md` docs.**
+
+### Model selection (Claude-driven filing)
+
+| Operation                                | Model           |
+| ---------------------------------------- | --------------- |
+| Incidental find mid-session (1–2 issues) | Opus inline     |
+| Bulk filing from a precise brief         | Haiku subagent  |
+| Mixed decision + execution batches       | Sonnet subagent |
+| Triage migration of legacy md trackers   | **Opus**        |
+| Audit doc → issues batch                 | Sonnet subagent |
+| Crowdin / dependency-PR auto-labeling    | Haiku subagent  |
+
+Default Opus inline; escalate down only when the operation matches.
+
 ## PR & Commit Convention
 
 Squash-merge is the default. Repo is configured with `squash_merge_commit_message: COMMIT_MESSAGES` and `squash_merge_commit_title: COMMIT_OR_PR_TITLE` — the squash commit body is auto-generated by concatenating the branch's commit messages, so commit messages **are** the durable archeology in `git log`.
@@ -452,16 +555,18 @@ See `.env.example`. Required:
 
 The cloud sync system is built incrementally. Each phase has a spec and plan in the reader repo at `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 
-| Phase | Status  | Scope                                                                            |
-| ----- | ------- | -------------------------------------------------------------------------------- |
-| 1     | Done    | Supabase setup (schema, auth, storage)                                           |
-| 2     | Done    | Device pairing (API + web UI)                                                    |
-| 3     | Done    | Sync API (auth middleware, merge logic)                                          |
-| 4     | Done    | Web app highlight viewer + highlight feed                                        |
-| 5     | Done    | Book transfer endpoints (client-side E2EE removed 2026-04-22, Identity A)        |
-| 6     | Done    | ESP32 firmware sync client                                                       |
-| WS-A  | Done    | Transfer schema consolidation + deletion hygiene + /privacy (2026-04-23)         |
-| WS-B  | Planned | Embed signed download URL + sha256 in sync response (spec ready)                 |
-| WS-C  | Planned | Firmware Range-resume, keep-alive, retry cadence, StatusBar + FileBrowser polish |
-| WS-D  | Planned | Populate `attempt_count` / `last_error`; retry UI; attempt-cap → `failed`        |
-| 7     | Planned | Further polish (realtime, covers, export)                                        |
+Forward-looking phases use descriptive Workstream names per the Issue tracking naming rule. Done phases (`Phase 1` … `Phase 6`) keep numbered names for historical accuracy.
+
+| Milestone                                          | Status  | Scope                                                                            |
+| -------------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| Phase 1                                            | Done    | Supabase setup (schema, auth, storage)                                           |
+| Phase 2                                            | Done    | Device pairing (API + web UI)                                                    |
+| Phase 3                                            | Done    | Sync API (auth middleware, merge logic)                                          |
+| Phase 4                                            | Done    | Web app highlight viewer + highlight feed                                        |
+| Phase 5                                            | Done    | Book transfer endpoints (client-side E2EE removed 2026-04-22, Identity A)        |
+| Phase 6                                            | Done    | ESP32 firmware sync client                                                       |
+| Transfer schema cleanup                            | Done    | Transfer schema consolidation + deletion hygiene + /privacy (2026-04-23)         |
+| Signed download URLs                               | Planned | Embed signed download URL + sha256 in sync response (spec ready)                 |
+| Firmware sync hardening                            | Planned | Firmware Range-resume, keep-alive, retry cadence, StatusBar + FileBrowser polish |
+| Transfer retry UI                                  | Planned | Populate `attempt_count` / `last_error`; retry UI; attempt-cap → `failed`        |
+| Realtime polish / Cover catalog / Highlight export | Planned | Decomposed from former "Phase 7" — three independent milestones                  |

@@ -1,0 +1,56 @@
+name: Web bug
+description: Defect in the librito.io web app, API, or sync
+title: "bug(<area>): <imperative summary>"
+type: "Bug"
+labels: ["needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What's wrong? Expected vs actual.
+      placeholder: |
+        When I X, Y happens.
+        I expected Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Visit /app/devices
+        2. Click "Add device"
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser / OS
+      placeholder: "Firefox 124 / macOS 14"
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors / network failures
+      description: Paste any browser console output or failed requests
+      render: shell
+
+  - type: textarea
+    id: fix
+    attributes:
+      label: Proposed fix (if known)
+      description: Optional. If you have a hypothesis or know the fix.
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] X no longer happens
+        - [ ] Y returns Z
+    validations:
+      required: true

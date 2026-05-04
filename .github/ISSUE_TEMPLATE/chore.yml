@@ -1,0 +1,34 @@
+name: Chore / tech debt
+description: Refactor, cleanup, dependency, CI, tooling. No user-visible change.
+title: "chore(<area>): <imperative summary>"
+type: "Chore"
+labels: ["needs-triage"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What needs doing
+      description: One paragraph. The change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: Pain it removes / risk it mitigates / convention it aligns with.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Files/modules touched. "Limited to X" or "cross-cutting".
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true

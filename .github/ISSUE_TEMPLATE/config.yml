@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/librito-io/web/security/advisories/new
+    about: Security issues should be reported privately, not as public issues. See SECURITY.md.
+  - name: 💬 Ask a question or discuss
+    url: https://github.com/orgs/librito-io/discussions
+    about: Questions, ideas, or discussion belong in Discussions, not Issues.

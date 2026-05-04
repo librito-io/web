@@ -1,0 +1,29 @@
+name: Stale issue cleanup
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-issue-stale: 90
+          days-before-issue-close: 30
+          stale-issue-label: "stale"
+          stale-issue-message: |
+            This issue has been inactive for 90 days. It will be closed in 30 days
+            unless updated. Comment to keep open.
+          close-issue-message: |
+            Closing as stale (no activity for 120 days). Reopen if still relevant.
+          exempt-issue-labels: "blocked,good-first-issue"
+          exempt-all-milestones: true
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          operations-per-run: 100

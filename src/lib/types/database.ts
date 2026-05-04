@@ -1,3 +1,4 @@
+// drift-check test marker — will be reverted (PR closed without merge)
 export type Json =
   | string
   | number

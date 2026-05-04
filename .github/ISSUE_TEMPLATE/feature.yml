@@ -3,6 +3,7 @@ description: New capability or enhancement
 title: "feat(<area>): <imperative summary>"
 type: "Feature"
 labels: ["needs-triage"]
+projects: ["librito-io/1"]
 body:
   - type: textarea
     id: problem

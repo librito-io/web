@@ -18,23 +18,36 @@ Source-of-truth for fix work that came out of `/branch-review` on `feat/ratelimi
 3. **Session reads the issue section + the referenced source files**, implements TDD-style per CLAUDE.md, opens PR.
 4. **Before session closes**: update the Status table here with PR link + status. Add follow-ups discovered during implementation as new sections.
 
+## Closure (2026-05-05)
+
+Audit complete. 3 PRs landed (#50, #51, #52). 11 of 13 issues addressed via PR; remaining 2 (SK1, SK2) explicit skips.
+
+Status reconciliation against codebase HEAD on 2026-05-05:
+
+- **K1, H1, M1, TG1, TG2** — PR [#52](https://github.com/librito-io/web/pull/52) merged 2026-05-01T12:27Z. Doc was stale at "in-review".
+- **P1** — `pairRequestLimiter` shipped with `failMode: "closed"` at [`src/lib/server/ratelimit.ts:290`](../../src/lib/server/ratelimit.ts#L290). Doc was stale at "open".
+- **D1** — WHY-comment for `transferConfirmLimiter` fail-open rationale present at [`src/lib/server/ratelimit.ts:333-334`](../../src/lib/server/ratelimit.ts#L333-L334). Doc was stale at "open".
+- **D2** — `safeLimit` AbortSignal-era comment refreshed at [`src/lib/server/ratelimit.ts:132`](../../src/lib/server/ratelimit.ts#L132). Doc was stale at "open".
+
+Per-issue sections retain full implementation detail and verification findings for `git blame` resolution. Table below now reflects ground truth.
+
 ## Status overview
 
-| #   | Issue                                                                                  | Severity              | Score | PR                                               | Status                  | Session date |
-| --- | -------------------------------------------------------------------------------------- | --------------------- | ----- | ------------------------------------------------ | ----------------------- | ------------ |
-| R1  | `safeLimit` discriminated-union refactor (eliminates synthetic struct + 2 `as` casts)  | Refactor (types)      | ~50   | [#50](https://github.com/librito-io/web/pull/50) | merged                  | 2026-05-01   |
-| T1  | `enforceRateLimits` Promise.all → sequence per-device → per-user; log on partial drain | Warning (bug/UX)      | 85    | [#51](https://github.com/librito-io/web/pull/51) | merged                  | 2026-05-01   |
-| C1  | Cast `as LimitResult[]` at `ratelimit.ts:231` → type-predicate filter                  | Warning (types)       | 87    | [#50](https://github.com/librito-io/web/pull/50) | merged (subsumed by R1) | 2026-05-01   |
-| K1  | Extract `FAIL_CLOSED_RETRY_AFTER_SEC` to `ratelimit.constants.ts`; consume in tests    | Warning (test drift)  | 75    | [#52](https://github.com/librito-io/web/pull/52) | in-review               | 2026-05-01   |
-| H1  | Replace `_RateLimiter` mock type with `import type { RateLimiter }`                    | Warning (types/drift) | 72    | [#52](https://github.com/librito-io/web/pull/52) | in-review               | 2026-05-01   |
-| M1  | Migrate route tests to real `enforceRateLimits` + delete pass-through helpers          | Warning (test arch)   | 68    | [#52](https://github.com/librito-io/web/pull/52) | in-review               | 2026-05-01   |
-| P1  | Flip `pairRequestLimiter` to `failMode: "closed"`                                      | Policy (avail)        | 32    | —                                                | open                    | —            |
-| D1  | WHY-comment for `transferConfirmLimiter` fail-open rationale                           | Doc                   | info  | —                                                | open                    | —            |
-| D2  | Refresh stale AbortSignal-era comment in `safeLimit`                                   | Doc                   | ~30   | —                                                | open                    | —            |
-| TG1 | Add `enforceRateLimits` test: fail-open throws while fail-closed allows                | Test gap              | 72    | [#52](https://github.com/librito-io/web/pull/52) | in-review               | 2026-05-01   |
-| TG2 | Add `enforceRateLimits` × timeout multi-limiter test                                   | Test gap              | ~35   | [#52](https://github.com/librito-io/web/pull/52) | in-review               | 2026-05-01   |
-| SK1 | `isFailClosed` `in`-check vs Symbol-keyed sentinel                                     | Skip                  | ~25   | —                                                | skip                    | —            |
-| SK2 | `passThroughEnforceRateLimits` filter chain density                                    | Skip                  | ~25   | —                                                | skip                    | —            |
+| #   | Issue                                                                                  | Severity              | Score | PR                                               | Status                                 | Session date |
+| --- | -------------------------------------------------------------------------------------- | --------------------- | ----- | ------------------------------------------------ | -------------------------------------- | ------------ |
+| R1  | `safeLimit` discriminated-union refactor (eliminates synthetic struct + 2 `as` casts)  | Refactor (types)      | ~50   | [#50](https://github.com/librito-io/web/pull/50) | merged                                 | 2026-05-01   |
+| T1  | `enforceRateLimits` Promise.all → sequence per-device → per-user; log on partial drain | Warning (bug/UX)      | 85    | [#51](https://github.com/librito-io/web/pull/51) | merged                                 | 2026-05-01   |
+| C1  | Cast `as LimitResult[]` at `ratelimit.ts:231` → type-predicate filter                  | Warning (types)       | 87    | [#50](https://github.com/librito-io/web/pull/50) | merged (subsumed by R1)                | 2026-05-01   |
+| K1  | Extract `FAIL_CLOSED_RETRY_AFTER_SEC` to `ratelimit.constants.ts`; consume in tests    | Warning (test drift)  | 75    | [#52](https://github.com/librito-io/web/pull/52) | merged                                 | 2026-05-01   |
+| H1  | Replace `_RateLimiter` mock type with `import type { RateLimiter }`                    | Warning (types/drift) | 72    | [#52](https://github.com/librito-io/web/pull/52) | merged                                 | 2026-05-01   |
+| M1  | Migrate route tests to real `enforceRateLimits` + delete pass-through helpers          | Warning (test arch)   | 68    | [#52](https://github.com/librito-io/web/pull/52) | merged                                 | 2026-05-01   |
+| P1  | Flip `pairRequestLimiter` to `failMode: "closed"`                                      | Policy (avail)        | 32    | —                                                | merged (verified in tree, see Closure) | 2026-05-05   |
+| D1  | WHY-comment for `transferConfirmLimiter` fail-open rationale                           | Doc                   | info  | —                                                | merged (verified in tree, see Closure) | 2026-05-05   |
+| D2  | Refresh stale AbortSignal-era comment in `safeLimit`                                   | Doc                   | ~30   | —                                                | merged (verified in tree, see Closure) | 2026-05-05   |
+| TG1 | Add `enforceRateLimits` test: fail-open throws while fail-closed allows                | Test gap              | 72    | [#52](https://github.com/librito-io/web/pull/52) | merged                                 | 2026-05-01   |
+| TG2 | Add `enforceRateLimits` × timeout multi-limiter test                                   | Test gap              | ~35   | [#52](https://github.com/librito-io/web/pull/52) | merged                                 | 2026-05-01   |
+| SK1 | `isFailClosed` `in`-check vs Symbol-keyed sentinel                                     | Skip                  | ~25   | —                                                | skip                                   | —            |
+| SK2 | `passThroughEnforceRateLimits` filter chain density                                    | Skip                  | ~25   | —                                                | skip                                   | —            |
 
 ## Suggested execution order
 

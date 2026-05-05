@@ -227,12 +227,18 @@ All work — bugs, features, chores, docs — is tracked in GitHub Issues under 
 CLI (Claude default):
 
 ```bash
-gh issue create --repo librito-io/web \
+# Step 1: create issue (gh ≤ 2.92 has no --type flag)
+ISSUE_URL=$(gh issue create --repo librito-io/web \
   --title "<type>(<area>): <imperative summary>" \
-  --type "Bug" \
   --label "area:<x>,needs-triage" \
-  --body "..."
+  --body "...")
+
+# Step 2: set Issue Type via REST API
+NUM=${ISSUE_URL##*/}
+gh api repos/librito-io/web/issues/$NUM -F type=Chore --silent
 ```
+
+`--type` was not yet released in `gh` CLI as of v2.92.0 (2026-04-28). Setting Issue Type post-create via `gh api ... -F type=<Bug|Feature|Chore|Docs>` is the only working path. Drop the post-create call once `gh issue create --type` lands and `gh ≥ <that-version>` is the local minimum.
 
 Web UI: pick a template (Web bug / Feature request / Chore). Blank issues are disabled.
 
@@ -246,18 +252,36 @@ Examples:
 - `feat(feed): add highlight export to markdown`
 - `chore(ci): add database.ts to .prettierignore`
 
-### Body sections (required)
+### Body sections (required for CLI-filed issues)
+
+Use these exact `##` headings, in this order:
+
+```markdown
+## Problem
+
+## Solution
+
+## Discovery
+
+## Acceptance
+```
+
+Content per section:
 
 1. **Problem** — what's wrong / what's needed
-2. **Proposed fix / solution** — concrete approach (mark optional for bugs without a known fix)
-3. **Discovery context** — which task/PR surfaced this (link the PR)
-4. **Acceptance criteria** — what does "done" look like
+2. **Solution** — concrete approach (mark optional / `_unknown_` for bugs without a known fix)
+3. **Discovery** — which task/PR surfaced this (link the PR)
+4. **Acceptance** — what does "done" look like
 
 Half-formed issues become ghosts. No exceptions.
 
+State (`blocked`, etc.) goes in **labels**, not body sections — do not add a 5th section for status flags.
+
+**Templates intentionally diverge** — bug/feature/chore form templates serve external contributors and have richer per-type fields (Steps to reproduce, Browser/OS, Why, Scope, etc.). The 4-section canonical above is for CLI-filed issues by maintainers / Claude — internal scaffold for quick filing with full context.
+
 ### Issue type (native, org-level)
 
-Set the **Issue Type** on every issue — `Bug`, `Feature`, `Chore`, or `Docs`. Issue Types are GitHub-native, org-level (cross-repo), filterable via `type:Bug` syntax. Templates set the type automatically; CLI uses `--type "Bug"`.
+Set the **Issue Type** on every issue — `Bug`, `Feature`, `Chore`, or `Docs`. Issue Types are GitHub-native, org-level (cross-repo), filterable via `type:Bug` syntax. Templates set the type automatically; CLI flow uses the two-step create-then-`gh api -F type=...` pattern (see "How to file" above) until `gh issue create --type` ships upstream.
 
 Type labels (`bug`, `feat`, `chore`, `docs`) are **not** used — superseded by Issue Types.
 

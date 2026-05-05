@@ -246,14 +246,32 @@ Examples:
 - `feat(feed): add highlight export to markdown`
 - `chore(ci): add database.ts to .prettierignore`
 
-### Body sections (required)
+### Body sections (required for CLI-filed issues)
+
+Use these exact `##` headings, in this order:
+
+```markdown
+## Problem
+
+## Solution
+
+## Discovery
+
+## Acceptance
+```
+
+Content per section:
 
 1. **Problem** — what's wrong / what's needed
-2. **Proposed fix / solution** — concrete approach (mark optional for bugs without a known fix)
-3. **Discovery context** — which task/PR surfaced this (link the PR)
-4. **Acceptance criteria** — what does "done" look like
+2. **Solution** — concrete approach (mark optional / `_unknown_` for bugs without a known fix)
+3. **Discovery** — which task/PR surfaced this (link the PR)
+4. **Acceptance** — what does "done" look like
 
 Half-formed issues become ghosts. No exceptions.
+
+State (`blocked`, etc.) goes in **labels**, not body sections — do not add a 5th section for status flags.
+
+**Templates intentionally diverge** — bug/feature/chore form templates serve external contributors and have richer per-type fields (Steps to reproduce, Browser/OS, Why, Scope, etc.). The 4-section canonical above is for CLI-filed issues by maintainers / Claude — internal scaffold for quick filing with full context.
 
 ### Issue type (native, org-level)
 

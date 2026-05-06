@@ -19,3 +19,6 @@ supabase/signing_keys.json
 # Working audit docs (mid-session fix trackers). Mirrors docs/superpowers/
 # pattern. Closed audits graduate to tracked docs/audits/ via dedicated PR.
 docs/audits-wip/
+
+# Claude Code branch-review skill calibration log (per-developer, local only)
+.claude/.review-log.jsonl

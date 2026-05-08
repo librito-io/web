@@ -283,13 +283,15 @@ State (`blocked`, etc.) goes in **labels**, not body sections — do not add a 5
 
 Set the **Issue Type** on every issue — `Bug`, `Feature`, `Chore`, or `Docs`. Issue Types are GitHub-native, org-level (cross-repo), filterable via `type:Bug` syntax. Templates set the type automatically; CLI flow uses the two-step create-then-`gh api -F type=...` pattern (see "How to file" above) until `gh issue create --type` ships upstream.
 
-Type labels (`bug`, `feat`, `chore`, `docs`) are **not** used — superseded by Issue Types.
+Type labels (`bug`, `feat`, `chore`, `docs`) are superseded by Issue Types. They do not exist in this repo. Do not create them.
 
 ### Labels (this repo)
 
 **Area** (pick one or more): `area:sync` `area:auth` `area:catalog` `area:transfer` `area:realtime` `area:feed` `area:ui` `area:i18n` `area:docs` `area:db` `area:ci` `area:infra`
 
 **Status** (auto-applied / cross-cutting): `needs-triage`, `blocked`
+
+**Cross-repo alignment**: `area:sync`, `area:realtime`, `area:transfer` exist in both web and reader with parallel scope — apply the same label in both repos for cross-stack work. Pairing splits: `area:auth` (web bundles device auth + browser sessions + pairing) / `area:pairing` (reader).
 
 ### Triage
 

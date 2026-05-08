@@ -238,7 +238,7 @@ NUM=${ISSUE_URL##*/}
 gh api repos/librito-io/web/issues/$NUM -F type=Chore --silent
 ```
 
-`--type` was not yet released in `gh` CLI as of v2.92.0 (2026-04-28). Setting Issue Type post-create via `gh api ... -F type=<Bug|Feature|Chore|Docs>` is the only working path. Drop the post-create call once `gh issue create --type` lands and `gh ≥ <that-version>` is the local minimum.
+`--type` was not yet released in `gh` CLI as of v2.92.0 (2026-04-28); upstream work is tracked in [cli/cli#13057](https://github.com/cli/cli/pull/13057). Setting Issue Type post-create via `gh api ... -F type=<Bug|Feature|Chore|Docs>` is the only working path. Drop the post-create call once `gh issue create --type` lands and `gh ≥ <that-version>` is the local minimum.
 
 Web UI: pick a template (Web bug / Feature request / Chore). Blank issues are disabled.
 

@@ -1,6 +1,5 @@
 name: Chore / tech debt
 description: Refactor, cleanup, dependency, CI, tooling. No user-visible change.
-title: "chore(<area>): <imperative summary>"
 type: "Chore"
 labels: ["needs-triage"]
 projects: ["librito-io/1"]

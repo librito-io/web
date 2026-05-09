@@ -229,8 +229,8 @@ CLI (Claude default):
 ```bash
 # Step 1: create issue (gh ≤ 2.92 has no --type flag)
 ISSUE_URL=$(gh issue create --repo librito-io/web \
-  --title "<type>(<area>): <imperative summary>" \
-  --label "area:<x>,needs-triage" \
+  --title "<imperative summary>" \
+  --label "area:<x>" \
   --body "...")
 
 # Step 2: set Issue Type via REST API
@@ -244,13 +244,17 @@ Web UI: pick a template (Web bug / Feature request / Chore). Blank issues are di
 
 ### Title format
 
-`<type>(<area>): <imperative summary>` — Conventional Commits style.
+Imperative summary. No prefix.
+
+Type is carried in the GitHub-native **Issue Type** field (`Bug`/`Feature`/`Chore`/`Docs`); area is carried in `area:*` labels. Embedding either in the title would duplicate queryable metadata in unqueryable form.
 
 Examples:
 
-- `bug(catalog): NYT warmup leaks API key in logs`
-- `feat(feed): add highlight export to markdown`
-- `chore(ci): add database.ts to .prettierignore`
+- `NYT warmup leaks API key in logs` (Type: Bug, label: `area:catalog`)
+- `Add highlight export to markdown` (Type: Feature, label: `area:feed`)
+- `Add database.ts to .prettierignore` (Type: Chore, label: `area:ci`)
+
+Conventional Commits prefixes (`feat`/`fix`/`chore`/`docs`/`test`/`perf`/`refactor`) remain canonical for **commits and PR titles** — see "PR & Commit Convention" below. They are intentionally not used on issue titles, matching established practice in major OSS repos (issue = noun/classification via label/Type; commit = verb/action via prefix).
 
 ### Body sections (required for CLI-filed issues)
 

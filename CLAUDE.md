@@ -293,7 +293,11 @@ Type labels (`bug`, `feat`, `chore`, `docs`) are superseded by Issue Types. They
 
 **Area** (pick one or more): `area:sync` `area:auth` `area:catalog` `area:transfer` `area:realtime` `area:feed` `area:ui` `area:i18n` `area:docs` `area:db` `area:ci` `area:infra`
 
-**Status** (auto-applied / cross-cutting): `needs-triage`, `blocked`
+**Status** (auto-applied / cross-cutting): `needs-triage`, `blocked`, `deferred`
+
+- `needs-triage` — auto-applied by `.github/workflows/triage.yml` when type or area missing. Removed manually after triage.
+- `blocked` — wants to proceed, can't. Waiting on an external dependency (upstream PR, hardware change, design decision someone else owns). Comment on the issue naming the blocker. Removed when the blocker resolves.
+- `deferred` — could proceed, choosing not to right now. No external dependency. **Issue body must document the trigger that should revive it** (e.g. "re-open when first outside contributor PR lands" or "re-evaluate at 100 active users"). Without a trigger, prefer closing — open-deferred-with-no-trigger is just clutter.
 
 **Cross-repo alignment**: `area:sync`, `area:realtime`, `area:transfer` exist in both web and reader with parallel scope — apply the same label in both repos for cross-stack work. Pairing splits: `area:auth` (web bundles device auth + browser sessions + pairing) / `area:pairing` (reader).
 

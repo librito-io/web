@@ -295,7 +295,9 @@ Type labels (`bug`, `feat`, `chore`, `docs`) are superseded by Issue Types. They
 
 ### Triage
 
-New issues auto-labeled `needs-triage` and added to Backlog. Triage at session start, or when Triage view has 3+ items. ~30 seconds per issue: confirm Issue Type, set area label(s), set Workstream if it fits a phase, remove `needs-triage`.
+New issues are added to Backlog and auto-labeled `needs-triage` **only if** the workflow can't see both an Issue Type and at least one `area:*` label on the opened issue (`.github/workflows/triage.yml`). CLI-filed issues that follow "How to file" already set both, so they bypass `needs-triage` and land in Backlog clean. Web-template / form-filed issues, or CLI issues missing either dimension, get stamped.
+
+Implication: absence of `needs-triage` means the issue was filed with type + area already set — it does not mean a human triaged it. Workstream assignment and "does this fit a phase?" judgement still happen at session start or when Backlog accumulates. ~30 seconds per issue when triage is needed: confirm Issue Type, set area label(s), set Workstream if it fits a phase, remove `needs-triage`.
 
 ### Working an issue
 

@@ -1,6 +1,5 @@
 name: Web bug
 description: Defect in the librito.io web app, API, or sync
-title: "bug(<area>): <imperative summary>"
 type: "Bug"
 labels: ["needs-triage"]
 projects: ["librito-io/1"]

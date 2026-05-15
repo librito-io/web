@@ -3,6 +3,7 @@ import { createAdminClient } from "$lib/server/supabase";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { constantTimeEqualString } from "$lib/server/cron-auth";
 import { CRON_SECRET } from "$env/static/private";
+import { logger } from "$lib/server/log";
 
 const BUCKET = "book-transfers";
 const PASS_A_BATCH = 500;
@@ -48,12 +49,13 @@ export const POST: RequestHandler = async ({ request }) => {
     passA += 1;
   }
   const passADurationMs = Date.now() - start;
-  console.log(
-    JSON.stringify({
-      sweep: "A",
+  logger().info(
+    {
+      event: "cron.transfer_sweep.pass_a",
       rowsAffected: passA,
       durationMs: passADurationMs,
-    }),
+    },
+    "cron.transfer_sweep.pass_a",
   );
 
   // Pass B — hard-delete scrubbed rows past 24 h grace.
@@ -66,7 +68,13 @@ export const POST: RequestHandler = async ({ request }) => {
     .lt("scrubbed_at", cutoff);
 
   if (deleteError) {
-    console.error("Pass B delete failed:", JSON.stringify(deleteError));
+    logger().error(
+      {
+        event: "cron.transfer_sweep.pass_b_failed",
+        error: deleteError.message ?? "unknown",
+      },
+      "cron.transfer_sweep.pass_b_failed",
+    );
     return jsonError(
       500,
       "server_error",
@@ -76,12 +84,13 @@ export const POST: RequestHandler = async ({ request }) => {
 
   const passB = passBCount ?? 0;
   const passBDurationMs = Date.now() - passBStart;
-  console.log(
-    JSON.stringify({
-      sweep: "B",
+  logger().info(
+    {
+      event: "cron.transfer_sweep.pass_b",
       rowsAffected: passB,
       durationMs: passBDurationMs,
-    }),
+    },
+    "cron.transfer_sweep.pass_b",
   );
 
   return jsonSuccess({

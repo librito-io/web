@@ -1,0 +1,61 @@
+name: Lint PR title
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title against Conventional Commits
+        id: lint
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            bug
+            chore
+            docs
+            test
+            perf
+            refactor
+          requireScope: false
+          subjectPattern: ^(?![A-Z])(?!.*\.$).+$
+          subjectPatternError: |
+            The subject doesn't match the configured pattern.
+            Subject must start with a lowercase character and must not end with a period.
+          wip: true
+
+      - name: Post failure comment
+        if: always() && (steps.lint.outputs.error_message != null)
+        env:
+          LINT_ERROR: ${{ steps.lint.outputs.error_message }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-title-lint
+          message: |
+            ### Pull request title doesn't follow Conventional Commits
+
+            **Details:** ${{ env.LINT_ERROR }}
+
+            Expected format: `type(scope): subject`
+
+            - Allowed types: `feat`, `fix`, `bug`, `chore`, `docs`, `test`, `perf`, `refactor`
+            - Subject must start lowercase and must not end with a period
+            - Scope is optional and free-form
+
+            See [`CLAUDE.md` → "PR & Commit Convention"](../blob/main/CLAUDE.md#pr--commit-convention) for the full convention.
+
+      - name: Remove failure comment on pass
+        if: ${{ steps.lint.outputs.error_message == null }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-title-lint
+          delete: true

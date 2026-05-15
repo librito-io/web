@@ -2,6 +2,7 @@ import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 import { transferRetryLimiter, enforceRateLimit } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
+import { logger } from "$lib/server/log";
 
 export const POST: RequestHandler = async ({
   params,
@@ -34,11 +35,15 @@ export const POST: RequestHandler = async ({
     return jsonError(404, "not_found", "Transfer not found");
   }
   if (transfer.status !== "failed") {
-    console.warn("transfer.retry_invalid_status", {
-      transferId: transfer.id,
-      userId: user.id,
-      status: transfer.status,
-    });
+    logger().warn(
+      {
+        event: "transfer.retry_invalid_status",
+        transferId: transfer.id,
+        userId: user.id,
+        status: transfer.status,
+      },
+      "transfer.retry_invalid_status",
+    );
     return jsonError(409, "not_failed", "Transfer is not in a failed state");
   }
 
@@ -73,10 +78,14 @@ export const POST: RequestHandler = async ({
   }
 
   if (!updateRows || updateRows.length === 0) {
-    console.warn("transfer.retry_race", {
-      transferId: transfer.id,
-      userId: user.id,
-    });
+    logger().warn(
+      {
+        event: "transfer.retry_race",
+        transferId: transfer.id,
+        userId: user.id,
+      },
+      "transfer.retry_race",
+    );
     return jsonError(
       409,
       "retry_race",
@@ -84,12 +93,16 @@ export const POST: RequestHandler = async ({
     );
   }
 
-  console.info("transfer.retry_reset", {
-    transferId: transfer.id,
-    userId: user.id,
-    previousAttemptCount: transfer.attempt_count,
-    previousLastError: transfer.last_error,
-  });
+  logger().info(
+    {
+      event: "transfer.retry_reset",
+      transferId: transfer.id,
+      userId: user.id,
+      previousAttemptCount: transfer.attempt_count,
+      previousLastError: transfer.last_error,
+    },
+    "transfer.retry_reset",
+  );
 
   return jsonSuccess({ success: true });
 };

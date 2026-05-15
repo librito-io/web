@@ -1,6 +1,7 @@
 // tests/routes/transfer-retry.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 
 vi.mock("$env/static/private", () => ({
   UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
@@ -46,16 +47,14 @@ function buildEvent(
 }
 
 describe("POST /api/transfer/[id]/retry", () => {
-  let infoSpy: ReturnType<typeof vi.spyOn>;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let logWrites: Record<string, unknown>[];
   beforeEach(() => {
     supabase._results.clear();
-    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    logWrites = [];
+    __setTestDestination((line) => logWrites.push(JSON.parse(line)));
   });
   afterEach(() => {
-    infoSpy.mockRestore();
-    warnSpy.mockRestore();
+    __resetTestDestination();
   });
 
   it("returns 401 when no session user", async () => {
@@ -123,8 +122,8 @@ describe("POST /api/transfer/[id]/retry", () => {
       const body = await res.json();
       expect(body.error).toBe("not_failed");
 
-      const call = warnSpy.mock.calls.find(
-        (c) => c[0] === "transfer.retry_invalid_status",
+      const call = logWrites.find(
+        (w) => w.event === "transfer.retry_invalid_status",
       );
       expect(call).toBeDefined();
     },
@@ -151,12 +150,9 @@ describe("POST /api/transfer/[id]/retry", () => {
     const body = await res.json();
     expect(body.success).toBe(true);
 
-    const call = infoSpy.mock.calls.find(
-      (c) => c[0] === "transfer.retry_reset",
-    );
+    const call = logWrites.find((w) => w.event === "transfer.retry_reset");
     expect(call).toBeDefined();
-    const payload = call![1] as Record<string, unknown>;
-    expect(payload).toMatchObject({
+    expect(call).toMatchObject({
       transferId: "t-1",
       userId: "u-1",
       previousAttemptCount: 10,
@@ -182,12 +178,10 @@ describe("POST /api/transfer/[id]/retry", () => {
     const body = await res.json();
     expect(body.error).toBe("retry_race");
 
-    const call = warnSpy.mock.calls.find((c) => c[0] === "transfer.retry_race");
+    const call = logWrites.find((w) => w.event === "transfer.retry_race");
     expect(call).toBeDefined();
 
-    const reset = infoSpy.mock.calls.find(
-      (c) => c[0] === "transfer.retry_reset",
-    );
+    const reset = logWrites.find((w) => w.event === "transfer.retry_reset");
     expect(reset).toBeUndefined();
   });
 

@@ -8,6 +8,7 @@ import {
   DEV_KID,
 } from "../fixtures/dev-jwk";
 import { FAIL_CLOSED_RETRY_AFTER_SEC } from "$lib/server/ratelimit.constants";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 
 const TEST_SUPABASE_URL = "https://test-proj.supabase.co";
 
@@ -70,9 +71,7 @@ function buildRequest(headers: Record<string, string> = {}) {
 }
 
 describe("POST /api/realtime-token (standby-key ES256)", () => {
-  let infoSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let logWrites: Record<string, unknown>[];
   let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
@@ -85,9 +84,8 @@ describe("POST /api/realtime-token (standby-key ES256)", () => {
       reset: Date.now() + 3_600_000,
     });
     supabase._results.clear();
-    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    logWrites = [];
+    __setTestDestination((line) => logWrites.push(JSON.parse(line)));
     // Fire-and-forget JWKS check inside mintRealtimeToken — stub global
     // fetch so the test environment doesn't hit the network.
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -98,9 +96,7 @@ describe("POST /api/realtime-token (standby-key ES256)", () => {
     );
   });
   afterEach(() => {
-    infoSpy.mockRestore();
-    errorSpy.mockRestore();
-    warnSpy.mockRestore();
+    __resetTestDestination();
     fetchSpy.mockRestore();
   });
 
@@ -230,15 +226,14 @@ describe("POST /api/realtime-token (standby-key ES256)", () => {
 
     await POST(buildRequest({ Authorization: "Bearer sk_device_xxx" }));
 
-    const call = infoSpy.mock.calls.find(
-      (c) => c[0] === "realtime.token_issued",
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "realtime.token_issued",
+        userId,
+        deviceId,
+        expiresIn: 86400,
+      }),
     );
-    expect(call).toBeDefined();
-    expect(call![1]).toMatchObject({
-      userId,
-      deviceId,
-      expiresIn: 86400,
-    });
   });
 });
 
@@ -260,13 +255,11 @@ describe("POST /api/realtime-token — fail-closed under Upstash outage", () => 
     });
     authMock.mockResolvedValueOnce({ device: { id: "d-1", userId: "u-1" } });
 
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await POST(buildRequest());
     expect(res.status).toBe(503);
     expect(res.headers.get("Retry-After")).toBe(
       String(FAIL_CLOSED_RETRY_AFTER_SEC),
     );
-    errorSpy.mockRestore();
   });
 
   it("returns 503 when per-user limiter throws", async () => {
@@ -280,12 +273,10 @@ describe("POST /api/realtime-token — fail-closed under Upstash outage", () => 
     userLimitMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     authMock.mockResolvedValueOnce({ device: { id: "d-1", userId: "u-1" } });
 
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await POST(buildRequest());
     expect(res.status).toBe(503);
     expect(res.headers.get("Retry-After")).toBe(
       String(FAIL_CLOSED_RETRY_AFTER_SEC),
     );
-    errorSpy.mockRestore();
   });
 });

@@ -14,6 +14,7 @@ import {
   type RealtimeSigningJwk,
 } from "$lib/server/realtime";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
+import { logger } from "$lib/server/log";
 
 export const POST: RequestHandler = async ({ request }) => {
   const supabase = createAdminClient();
@@ -30,7 +31,10 @@ export const POST: RequestHandler = async ({ request }) => {
   // route returns 503 instead of breaking the build.
   const rawJwk = env.LIBRITO_JWT_PRIVATE_KEY_JWK;
   if (!rawJwk) {
-    console.error("realtime.token_disabled", { hasPrivateKey: false });
+    logger().error(
+      { event: "realtime.token_disabled", hasPrivateKey: false },
+      "realtime.token_disabled",
+    );
     return jsonError(
       503,
       "realtime_disabled",
@@ -42,7 +46,10 @@ export const POST: RequestHandler = async ({ request }) => {
   try {
     privateJwk = JSON.parse(rawJwk) as RealtimeSigningJwk;
   } catch {
-    console.error("realtime.jwk_parse_failed");
+    logger().error(
+      { event: "realtime.jwk_parse_failed" },
+      "realtime.jwk_parse_failed",
+    );
     return jsonError(500, "server_error", "Failed to mint Realtime token");
   }
 
@@ -63,20 +70,28 @@ export const POST: RequestHandler = async ({ request }) => {
       supabaseUrl: PUBLIC_SUPABASE_URL,
     });
 
-    console.info("realtime.token_issued", {
-      userId: device.userId,
-      deviceId: device.id,
-      expiresIn,
-    });
+    logger().info(
+      {
+        event: "realtime.token_issued",
+        userId: device.userId,
+        deviceId: device.id,
+        expiresIn,
+      },
+      "realtime.token_issued",
+    );
 
     const { realtimeUrl, anonKey } = getRealtimeConnectionInfo();
     return jsonSuccess({ token, expiresIn, realtimeUrl, anonKey });
   } catch (err) {
-    console.error("realtime.token_mint_failed", {
-      userId: device.userId,
-      deviceId: device.id,
-      error: String(err),
-    });
+    logger().error(
+      {
+        event: "realtime.token_mint_failed",
+        userId: device.userId,
+        deviceId: device.id,
+        error: String(err),
+      },
+      "realtime.token_mint_failed",
+    );
     return jsonError(500, "server_error", "Failed to mint Realtime token");
   }
 };

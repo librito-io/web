@@ -64,6 +64,7 @@ vi.mock("$lib/server/supabase", () => ({
 }));
 
 const { POST } = await import("../../src/routes/api/realtime-token/+server");
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 
 function buildRequest(headers: Record<string, string> = {}) {
   return {
@@ -75,7 +76,7 @@ function buildRequest(headers: Record<string, string> = {}) {
 }
 
 describe("POST /api/realtime-token (mint failure path)", () => {
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let logWrites: Record<string, unknown>[];
 
   beforeEach(() => {
     authMock.mockReset();
@@ -86,10 +87,11 @@ describe("POST /api/realtime-token (mint failure path)", () => {
       success: true,
       reset: Date.now() + 3_600_000,
     });
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    logWrites = [];
+    __setTestDestination((line) => logWrites.push(JSON.parse(line)));
   });
   afterEach(() => {
-    errorSpy.mockRestore();
+    __resetTestDestination();
   });
 
   it("500 server_error with realtime.token_mint_failed log when signing throws", async () => {
@@ -109,13 +111,12 @@ describe("POST /api/realtime-token (mint failure path)", () => {
     const body = await res.json();
     expect(body.error).toBe("server_error");
 
-    const call = errorSpy.mock.calls.find(
-      (c) => c[0] === "realtime.token_mint_failed",
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "realtime.token_mint_failed",
+        userId: "11111111-1111-1111-1111-111111111111",
+        deviceId: "22222222-2222-2222-2222-222222222222",
+      }),
     );
-    expect(call).toBeDefined();
-    expect(call![1]).toMatchObject({
-      userId: "11111111-1111-1111-1111-111111111111",
-      deviceId: "22222222-2222-2222-2222-222222222222",
-    });
   });
 });

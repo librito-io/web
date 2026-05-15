@@ -23,12 +23,7 @@ import {
   resolveTitleAuthor,
 } from "../../../src/lib/server/catalog/fetcher";
 
-const NEG_TTL_DAYS = 30;
 const fakeOk = { kind: "ok" as const, result: { success: true } as never };
-const fakeBlocked = {
-  kind: "ok" as const,
-  result: { success: false } as never,
-};
 
 function deps(overrides: Partial<Parameters<typeof resolveIsbn>[2]> = {}) {
   return {

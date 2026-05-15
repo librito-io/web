@@ -7,6 +7,7 @@ import {
 } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { DOWNLOAD_URL_TTL } from "$lib/server/transfer";
+import { logger } from "$lib/server/log";
 
 export const GET: RequestHandler = async ({ request, params }) => {
   const supabase = createAdminClient();
@@ -61,12 +62,16 @@ export const GET: RequestHandler = async ({ request, params }) => {
     return jsonError(500, "server_error", "Failed to generate download URL");
   }
 
-  console.info("transfer.download_url_issued", {
-    transferId: transfer.id,
-    userId: device.userId,
-    deviceId: device.id,
-    ttl: DOWNLOAD_URL_TTL,
-  });
+  logger().info(
+    {
+      event: "transfer.download_url_issued",
+      transferId: transfer.id,
+      userId: device.userId,
+      deviceId: device.id,
+      ttl: DOWNLOAD_URL_TTL,
+    },
+    "transfer.download_url_issued",
+  );
 
   return jsonSuccess({
     downloadUrl: urlData.signedUrl,

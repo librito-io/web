@@ -1,6 +1,7 @@
 // tests/routes/transfer-logs.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 
 vi.mock("$env/static/private", () => ({
   UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
@@ -49,19 +50,14 @@ beforeEach(() => {
 });
 
 describe("transfer log catalog — defensive shape freeze", () => {
-  let infoSpy: ReturnType<typeof vi.spyOn>;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let logWrites: Record<string, unknown>[];
 
   beforeEach(() => {
-    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    logWrites = [];
+    __setTestDestination((line) => logWrites.push(JSON.parse(line)));
   });
   afterEach(() => {
-    infoSpy.mockRestore();
-    warnSpy.mockRestore();
-    errorSpy.mockRestore();
+    __resetTestDestination();
   });
 
   it("emits transfer.initiate at info with {transferId, userId, filenameLen, fileSize, sha256Prefix} on successful insert", async () => {
@@ -97,11 +93,9 @@ describe("transfer log catalog — defensive shape freeze", () => {
 
     await POST(evt);
 
-    const initiateCall = infoSpy.mock.calls.find(
-      (c) => c[0] === "transfer.initiate",
-    );
+    const initiateCall = logWrites.find((w) => w.event === "transfer.initiate");
     expect(initiateCall).toBeDefined();
-    const payload = initiateCall![1] as Record<string, unknown>;
+    const payload = initiateCall as Record<string, unknown>;
     expect(typeof payload.transferId).toBe("string");
     expect(payload.userId).toBe("u-1");
     expect(payload.filenameLen).toBe("book.epub".length);
@@ -138,11 +132,11 @@ describe("transfer log catalog — defensive shape freeze", () => {
 
     await GET(evt);
 
-    const call = infoSpy.mock.calls.find(
-      (c) => c[0] === "transfer.download_url_issued",
+    const call = logWrites.find(
+      (w) => w.event === "transfer.download_url_issued",
     );
     expect(call).toBeDefined();
-    const payload = call![1] as Record<string, unknown>;
+    const payload = call as Record<string, unknown>;
     expect(payload.transferId).toBe("t-1");
     expect(payload.userId).toBe("u-1");
     expect(payload.deviceId).toBe("d-1");
@@ -178,11 +172,9 @@ describe("transfer log catalog — defensive shape freeze", () => {
     } as unknown as Parameters<typeof POST>[0];
     await POST(evt);
 
-    const call = infoSpy.mock.calls.find(
-      (c) => c[0] === "transfer.retry_reset",
-    );
+    const call = logWrites.find((w) => w.event === "transfer.retry_reset");
     expect(call).toBeDefined();
-    const payload = call![1] as Record<string, unknown>;
+    const payload = call as Record<string, unknown>;
     expect(payload.transferId).toBe("t-1");
     expect(payload.userId).toBe("u-1");
     expect(payload.previousAttemptCount).toBe(10);

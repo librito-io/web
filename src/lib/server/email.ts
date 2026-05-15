@@ -1,12 +1,17 @@
 import { Resend } from "resend";
 import { RESEND_API_KEY } from "$env/static/private";
 import welcomeHtml from "../../../supabase/templates/welcome.html?raw";
+import { logger } from "$lib/server/log";
 
 // One warn at module load; per-call would spam self-host logs.
 if (!RESEND_API_KEY) {
-  console.warn(
-    "email.resend_unconfigured: RESEND_API_KEY not set — welcome emails will be silently skipped. " +
-      "Set RESEND_API_KEY in env to enable.",
+  logger().warn(
+    {
+      event: "email.resend_unconfigured",
+      detail:
+        "RESEND_API_KEY not set — welcome emails will be silently skipped. Set RESEND_API_KEY in env to enable.",
+    },
+    "email.resend_unconfigured",
   );
 }
 
@@ -53,6 +58,12 @@ export async function sendWelcomeEmail(
       html,
     });
   } catch (err) {
-    console.error("Failed to send welcome email:", err);
+    logger().error(
+      {
+        event: "email.send_welcome_failed",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "email.send_welcome_failed",
+    );
   }
 }

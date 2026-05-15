@@ -16,6 +16,7 @@ import {
 } from "$lib/server/ratelimit";
 import { runInBackground } from "$lib/server/wait-until";
 import { createAdminClient } from "$lib/server/supabase";
+import { logger } from "$lib/server/log";
 
 export const GET: RequestHandler = async (event) => {
   const {
@@ -41,7 +42,13 @@ export const GET: RequestHandler = async (event) => {
   });
 
   if (error) {
-    console.error("/app/feed rpc error", error);
+    logger().error(
+      {
+        event: "app.feed.rpc_error",
+        error: error.message,
+      },
+      "app.feed.rpc_error",
+    );
     return jsonError(500, "rpc_failed", "Feed query failed");
   }
 
@@ -69,7 +76,10 @@ export const GET: RequestHandler = async (event) => {
       "thumbnail",
     );
   } catch (err) {
-    console.warn("feed_cover_lookup_failed", { error: String(err) });
+    logger().warn(
+      { event: "feed_cover_lookup_failed", error: String(err) },
+      "feed_cover_lookup_failed",
+    );
   }
 
   const missing = uniqueCanon.filter((c) => !coverUrlsByCanon.has(c));

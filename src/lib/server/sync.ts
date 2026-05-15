@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SYNC_DOWNLOAD_URL_TTL } from "./transfer";
+import { logger } from "$lib/server/log";
 
 // --- Incoming payload types (device → server) ---
 
@@ -578,14 +579,18 @@ export async function processSync(
       };
     }
 
-    console.warn("transfer_url_gen_failed", {
-      transferId: t.id,
-      storagePath: t.storage_path,
-      error:
-        urlResult.status === "rejected"
-          ? String(urlResult.reason)
-          : (urlResult.value.error?.message ?? "unknown"),
-    });
+    logger().warn(
+      {
+        event: "transfer_url_gen_failed",
+        transferId: t.id,
+        storagePath: t.storage_path,
+        error:
+          urlResult.status === "rejected"
+            ? String(urlResult.reason)
+            : (urlResult.value.error?.message ?? "unknown"),
+      },
+      "transfer_url_gen_failed",
+    );
     return base;
   });
 
@@ -606,8 +611,12 @@ export async function processSync(
 
   let failedTransferCount = 0;
   if (failedCountResult.error) {
-    console.error(
-      `Failed to fetch failedTransferCount: ${failedCountResult.error.message}`,
+    logger().error(
+      {
+        event: "sync.failed_count_fetch_failed",
+        error: failedCountResult.error.message,
+      },
+      "sync.failed_count_fetch_failed",
     );
   } else {
     failedTransferCount = failedCountResult.count ?? 0;

@@ -1,9 +1,17 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createUpstashMutex,
   createTestMutex,
   noopMutex,
 } from "../../../src/lib/server/catalog/mutex";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
+
+let logWrites: Record<string, unknown>[];
+beforeEach(() => {
+  logWrites = [];
+  __setTestDestination((line) => logWrites.push(JSON.parse(line)));
+});
+afterEach(() => __resetTestDestination());
 
 describe("createTestMutex", () => {
   it("acquire returns true once for a fresh key", async () => {
@@ -88,14 +96,14 @@ describe("createUpstashMutex", () => {
     const redis = makeRedis(async () => {
       throw new Error("upstash unreachable");
     });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const m = createUpstashMutex(redis);
     expect(await m.acquire("k")).toBe(true);
-    expect(warn).toHaveBeenCalledWith(
-      "catalog_mutex_acquire_failed",
-      expect.objectContaining({ key: "k" }),
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "catalog_mutex_acquire_failed",
+        key: "k",
+      }),
     );
-    warn.mockRestore();
   });
 
   it("release calls redis.del", async () => {
@@ -110,13 +118,13 @@ describe("createUpstashMutex", () => {
     redis.del.mockImplementationOnce(async () => {
       throw new Error("upstash blip");
     });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const m = createUpstashMutex(redis);
     await expect(m.release("k")).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(
-      "catalog_mutex_release_failed",
-      expect.objectContaining({ key: "k" }),
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "catalog_mutex_release_failed",
+        key: "k",
+      }),
     );
-    warn.mockRestore();
   });
 });

@@ -1,5 +1,12 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fetchNytBestsellerIsbns } from "../../../src/lib/server/catalog/nyt";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
+
+let logWrites: Record<string, unknown>[];
+beforeEach(() => {
+  logWrites = [];
+  __setTestDestination((line) => logWrites.push(JSON.parse(line)));
+});
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -14,6 +21,7 @@ function nytBody(isbns: string[]): unknown {
 
 afterEach(() => {
   vi.useRealTimers();
+  __resetTestDestination();
 });
 
 describe("fetchNytBestsellerIsbns", () => {
@@ -37,7 +45,6 @@ describe("fetchNytBestsellerIsbns", () => {
 
   it("aborts a hung fetch after 5 seconds and skips that list", async () => {
     vi.useFakeTimers();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const fetchFn = vi.fn(
       (_url: string, init?: RequestInit) =>
@@ -56,14 +63,15 @@ describe("fetchNytBestsellerIsbns", () => {
     const result = await promise;
 
     expect(result).toEqual([]);
-    expect(warn).toHaveBeenCalled();
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({ event: "catalog_warmup_nyt_failed" }),
+    );
     expect(fetchFn).toHaveBeenCalledTimes(3);
     // Each call must have received a signal — verifies AbortController wiring.
     for (const call of fetchFn.mock.calls) {
       const init = call[1] as RequestInit | undefined;
       expect(init?.signal).toBeInstanceOf(AbortSignal);
     }
-    warn.mockRestore();
   });
 
   it("merges ISBNs from all three lists, deduplicating", async () => {

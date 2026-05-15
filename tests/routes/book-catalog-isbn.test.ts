@@ -260,13 +260,11 @@ describe("GET /api/book-catalog/[isbn]", () => {
   it("503 when per-user limiter fail-closes on Upstash outage", async () => {
     supabase._results.set("book_catalog.select", { data: [], error: null });
     userLimitMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await GET(buildEvent("9780743273565"));
     expect(res.status).toBe(503);
     expect(res.headers.get("Retry-After")).toBe(
       String(FAIL_CLOSED_RETRY_AFTER_SEC),
     );
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
-    errorSpy.mockRestore();
   });
 });

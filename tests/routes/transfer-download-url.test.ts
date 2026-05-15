@@ -1,6 +1,7 @@
 // tests/routes/transfer-download-url.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 
 vi.mock("$lib/server/auth", async () => {
   const { jsonError } = await import("../../src/lib/server/errors");
@@ -59,15 +60,16 @@ const pendingTransfer = {
 };
 
 describe("GET /api/transfer/[id]/download-url — WS-D", () => {
-  let infoSpy: ReturnType<typeof vi.spyOn>;
+  let logWrites: Record<string, unknown>[];
 
   beforeEach(() => {
     supabase._results.clear();
     supabase._storage.clear();
-    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    logWrites = [];
+    __setTestDestination((line) => logWrites.push(JSON.parse(line)));
   });
   afterEach(() => {
-    infoSpy.mockRestore();
+    __resetTestDestination();
   });
 
   it("returns downloadUrl, transferId, sha256, filename on success", async () => {
@@ -93,11 +95,11 @@ describe("GET /api/transfer/[id]/download-url — WS-D", () => {
 
     await GET(buildEvent("t-1"));
 
-    const call = infoSpy.mock.calls.find(
-      (c) => c[0] === "transfer.download_url_issued",
+    const call = logWrites.find(
+      (w) => w.event === "transfer.download_url_issued",
     );
     expect(call).toBeDefined();
-    const payload = call![1] as Record<string, unknown>;
+    const payload = call as Record<string, unknown>;
     expect(payload.transferId).toBe("t-1");
     expect(payload.userId).toBe("u-1");
     expect(payload.deviceId).toBe("d-1");

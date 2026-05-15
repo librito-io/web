@@ -1,4 +1,5 @@
 import type { Redis } from "@upstash/redis";
+import { logger } from "$lib/server/log";
 
 /**
  * Per-key coordination primitive used to dedupe concurrent catalog
@@ -65,10 +66,10 @@ export function createUpstashMutex(
         // `persistCover` is the remaining backstop against duplicated
         // uploads — the duplicated upstream fetches under blip are an
         // acceptable cost for keeping covers materializing during outages.
-        console.warn("catalog_mutex_acquire_failed", {
-          key,
-          error: String(err),
-        });
+        logger().warn(
+          { event: "catalog_mutex_acquire_failed", key, error: String(err) },
+          "catalog_mutex_acquire_failed",
+        );
         return true;
       }
     },
@@ -79,10 +80,10 @@ export function createUpstashMutex(
         // TTL is the backstop. Don't propagate — release runs in a
         // `finally` and an unhandled throw here would mask the original
         // resolver error.
-        console.warn("catalog_mutex_release_failed", {
-          key,
-          error: String(err),
-        });
+        logger().warn(
+          { event: "catalog_mutex_release_failed", key, error: String(err) },
+          "catalog_mutex_release_failed",
+        );
       }
     },
   };

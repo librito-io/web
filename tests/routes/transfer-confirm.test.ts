@@ -1,6 +1,7 @@
 // tests/routes/transfer-confirm.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 
 vi.mock("$env/static/private", () => ({
   UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
@@ -49,21 +50,16 @@ function buildEvent(transferId: string) {
 }
 
 describe("POST /api/transfer/[id]/confirm — WS-D", () => {
-  let infoSpy: ReturnType<typeof vi.spyOn>;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let logWrites: Record<string, unknown>[];
 
   beforeEach(() => {
     supabase._results.clear();
     supabase._storage.clear();
-    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    logWrites = [];
+    __setTestDestination((line) => logWrites.push(JSON.parse(line)));
   });
   afterEach(() => {
-    infoSpy.mockRestore();
-    warnSpy.mockRestore();
-    errorSpy.mockRestore();
+    __resetTestDestination();
   });
 
   it("on success: writes status='downloaded', resets accounting fields, emits transfer.confirm_success", async () => {
@@ -85,12 +81,9 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     const res = await POST(buildEvent("t-1"));
     expect(res.status).toBe(200);
 
-    const call = infoSpy.mock.calls.find(
-      (c) => c[0] === "transfer.confirm_success",
-    );
+    const call = logWrites.find((w) => w.event === "transfer.confirm_success");
     expect(call).toBeDefined();
-    const payload = call![1] as Record<string, unknown>;
-    expect(payload).toMatchObject({
+    expect(call).toMatchObject({
       transferId: "t-1",
       userId: "u-1",
       deviceId: "d-1",
@@ -115,14 +108,12 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     const res = await POST(buildEvent("t-1"));
     expect(res.status).toBe(409);
 
-    const successCall = infoSpy.mock.calls.find(
-      (c) => c[0] === "transfer.confirm_success",
+    const successCall = logWrites.find(
+      (w) => w.event === "transfer.confirm_success",
     );
     expect(successCall).toBeUndefined();
 
-    const raceCall = warnSpy.mock.calls.find(
-      (c) => c[0] === "transfer.confirm_race",
-    );
+    const raceCall = logWrites.find((w) => w.event === "transfer.confirm_race");
     expect(raceCall).toBeDefined();
 
     // No storage.remove on a row that did not transition.
@@ -153,11 +144,9 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     const res = await POST(buildEvent("t-1"));
     expect(res.status).toBe(500);
 
-    const call = warnSpy.mock.calls.find(
-      (c) => c[0] === "transfer.confirm_failure",
-    );
+    const call = logWrites.find((w) => w.event === "transfer.confirm_failure");
     expect(call).toBeDefined();
-    const payload = call![1] as Record<string, unknown>;
+    const payload = call as Record<string, unknown>;
     expect(payload.transferId).toBe("t-1");
     expect(payload.userId).toBe("u-1");
     expect(payload.deviceId).toBe("d-1");
@@ -189,11 +178,9 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     const res = await POST(buildEvent("t-1"));
     expect(res.status).toBe(500);
 
-    const call = errorSpy.mock.calls.find(
-      (c) => c[0] === "transfer.cap_hit_failed",
-    );
+    const call = logWrites.find((w) => w.event === "transfer.cap_hit_failed");
     expect(call).toBeDefined();
-    const payload = call![1] as Record<string, unknown>;
+    const payload = call as Record<string, unknown>;
     expect(payload.attemptCount).toBe(10);
     expect(payload.transferId).toBe("t-1");
     expect(payload.userId).toBe("u-1");
@@ -201,9 +188,7 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     expect(payload.error).toBe("transport reset");
     expect(payload.errorCode).toBe("08006");
 
-    const warn = warnSpy.mock.calls.find(
-      (c) => c[0] === "transfer.confirm_failure",
-    );
+    const warn = logWrites.find((w) => w.event === "transfer.confirm_failure");
     expect(warn).toBeUndefined();
   });
 
@@ -232,24 +217,22 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     const res = await POST(buildEvent("t-1"));
     expect(res.status).toBe(500);
 
-    const noChange = warnSpy.mock.calls.find(
-      (c) => c[0] === "transfer.confirm_failure_no_change",
+    const noChange = logWrites.find(
+      (w) => w.event === "transfer.confirm_failure_no_change",
     );
     expect(noChange).toBeDefined();
-    const payload = noChange![1] as Record<string, unknown>;
+    const payload = noChange as Record<string, unknown>;
     expect(payload.transferId).toBe("t-1");
     expect(payload.error).toBe("deadlock");
     expect(payload.errorCode).toBe("40P01");
     expect(payload).not.toHaveProperty("newAttemptCount");
     expect(payload).not.toHaveProperty("attemptCount");
 
-    const failure = warnSpy.mock.calls.find(
-      (c) => c[0] === "transfer.confirm_failure",
+    const failure = logWrites.find(
+      (w) => w.event === "transfer.confirm_failure",
     );
     expect(failure).toBeUndefined();
-    const cap = errorSpy.mock.calls.find(
-      (c) => c[0] === "transfer.cap_hit_failed",
-    );
+    const cap = logWrites.find((w) => w.event === "transfer.cap_hit_failed");
     expect(cap).toBeUndefined();
   });
 
@@ -276,12 +259,8 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     const res = await POST(buildEvent("t-1"));
     expect(res.status).toBe(500);
 
-    const warn = warnSpy.mock.calls.find(
-      (c) => c[0] === "transfer.confirm_failure",
-    );
-    const error = errorSpy.mock.calls.find(
-      (c) => c[0] === "transfer.cap_hit_failed",
-    );
+    const warn = logWrites.find((w) => w.event === "transfer.confirm_failure");
+    const error = logWrites.find((w) => w.event === "transfer.cap_hit_failed");
     expect(warn).toBeUndefined();
     expect(error).toBeUndefined();
   });

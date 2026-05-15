@@ -10,6 +10,7 @@ import {
   UPLOAD_URL_TTL,
   MAX_PENDING_TRANSFERS,
 } from "$lib/server/transfer";
+import { logger } from "$lib/server/log";
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 
@@ -131,13 +132,17 @@ export const POST: RequestHandler = async ({
     return jsonError(500, "server_error", "Failed to create upload URL");
   }
 
-  console.info("transfer.initiate", {
-    transferId,
-    userId: user.id,
-    filenameLen: safeFilename.length,
-    fileSize,
-    sha256Prefix: clientSha.slice(0, 12),
-  });
+  logger().info(
+    {
+      event: "transfer.initiate",
+      transferId,
+      userId: user.id,
+      filenameLen: safeFilename.length,
+      fileSize,
+      sha256Prefix: clientSha.slice(0, 12),
+    },
+    "transfer.initiate",
+  );
 
   return jsonSuccess(
     { transferId, uploadUrl: uploadData.signedUrl, expiresIn: UPLOAD_URL_TTL },

@@ -55,6 +55,7 @@ vi.mock("$lib/server/supabase", () => ({
 }));
 
 const { POST } = await import("../../src/routes/api/realtime-token/+server");
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 
 function buildRequest(headers: Record<string, string> = {}) {
   return {
@@ -66,7 +67,7 @@ function buildRequest(headers: Record<string, string> = {}) {
 }
 
 describe("POST /api/realtime-token (env not configured)", () => {
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let logWrites: Record<string, unknown>[];
 
   beforeEach(() => {
     authMock.mockReset();
@@ -77,10 +78,11 @@ describe("POST /api/realtime-token (env not configured)", () => {
       success: true,
       reset: Date.now() + 3_600_000,
     });
-    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    logWrites = [];
+    __setTestDestination((line) => logWrites.push(JSON.parse(line)));
   });
   afterEach(() => {
-    errorSpy.mockRestore();
+    __resetTestDestination();
   });
 
   it("503 realtime_disabled when LIBRITO_JWT_* env vars are unset", async () => {
@@ -106,12 +108,11 @@ describe("POST /api/realtime-token (env not configured)", () => {
     // failure mode.
     expect(authMock).toHaveBeenCalledOnce();
 
-    const call = errorSpy.mock.calls.find(
-      (c) => c[0] === "realtime.token_disabled",
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "realtime.token_disabled",
+        hasPrivateKey: false,
+      }),
     );
-    expect(call).toBeDefined();
-    expect(call![1]).toMatchObject({
-      hasPrivateKey: false,
-    });
   });
 });

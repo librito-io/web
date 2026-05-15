@@ -6,6 +6,7 @@ import {
 } from "$env/static/private";
 import { jsonError } from "$lib/server/errors";
 import { FAIL_CLOSED_RETRY_AFTER_SEC } from "$lib/server/ratelimit.constants";
+import { logger } from "$lib/server/log";
 
 // `@upstash/redis` defaults to 3 retries with exponential backoff (~4.3 s
 // total hold) before surfacing the error. Every request-path Redis call —
@@ -152,26 +153,38 @@ export async function safeLimit(
     const error = err instanceof Error ? err.message : String(err);
     const stack = err instanceof Error ? err.stack : undefined;
     if (isTimeout) {
-      console.error("ratelimit.upstash_timeout", {
-        limiter: limiter.label,
-        failMode: limiter.failMode,
-        timeoutMs: UPSTASH_TIMEOUT_MS,
-      });
+      logger().error(
+        {
+          event: "ratelimit.upstash_timeout",
+          limiter: limiter.label,
+          failMode: limiter.failMode,
+          timeoutMs: UPSTASH_TIMEOUT_MS,
+        },
+        "ratelimit.upstash_timeout",
+      );
     } else if (isTransportError(err)) {
-      console.error("ratelimit.upstash_unreachable", {
-        limiter: limiter.label,
-        failMode: limiter.failMode,
-        error,
-        stack,
-      });
+      logger().error(
+        {
+          event: "ratelimit.upstash_unreachable",
+          limiter: limiter.label,
+          failMode: limiter.failMode,
+          error,
+          stack,
+        },
+        "ratelimit.upstash_unreachable",
+      );
     } else {
-      console.error("ratelimit.unexpected_throw", {
-        limiter: limiter.label,
-        failMode: limiter.failMode,
-        errorName,
-        error,
-        stack,
-      });
+      logger().error(
+        {
+          event: "ratelimit.unexpected_throw",
+          limiter: limiter.label,
+          failMode: limiter.failMode,
+          errorName,
+          error,
+          stack,
+        },
+        "ratelimit.unexpected_throw",
+      );
     }
     return limiter.failMode === "closed"
       ? { kind: "failClosed", label: limiter.label }
@@ -247,10 +260,14 @@ export async function enforceRateLimits(
         // upstream; this one failed → 503. Surface the asymmetry so an
         // operator looking at "device locked out of /realtime-token" can
         // correlate to the Upstash blip in the same time window.
-        console.warn("ratelimit.partial_drain", {
-          succeededLabels: [...succeededLabels],
-          failedLabel: outcome.label,
-        });
+        logger().warn(
+          {
+            event: "ratelimit.partial_drain",
+            succeededLabels: [...succeededLabels],
+            failedLabel: outcome.label,
+          },
+          "ratelimit.partial_drain",
+        );
       }
       return jsonError(
         503,

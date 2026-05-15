@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("$lib/server/tokens", () => ({
   generatePairingCode: vi.fn(() => "482901"),
@@ -13,6 +13,14 @@ import {
   checkPairingStatus,
   claimPairingCode,
 } from "$lib/server/pairing";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
+
+let logWrites: Record<string, unknown>[];
+beforeEach(() => {
+  logWrites = [];
+  __setTestDestination((line) => logWrites.push(JSON.parse(line)));
+});
+afterEach(() => __resetTestDestination());
 import { createMockSupabase, createMockRedis } from "../helpers";
 
 describe("requestPairingCode", () => {
@@ -453,7 +461,6 @@ describe("claimPairingCode", () => {
       error: { message: "rollback connection failure" },
     });
     redis.set.mockRejectedValueOnce(new Error("ECONNREFUSED"));
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const rpcSpy = vi.spyOn(supabase, "rpc");
     const result = await callClaim(supabase, redis);
@@ -465,15 +472,12 @@ describe("claimPairingCode", () => {
       p_user_id: "user-uuid",
     });
     // Both failure events must be logged (Redis + rollback RPC).
-    expect(errorSpy).toHaveBeenCalledWith(
-      "pairing.redis_token_write_failed",
-      expect.any(Object),
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({ event: "pairing.redis_token_write_failed" }),
     );
-    expect(errorSpy).toHaveBeenCalledWith(
-      "pairing.rollback_rpc_failed",
-      expect.any(Object),
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({ event: "pairing.rollback_rpc_failed" }),
     );
-    errorSpy.mockRestore();
   });
 
   it("does NOT invoke rollback when Redis write succeeds", async () => {

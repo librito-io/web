@@ -169,12 +169,10 @@ describe("load /app/book/[bookHash] — per-user catalog limiter", () => {
     supabase._results.set("books.select", { data: [bookRow], error: null });
     supabase._results.set("book_catalog.select", { data: [], error: null });
     userLimitMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const result = await loadResult(buildEvent());
 
     expect(result.catalog.cover_url).toBe("/cover-placeholder.svg");
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
-    errorSpy.mockRestore();
   });
 });

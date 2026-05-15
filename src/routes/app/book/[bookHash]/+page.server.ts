@@ -19,6 +19,7 @@ import {
   type BookDetailCatalog,
 } from "$lib/server/catalog/view";
 import { getCatalogMutex } from "$lib/server/catalog/mutex";
+import { logger } from "$lib/server/log";
 
 export const load: PageServerLoad = async (event) => {
   const {
@@ -53,7 +54,13 @@ export const load: PageServerLoad = async (event) => {
   const [bookRes, feedRes] = await Promise.all([bookQuery, feedQuery]);
 
   if (bookRes.error) {
-    console.error("book lookup failed", bookRes.error);
+    logger().error(
+      {
+        event: "app.book.lookup_failed",
+        error: bookRes.error.message,
+      },
+      "app.book.lookup_failed",
+    );
     error(500, "Failed to load book");
   }
   if (!bookRes.data) error(404, "Book not found");
@@ -120,7 +127,13 @@ export const load: PageServerLoad = async (event) => {
   }
 
   if (feedRes.error) {
-    console.error("get_highlight_feed failed", feedRes.error);
+    logger().error(
+      {
+        event: "app.book.feed_rpc_failed",
+        error: feedRes.error.message,
+      },
+      "app.book.feed_rpc_failed",
+    );
     return {
       book: bookRow,
       catalog,

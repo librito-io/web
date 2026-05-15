@@ -73,7 +73,6 @@ function buildEvent(
 describe("POST /api/pair/claim — fail-closed under Upstash outage", () => {
   it("returns 503 rate_limit_unavailable when limiter throws", async () => {
     const { pairClaimLimiter } = await import("$lib/server/ratelimit");
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     (pairClaimLimiter.limit as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error("ECONNREFUSED"),
@@ -87,7 +86,6 @@ describe("POST /api/pair/claim — fail-closed under Upstash outage", () => {
     );
     const body = await res.json();
     expect(body.error).toBe("rate_limit_unavailable");
-    errorSpy.mockRestore();
   });
 });
 

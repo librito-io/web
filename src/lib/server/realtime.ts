@@ -3,6 +3,7 @@ import {
   PUBLIC_SUPABASE_URL,
   PUBLIC_SUPABASE_ANON_KEY,
 } from "$env/static/public";
+import { logger } from "$lib/server/log";
 
 export const REALTIME_TOKEN_TTL_SECONDS = 86400;
 
@@ -54,7 +55,10 @@ async function checkKidInJwks(kid: string, supabaseUrl: string): Promise<void> {
       // Distinct from `realtime.jwks_fetch_threw` (catch branch) and
       // `realtime.kid_not_in_jwks` (fetch ok but kid absent) so dashboards
       // can split "upstream JWKS endpoint sad" from "key is rotated out".
-      console.warn("realtime.jwks_fetch_non_ok", { status: res.status, kid });
+      logger().warn(
+        { event: "realtime.jwks_fetch_non_ok", status: res.status, kid },
+        "realtime.jwks_fetch_non_ok",
+      );
       return;
     }
     const body = (await res.json()) as { keys?: Array<{ kid: string }> };
@@ -62,13 +66,20 @@ async function checkKidInJwks(kid: string, supabaseUrl: string): Promise<void> {
     if (keys.some((k) => k.kid === kid)) {
       jwksKidConfirmed = kid;
     } else {
-      console.warn("realtime.kid_not_in_jwks", {
-        kid,
-        knownKids: keys.map((k) => k.kid),
-      });
+      logger().warn(
+        {
+          event: "realtime.kid_not_in_jwks",
+          kid,
+          knownKids: keys.map((k) => k.kid),
+        },
+        "realtime.kid_not_in_jwks",
+      );
     }
   } catch (err) {
-    console.warn("realtime.jwks_fetch_threw", { error: String(err), kid });
+    logger().warn(
+      { event: "realtime.jwks_fetch_threw", error: String(err), kid },
+      "realtime.jwks_fetch_threw",
+    );
   }
 }
 

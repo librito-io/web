@@ -1,4 +1,5 @@
 import { canonicalizeIsbn } from "./isbn";
+import { logger } from "$lib/server/log";
 
 const NYT_LISTS = [
   "hardcover-fiction",
@@ -34,7 +35,10 @@ export async function fetchNytBestsellerIsbns(
         }
         return found;
       } catch (err) {
-        console.warn("catalog_warmup_nyt_failed", { list, error: String(err) });
+        logger().warn(
+          { event: "catalog_warmup_nyt_failed", list, error: String(err) },
+          "catalog_warmup_nyt_failed",
+        );
         return [] as string[];
       } finally {
         clearTimeout(timer);

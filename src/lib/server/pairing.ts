@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SetCommandOptions } from "@upstash/redis";
 import { firstRow } from "./rpc";
 import { generatePairingCode, generateDeviceToken, hashToken } from "./tokens";
+import { logger } from "$lib/server/log";
 
 type Redis = {
   set: (
@@ -90,10 +91,14 @@ export async function checkPairingStatus(
   try {
     token = await redis.get(`pair:token:${pairingId}`);
   } catch (err) {
-    console.error("pairing.redis_token_read_failed", {
-      pairingId,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    logger().error(
+      {
+        event: "pairing.redis_token_read_failed",
+        pairingId,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "pairing.redis_token_read_failed",
+    );
     return { error: "code_expired" };
   }
   if (!token) return { error: "code_expired" };
@@ -185,10 +190,14 @@ export async function claimPairingCode(
   );
 
   if (rpcError) {
-    console.error("pairing.claim_atomic_rpc_failed", {
-      pairingId: pairingCode.id,
-      error: rpcError.message,
-    });
+    logger().error(
+      {
+        event: "pairing.claim_atomic_rpc_failed",
+        pairingId: pairingCode.id,
+        error: rpcError.message,
+      },
+      "pairing.claim_atomic_rpc_failed",
+    );
     return { error: "server_error" };
   }
 
@@ -197,9 +206,13 @@ export async function claimPairingCode(
   if (!isAtomicClaimRow(row)) {
     // Schema drift: the RPC returned a row that does not match our expected
     // shape. Fail closed instead of silently propagating undefined fields.
-    console.error("pairing.claim_atomic_rpc_unexpected_shape", {
-      pairingId: pairingCode.id,
-    });
+    logger().error(
+      {
+        event: "pairing.claim_atomic_rpc_unexpected_shape",
+        pairingId: pairingCode.id,
+      },
+      "pairing.claim_atomic_rpc_unexpected_shape",
+    );
     return { error: "server_error" };
   }
 
@@ -212,10 +225,14 @@ export async function claimPairingCode(
         ex: PAIRING_CODE_TTL_SEC,
       });
     } catch (err) {
-      console.error("pairing.redis_token_write_failed", {
-        pairingId: pairingCode.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      logger().error(
+        {
+          event: "pairing.redis_token_write_failed",
+          pairingId: pairingCode.id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        "pairing.redis_token_write_failed",
+      );
       // Roll back so the user can retry. The rollback function flips
       // claimed=false but does NOT delete the device row (see migration
       // for rationale on the asymmetry).
@@ -224,10 +241,14 @@ export async function claimPairingCode(
         { p_pairing_id: pairingCode.id, p_user_id: userId },
       );
       if (rollbackError) {
-        console.error("pairing.rollback_rpc_failed", {
-          pairingId: pairingCode.id,
-          error: rollbackError.message,
-        });
+        logger().error(
+          {
+            event: "pairing.rollback_rpc_failed",
+            pairingId: pairingCode.id,
+            error: rollbackError.message,
+          },
+          "pairing.rollback_rpc_failed",
+        );
       }
       return { error: "server_error" };
     }
@@ -242,10 +263,14 @@ export async function claimPairingCode(
     try {
       existingToken = await redis.get(`pair:token:${pairingCode.id}`);
     } catch (err) {
-      console.error("pairing.redis_token_read_failed", {
-        pairingId: pairingCode.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      logger().error(
+        {
+          event: "pairing.redis_token_read_failed",
+          pairingId: pairingCode.id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        "pairing.redis_token_read_failed",
+      );
       return { error: "code_expired" };
     }
     if (!existingToken) return { error: "code_expired" };

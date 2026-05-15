@@ -1,11 +1,35 @@
 import { createServerClient } from "@supabase/ssr";
+import { sequence } from "@sveltejs/kit/hooks";
 import type { Handle } from "@sveltejs/kit";
 import {
   PUBLIC_SUPABASE_URL,
   PUBLIC_SUPABASE_ANON_KEY,
 } from "$env/static/public";
+import { runWithContext } from "$lib/server/log";
 
-export const handle: Handle = async ({ event, resolve }) => {
+const requestContext: Handle = async ({ event, resolve }) => {
+  const requestId =
+    event.request.headers.get("x-vercel-id") ?? crypto.randomUUID();
+  event.locals.requestId = requestId;
+  return runWithContext(
+    {
+      requestId,
+      route: event.route.id ?? undefined,
+      method: event.request.method,
+    },
+    async () => {
+      const response = await resolve(event, {
+        filterSerializedResponseHeaders(name) {
+          return name === "content-range" || name === "x-supabase-api-version";
+        },
+      });
+      response.headers.set("x-request-id", requestId);
+      return response;
+    },
+  );
+};
+
+const supabaseSetup: Handle = async ({ event, resolve }) => {
   event.locals.supabase = createServerClient(
     PUBLIC_SUPABASE_URL,
     PUBLIC_SUPABASE_ANON_KEY,
@@ -41,9 +65,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     return { session, user };
   };
 
-  return resolve(event, {
-    filterSerializedResponseHeaders(name) {
-      return name === "content-range" || name === "x-supabase-api-version";
-    },
-  });
+  return resolve(event);
 };
+
+export const handle = sequence(requestContext, supabaseSetup);

@@ -20,6 +20,13 @@ import {
   type SafeOutcome,
 } from "$lib/server/ratelimit";
 import { Ratelimit } from "@upstash/ratelimit";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
+
+let logWrites: Record<string, unknown>[];
+beforeEach(() => {
+  logWrites = [];
+  __setTestDestination((line) => logWrites.push(JSON.parse(line)));
+});
 
 function fakeLimiter(
   failMode: FailMode,
@@ -46,6 +53,7 @@ function fullLimitResult(over: Partial<LimitResult> = {}): LimitResult {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
+  __resetTestDestination();
 });
 
 describe("createLimiter", () => {
@@ -122,7 +130,6 @@ describe("enforceRateLimit — happy paths", () => {
 
 describe("enforceRateLimit — fail-closed under Upstash failure", () => {
   it("returns 503 with Retry-After: 30 when limiter throws and failMode is closed", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const limiter = fakeLimiter("closed", async () => {
       throw new Error("ECONNREFUSED");
     });
@@ -135,9 +142,9 @@ describe("enforceRateLimit — fail-closed under Upstash failure", () => {
       error: "rate_limit_unavailable",
       message: "Service temporarily unavailable. Please retry shortly.",
     });
-    expect(errorSpy).toHaveBeenCalledWith(
-      "ratelimit.upstash_unreachable",
+    expect(logWrites).toContainEqual(
       expect.objectContaining({
+        event: "ratelimit.upstash_unreachable",
         limiter: "test:closed",
         failMode: "closed",
       }),
@@ -145,15 +152,14 @@ describe("enforceRateLimit — fail-closed under Upstash failure", () => {
   });
 
   it("returns null (allows request) when limiter throws and failMode is open", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const limiter = fakeLimiter("open", async () => {
       throw new Error("ECONNREFUSED");
     });
     const res = await enforceRateLimit(limiter, "key-1", "Too many requests");
     expect(res).toBeNull();
-    expect(errorSpy).toHaveBeenCalledWith(
-      "ratelimit.upstash_unreachable",
+    expect(logWrites).toContainEqual(
       expect.objectContaining({
+        event: "ratelimit.upstash_unreachable",
         limiter: "test:open",
         failMode: "open",
       }),
@@ -167,20 +173,18 @@ describe("safeLimit — programmer-error rethrow", () => {
     ["SyntaxError", () => new SyntaxError("unexpected token")],
     ["ReferenceError", () => new ReferenceError("foo is not defined")],
   ])("rethrows %s instead of fail-open/closed", async (_name, mkErr) => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const limiter = fakeLimiter("open", async () => {
       throw mkErr();
     });
     await expect(enforceRateLimit(limiter, "key-1", "msg")).rejects.toThrow(
       mkErr().constructor as new (...args: unknown[]) => Error,
     );
-    expect(errorSpy).not.toHaveBeenCalled();
+    expect(logWrites).toEqual([]);
   });
 });
 
 describe("safeLimit — unexpected throws are logged distinctly", () => {
   it("logs ratelimit.unexpected_throw with errorName for non-transport Error", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     class CustomError extends Error {
       constructor() {
         super("custom boom");
@@ -192,9 +196,9 @@ describe("safeLimit — unexpected throws are logged distinctly", () => {
     });
     const res = await enforceRateLimit(limiter, "key-1", "msg");
     expect(res).toBeNull();
-    expect(errorSpy).toHaveBeenCalledWith(
-      "ratelimit.unexpected_throw",
+    expect(logWrites).toContainEqual(
       expect.objectContaining({
+        event: "ratelimit.unexpected_throw",
         limiter: "test:open",
         errorName: "CustomError",
         error: "custom boom",
@@ -209,16 +213,15 @@ describe("safeLimit — timeout", () => {
   });
 
   it("logs ratelimit.upstash_timeout and applies failMode after 1500ms hang", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const limiter = fakeLimiter("closed", () => new Promise(() => {}));
     const promise = enforceRateLimit(limiter, "key-1", "msg");
     await vi.advanceTimersByTimeAsync(1501);
     const res = await promise;
     expect(res).toBeInstanceOf(Response);
     expect(res!.status).toBe(503);
-    expect(errorSpy).toHaveBeenCalledWith(
-      "ratelimit.upstash_timeout",
+    expect(logWrites).toContainEqual(
       expect.objectContaining({
+        event: "ratelimit.upstash_timeout",
         limiter: "test:closed",
         failMode: "closed",
         timeoutMs: 1500,
@@ -243,7 +246,6 @@ describe("safeLimit — timeout", () => {
   // is invoked — this test pins that semantics so a future Promise.all
   // re-introduction can't slip through silently.
   it("returns 503 when the first sequenced limiter times out and never invokes the second", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const aImpl = vi.fn(() => new Promise<LimitResult>(() => {}));
     const bImpl = vi.fn(async () => fullLimitResult({ success: true }));
     const a: RateLimiter = { limit: aImpl, label: "first", failMode: "closed" };
@@ -264,9 +266,11 @@ describe("safeLimit — timeout", () => {
     expect(res!.status).toBe(503);
     expect(res!.headers.get("Retry-After")).toBe("30");
     expect(bImpl).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith(
-      "ratelimit.upstash_timeout",
-      expect.objectContaining({ limiter: "first" }),
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "ratelimit.upstash_timeout",
+        limiter: "first",
+      }),
     );
   });
 });
@@ -278,38 +282,35 @@ describe("safeLimit — log payload hygiene (no PII / credentials)", () => {
   const SENSITIVE_KEY = "code-abc123:203.0.113.7";
 
   it("upstash_unreachable log omits key", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const limiter = fakeLimiter("open", async () => {
       throw new Error("ECONNREFUSED");
     });
     await enforceRateLimit(limiter, SENSITIVE_KEY, "msg");
-    expect(errorSpy).toHaveBeenCalledTimes(1);
-    const payload = errorSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(logWrites).toHaveLength(1);
+    const payload = logWrites[0] as Record<string, unknown>;
     expect(payload.key).toBeUndefined();
     expect(JSON.stringify(payload)).not.toContain(SENSITIVE_KEY);
   });
 
   it("unexpected_throw log omits key", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const limiter = fakeLimiter("open", async () => {
       throw new Error("custom boom");
     });
     await enforceRateLimit(limiter, SENSITIVE_KEY, "msg");
-    expect(errorSpy).toHaveBeenCalledTimes(1);
-    const payload = errorSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(logWrites).toHaveLength(1);
+    const payload = logWrites[0] as Record<string, unknown>;
     expect(payload.key).toBeUndefined();
     expect(JSON.stringify(payload)).not.toContain(SENSITIVE_KEY);
   });
 
   it("upstash_timeout log omits key", async () => {
     vi.useFakeTimers();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const limiter = fakeLimiter("closed", () => new Promise(() => {}));
     const promise = enforceRateLimit(limiter, SENSITIVE_KEY, "msg");
     await vi.advanceTimersByTimeAsync(1501);
     await promise;
-    expect(errorSpy).toHaveBeenCalledTimes(1);
-    const payload = errorSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(logWrites).toHaveLength(1);
+    const payload = logWrites[0] as Record<string, unknown>;
     expect(payload.key).toBeUndefined();
     expect(JSON.stringify(payload)).not.toContain(SENSITIVE_KEY);
   });
@@ -346,7 +347,6 @@ describe("safeLimit — discriminated-union outcome shape", () => {
   });
 
   it("returns kind:'failOpen' with the limiter label when fail-open limiter throws", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
     const limiter = fakeLimiter("open", async () => {
       throw new Error("ECONNREFUSED");
     });
@@ -355,7 +355,6 @@ describe("safeLimit — discriminated-union outcome shape", () => {
   });
 
   it("returns kind:'failClosed' with the limiter label when fail-closed limiter throws", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
     const limiter = fakeLimiter("closed", async () => {
       throw new Error("ECONNREFUSED");
     });
@@ -397,7 +396,6 @@ describe("enforceRateLimits — multi-limiter precedence", () => {
   // the per-limiter policy is load-bearing. Pins the contract so a future
   // refactor of `safeLimit` cannot conflate the two failure arms.
   it("returns null when a fail-open limiter throws and a fail-closed limiter allows", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
     const open = fakeLimiter("open", async () => {
       throw new Error("ECONNREFUSED");
     });
@@ -443,8 +441,6 @@ describe("enforceRateLimits — multi-limiter precedence", () => {
   });
 
   it("returns 503 when first limiter fails closed; later limiters not invoked (no partial drain to log)", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const aImpl = vi.fn(async () => {
       throw new Error("ECONNREFUSED");
     });
@@ -467,20 +463,19 @@ describe("enforceRateLimits — multi-limiter precedence", () => {
     expect(res!.status).toBe(503);
     expect(res!.headers.get("Retry-After")).toBe("30");
     expect(bImpl).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith(
-      "ratelimit.upstash_unreachable",
-      expect.objectContaining({ limiter: "first" }),
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "ratelimit.upstash_unreachable",
+        limiter: "first",
+      }),
     );
     // No earlier success to lament: no partial_drain warn.
-    expect(warnSpy).not.toHaveBeenCalledWith(
-      "ratelimit.partial_drain",
-      expect.anything(),
+    expect(logWrites).not.toContainEqual(
+      expect.objectContaining({ event: "ratelimit.partial_drain" }),
     );
   });
 
   it("logs ratelimit.partial_drain when an earlier limiter succeeded but a later limiter fail-closed", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const aImpl = vi.fn(async () => fullLimitResult({ success: true }));
     const bImpl = vi.fn(async () => {
       throw new Error("ECONNREFUSED");
@@ -505,17 +500,19 @@ describe("enforceRateLimits — multi-limiter precedence", () => {
     expect(res!.status).toBe(503);
     expect(aImpl).toHaveBeenCalledTimes(1);
     expect(bImpl).toHaveBeenCalledTimes(1);
-    expect(errorSpy).toHaveBeenCalledWith(
-      "ratelimit.upstash_unreachable",
-      expect.objectContaining({ limiter: "realtime:token:user" }),
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "ratelimit.upstash_unreachable",
+        limiter: "realtime:token:user",
+      }),
     );
     // T1: operators need a single log line linking the device-locked
     // window to the upstream blip — the per-device bucket's token has
     // already been burned; the per-user bucket failed; the device cannot
     // mint until the per-device window rolls over.
-    expect(warnSpy).toHaveBeenCalledWith(
-      "ratelimit.partial_drain",
+    expect(logWrites).toContainEqual(
       expect.objectContaining({
+        event: "ratelimit.partial_drain",
         succeededLabels: ["realtime:token"],
         failedLabel: "realtime:token:user",
       }),

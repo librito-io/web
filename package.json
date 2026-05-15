@@ -9,6 +9,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "gen:types": "supabase gen types typescript --local > src/lib/types/database.ts",
     "test": "vitest run",
+    "test:integration": "INTEGRATION=1 vitest run --config vitest.integration.config.ts",
     "prepare": "svelte-kit sync",
     "generate-types": "supabase gen types typescript --linked 2>/dev/null > src/lib/types/database.ts"
   },
@@ -17,6 +18,7 @@
     "@sveltejs/kit": "^2.21.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@types/node": "^22.19.19",
+    "postgres": "^3.4.9",
     "prettier": "^3.8.2",
     "prettier-plugin-svelte": "^3.5.1",
     "svelte": "^5.55.7",

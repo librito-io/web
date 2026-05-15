@@ -1,6 +1,14 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { validateSyncPayload, processSync } from "$lib/server/sync";
 import { createMockSupabase } from "../helpers";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
+
+let logWrites: Record<string, unknown>[];
+beforeEach(() => {
+  logWrites = [];
+  __setTestDestination((line) => logWrites.push(JSON.parse(line)));
+});
+afterEach(() => __resetTestDestination());
 
 describe("validateSyncPayload", () => {
   it("accepts a valid empty payload", () => {
@@ -884,8 +892,6 @@ describe("processSync", () => {
       },
     });
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
     const result = await processSync(supabase, "dev-1", "user-1", {
       lastSyncedAt: 1000,
       books: [],
@@ -906,8 +912,6 @@ describe("processSync", () => {
         fileSize: 200,
       },
     ]);
-
-    warnSpy.mockRestore();
   });
 
   it("degrades gracefully when createSignedUrl returns an error result", async () => {
@@ -931,8 +935,6 @@ describe("processSync", () => {
       },
     });
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
     const result = await processSync(supabase, "dev-1", "user-1", {
       lastSyncedAt: 1000,
       books: [],
@@ -945,8 +947,6 @@ describe("processSync", () => {
         fileSize: 100,
       },
     ]);
-
-    warnSpy.mockRestore();
   });
 
   it("emits a transfer_url_gen_failed warn log per URL-gen failure", async () => {
@@ -981,26 +981,31 @@ describe("processSync", () => {
       },
     });
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
     await processSync(supabase, "dev-1", "user-1", {
       lastSyncedAt: 1000,
       books: [],
     });
 
-    expect(warnSpy).toHaveBeenCalledTimes(2);
-    expect(warnSpy).toHaveBeenCalledWith("transfer_url_gen_failed", {
-      transferId: "transfer-1",
-      storagePath: "user-1/transfer-1/a.epub",
-      error: "Error: timeout",
-    });
-    expect(warnSpy).toHaveBeenCalledWith("transfer_url_gen_failed", {
-      transferId: "transfer-2",
-      storagePath: "user-1/transfer-2/b.epub",
-      error: "bucket unavailable",
-    });
-
-    warnSpy.mockRestore();
+    const failures = logWrites.filter(
+      (w) => w.event === "transfer_url_gen_failed",
+    );
+    expect(failures).toHaveLength(2);
+    expect(failures).toContainEqual(
+      expect.objectContaining({
+        event: "transfer_url_gen_failed",
+        transferId: "transfer-1",
+        storagePath: "user-1/transfer-1/a.epub",
+        error: "Error: timeout",
+      }),
+    );
+    expect(failures).toContainEqual(
+      expect.objectContaining({
+        event: "transfer_url_gen_failed",
+        transferId: "transfer-2",
+        storagePath: "user-1/transfer-2/b.epub",
+        error: "bucket unavailable",
+      }),
+    );
   });
 
   it("omits deleted_at from highlight upsert payload (server owns soft-delete)", async () => {

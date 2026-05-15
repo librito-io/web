@@ -214,7 +214,7 @@ export async function claimPairingCode(
     } catch (err) {
       console.error("pairing.redis_token_write_failed", {
         pairingId: pairingCode.id,
-        error: String(err),
+        error: err instanceof Error ? err.message : String(err),
       });
       // Roll back so the user can retry. The rollback function flips
       // claimed=false but does NOT delete the device row (see migration

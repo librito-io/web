@@ -4,6 +4,7 @@ import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import { syncLimiter, enforceRateLimit } from "$lib/server/ratelimit";
 import { validateSyncPayload, processSync } from "$lib/server/sync";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
+import { logger } from "$lib/server/log";
 
 export const POST: RequestHandler = async ({ request }) => {
   const supabase = createAdminClient();
@@ -63,7 +64,13 @@ export const POST: RequestHandler = async ({ request }) => {
     );
     return jsonSuccess(response);
   } catch (err) {
-    console.error("Sync processing failed:", err);
+    logger().error(
+      {
+        event: "sync.processing_failed",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "sync.processing_failed",
+    );
     return jsonError(500, "server_error", "Sync processing failed");
   }
 };

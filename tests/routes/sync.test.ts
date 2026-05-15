@@ -73,13 +73,11 @@ function buildEvent(body: unknown) {
 describe("POST /api/sync — fail-open under Upstash outage", () => {
   it("proceeds to processSync (200) when syncLimiter throws", async () => {
     limitMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const res = await POST(buildEvent({ lastSyncedAt: 0, books: [] }));
 
     expect(res.status).toBe(200);
     expect(processSyncMock).toHaveBeenCalledTimes(1);
-    errorSpy.mockRestore();
   });
 
   it("returns 429 when syncLimiter denies", async () => {

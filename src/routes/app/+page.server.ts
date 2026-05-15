@@ -1,3 +1,4 @@
+import { redirect } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 import { parseSort, SORT_COOKIE } from "$lib/feed/sort";
 import { encodeCursor } from "$lib/feed/cursor";
@@ -24,9 +25,7 @@ export const load: PageServerLoad = async (event) => {
   const { user } = await safeGetSession();
   const sort: Sort = parseSort(cookies.get(SORT_COOKIE), "recent");
 
-  if (!user) {
-    return { items: [] as FeedItem[], nextCursor: null, sort };
-  }
+  if (!user) redirect(303, "/auth/login");
 
   const { data, error } = await supabase.rpc("get_highlight_feed", {
     p_sort: sort,

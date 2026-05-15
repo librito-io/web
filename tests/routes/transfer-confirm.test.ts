@@ -8,11 +8,17 @@ vi.mock("$env/static/private", () => ({
   UPSTASH_REDIS_REST_TOKEN: "mock-token",
 }));
 
-vi.mock("$lib/server/auth", () => ({
-  authenticateDevice: vi.fn(async () => ({
-    device: { id: "d-1", userId: "u-1" },
-  })),
-}));
+vi.mock("$lib/server/auth", async () => {
+  const { jsonError } = await import("../../src/lib/server/errors");
+  return {
+    authenticateDevice: vi.fn(async () => ({
+      device: { id: "d-1", userId: "u-1" },
+    })),
+    authErrorResponse: vi.fn((code: string) =>
+      jsonError(401, code, `auth:${code}`),
+    ),
+  };
+});
 
 vi.mock("$lib/server/ratelimit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
@@ -65,26 +71,26 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
   it("on success: writes status='downloaded', resets accounting fields, emits transfer.confirm_success", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "pending",
-        storage_path: "u-1/t-1/book.epub",
+        storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
         attempt_count: 3,
       },
       error: null,
     });
     supabase._results.set("book_transfers.update", {
-      data: [{ id: "t-1" }],
+      data: [{ id: "11111111-1111-4111-8111-111111111111" }],
       error: null,
     });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(200);
 
     const call = logWrites.find((w) => w.event === "transfer.confirm_success");
     expect(call).toBeDefined();
     expect(call).toMatchObject({
-      transferId: "t-1",
+      transferId: "11111111-1111-4111-8111-111111111111",
       userId: "u-1",
       deviceId: "d-1",
       attemptCountAtSuccess: 3,
@@ -94,10 +100,10 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
   it("on update returning zero rows (TOCTOU race): emits transfer.confirm_race, returns 409, does not delete storage or log success", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "pending",
-        storage_path: "u-1/t-1/book.epub",
+        storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
         attempt_count: 3,
       },
       error: null,
@@ -105,7 +111,7 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     // Guarded UPDATE matches zero rows (row already moved out of pending).
     supabase._results.set("book_transfers.update", { data: [], error: null });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(409);
 
     const successCall = logWrites.find(
@@ -124,10 +130,10 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
   it("on update error pre-cap: calls increment_transfer_attempt RPC, emits transfer.confirm_failure (warn) using RPC-returned count", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "pending",
-        storage_path: "u-1/t-1/book.epub",
+        storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
         attempt_count: 4,
       },
       error: null,
@@ -141,13 +147,13 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
       error: null,
     });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(500);
 
     const call = logWrites.find((w) => w.event === "transfer.confirm_failure");
     expect(call).toBeDefined();
     const payload = call as Record<string, unknown>;
-    expect(payload.transferId).toBe("t-1");
+    expect(payload.transferId).toBe("11111111-1111-4111-8111-111111111111");
     expect(payload.userId).toBe("u-1");
     expect(payload.deviceId).toBe("d-1");
     expect(payload.newAttemptCount).toBe(5);
@@ -158,10 +164,10 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
   it("on update error at cap: RPC returns status='failed', handler emits transfer.cap_hit_failed (error) with attemptCount=10", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "pending",
-        storage_path: "u-1/t-1/book.epub",
+        storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
         attempt_count: 9,
       },
       error: null,
@@ -175,14 +181,14 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
       error: null,
     });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(500);
 
     const call = logWrites.find((w) => w.event === "transfer.cap_hit_failed");
     expect(call).toBeDefined();
     const payload = call as Record<string, unknown>;
     expect(payload.attemptCount).toBe(10);
-    expect(payload.transferId).toBe("t-1");
+    expect(payload.transferId).toBe("11111111-1111-4111-8111-111111111111");
     expect(payload.userId).toBe("u-1");
     expect(payload.deviceId).toBe("d-1");
     expect(payload.error).toBe("transport reset");
@@ -195,10 +201,10 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
   it("on update error + RPC matches zero rows (race after updateError): emits transfer.confirm_failure_no_change, no numeric attempt log", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "pending",
-        storage_path: "u-1/t-1/book.epub",
+        storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
         attempt_count: 4,
       },
       error: null,
@@ -214,7 +220,7 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
       error: null,
     });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(500);
 
     const noChange = logWrites.find(
@@ -222,7 +228,7 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     );
     expect(noChange).toBeDefined();
     const payload = noChange as Record<string, unknown>;
-    expect(payload.transferId).toBe("t-1");
+    expect(payload.transferId).toBe("11111111-1111-4111-8111-111111111111");
     expect(payload.error).toBe("deadlock");
     expect(payload.errorCode).toBe("40P01");
     expect(payload).not.toHaveProperty("newAttemptCount");
@@ -239,10 +245,10 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
   it("on update error AND RPC error: returns 500, emits no transfer.confirm_failure / cap_hit_failed log", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "pending",
-        storage_path: "u-1/t-1/book.epub",
+        storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
         attempt_count: 4,
       },
       error: null,
@@ -256,7 +262,7 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
       error: { message: "rpc unreachable" },
     });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(500);
 
     const warn = logWrites.find((w) => w.event === "transfer.confirm_failure");
@@ -265,7 +271,7 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     expect(error).toBeUndefined();
   });
 
-  it("returns 401 when authenticateDevice errors", async () => {
+  it("returns 401 via authErrorResponse when authenticateDevice errors", async () => {
     const auth = await import("$lib/server/auth");
     (
       auth.authenticateDevice as unknown as {
@@ -273,8 +279,18 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
       }
     ).mockResolvedValueOnce({ error: "missing_token" });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toBe("missing_token");
+    expect(auth.authErrorResponse).toHaveBeenCalledWith("missing_token");
+  });
+
+  it("returns 404 on malformed UUID with no auth or DB call", async () => {
+    const res = await POST(buildEvent("not-a-uuid"));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe("not_found");
   });
 
   it("returns 429 when rate-limited", async () => {
@@ -285,7 +301,7 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
       }
     ).mockResolvedValueOnce({ success: false, reset: Date.now() + 30_000 });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(429);
     const body = await res.json();
     expect(body.error).toBe("rate_limited");
@@ -293,14 +309,14 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
 
   it("returns 404 when row missing", async () => {
     supabase._results.set("book_transfers.select", { data: null, error: null });
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(404);
   });
 
   it("returns 404 when transfer.user_id !== device.userId", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "other",
         status: "pending",
         storage_path: "p",
@@ -308,14 +324,14 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
       },
       error: null,
     });
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(404);
   });
 
   it("returns 409 when status !== 'pending'", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "downloaded",
         storage_path: "p",
@@ -323,7 +339,7 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
       },
       error: null,
     });
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(409);
   });
 });

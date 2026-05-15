@@ -50,11 +50,11 @@ function buildEvent(transferId: string) {
 }
 
 const pendingTransfer = {
-  id: "t-1",
+  id: "11111111-1111-4111-8111-111111111111",
   user_id: "u-1",
   device_id: null,
   status: "pending",
-  storage_path: "u-1/t-1/book.epub",
+  storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
   sha256: "a".repeat(64),
   filename: "book.epub",
 };
@@ -78,11 +78,11 @@ describe("GET /api/transfer/[id]/download-url — WS-D", () => {
       error: null,
     });
 
-    const res = await GET(buildEvent("t-1"));
+    const res = await GET(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.downloadUrl).toContain("book.epub");
-    expect(body.transferId).toBe("t-1");
+    expect(body.transferId).toBe("11111111-1111-4111-8111-111111111111");
     expect(body.sha256).toBe("a".repeat(64));
     expect(body.filename).toBe("book.epub");
   });
@@ -93,14 +93,14 @@ describe("GET /api/transfer/[id]/download-url — WS-D", () => {
       error: null,
     });
 
-    await GET(buildEvent("t-1"));
+    await GET(buildEvent("11111111-1111-4111-8111-111111111111"));
 
     const call = logWrites.find(
       (w) => w.event === "transfer.download_url_issued",
     );
     expect(call).toBeDefined();
     const payload = call as Record<string, unknown>;
-    expect(payload.transferId).toBe("t-1");
+    expect(payload.transferId).toBe("11111111-1111-4111-8111-111111111111");
     expect(payload.userId).toBe("u-1");
     expect(payload.deviceId).toBe("d-1");
     expect(typeof payload.ttl).toBe("number");
@@ -114,7 +114,7 @@ describe("GET /api/transfer/[id]/download-url — WS-D", () => {
       }
     ).mockResolvedValueOnce({ error: "missing_token" });
 
-    const res = await GET(buildEvent("t-1"));
+    const res = await GET(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(401);
   });
 
@@ -126,7 +126,7 @@ describe("GET /api/transfer/[id]/download-url — WS-D", () => {
       }
     ).mockResolvedValueOnce({ success: false, reset: Date.now() + 30_000 });
 
-    const res = await GET(buildEvent("t-1"));
+    const res = await GET(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(429);
     const body = await res.json();
     expect(body.error).toBe("rate_limited");
@@ -134,7 +134,7 @@ describe("GET /api/transfer/[id]/download-url — WS-D", () => {
 
   it("returns 404 when row missing", async () => {
     supabase._results.set("book_transfers.select", { data: [], error: null });
-    const res = await GET(buildEvent("t-1"));
+    const res = await GET(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(404);
   });
 
@@ -143,7 +143,7 @@ describe("GET /api/transfer/[id]/download-url — WS-D", () => {
       data: [{ ...pendingTransfer, user_id: "other" }],
       error: null,
     });
-    const res = await GET(buildEvent("t-1"));
+    const res = await GET(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(404);
   });
 
@@ -152,7 +152,7 @@ describe("GET /api/transfer/[id]/download-url — WS-D", () => {
       data: [{ ...pendingTransfer, status: "downloaded" }],
       error: null,
     });
-    const res = await GET(buildEvent("t-1"));
+    const res = await GET(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(409);
   });
 
@@ -161,8 +161,20 @@ describe("GET /api/transfer/[id]/download-url — WS-D", () => {
       data: [{ ...pendingTransfer, device_id: "other-device" }],
       error: null,
     });
-    const res = await GET(buildEvent("t-1"));
+    const res = await GET(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(404);
+  });
+
+  it("returns 404 on malformed UUID with no DB call", async () => {
+    const res = await GET({
+      request: new Request("http://x/api/transfer/not-a-uuid/download-url", {
+        headers: { Authorization: "Bearer sk_device_xxx" },
+      }),
+      params: { id: "not-a-uuid" },
+    } as unknown as Parameters<typeof GET>[0]);
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe("not_found");
   });
 
   it("returns 500 on DB fetch error", async () => {
@@ -170,7 +182,7 @@ describe("GET /api/transfer/[id]/download-url — WS-D", () => {
       data: null,
       error: { message: "db error" },
     });
-    const res = await GET(buildEvent("t-1"));
+    const res = await GET(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(500);
   });
 });

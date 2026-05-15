@@ -1,5 +1,5 @@
 import type { RequestHandler } from "./$types";
-import { authenticateDevice } from "$lib/server/auth";
+import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import { createAdminClient } from "$lib/server/supabase";
 import {
   transferConfirmLimiter,
@@ -8,17 +8,22 @@ import {
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { recordConfirmFailure } from "$lib/server/transfer";
 import { logger } from "$lib/server/log";
+import { UUID_RE } from "$lib/server/validation";
 
 export const POST: RequestHandler = async ({ request, params }) => {
   const supabase = createAdminClient();
   const authResult = await authenticateDevice(request, supabase);
 
   if ("error" in authResult) {
-    return jsonError(401, authResult.error, "Device authentication failed");
+    return authErrorResponse(authResult.error);
   }
 
   const { device } = authResult;
   const transferId = params.id;
+
+  if (!UUID_RE.test(transferId)) {
+    return jsonError(404, "not_found", "Transfer not found");
+  }
 
   const limited = await enforceRateLimit(
     transferConfirmLimiter,

@@ -58,10 +58,20 @@ describe("POST /api/transfer/[id]/retry", () => {
   });
 
   it("returns 401 when no session user", async () => {
-    const res = await POST(buildEvent("t-1", null));
+    const res = await POST(
+      buildEvent("11111111-1111-4111-8111-111111111111", null),
+    );
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error).toBe("unauthorized");
+  });
+
+  it("returns 404 on malformed UUID with no DB call", async () => {
+    const res = await POST(buildEvent("not-a-uuid"));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe("not_found");
+    expect(supabase._updateCalls).toHaveLength(0);
   });
 
   it("returns 429 when rate-limited", async () => {
@@ -72,7 +82,7 @@ describe("POST /api/transfer/[id]/retry", () => {
       }
     ).mockResolvedValueOnce({ success: false, reset: Date.now() + 30_000 });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(429);
     const body = await res.json();
     expect(body.error).toBe("rate_limited");
@@ -83,7 +93,7 @@ describe("POST /api/transfer/[id]/retry", () => {
       data: null,
       error: null,
     });
-    const res = await POST(buildEvent("t-missing"));
+    const res = await POST(buildEvent("99999999-9999-4999-8999-999999999999"));
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error).toBe("not_found");
@@ -92,7 +102,7 @@ describe("POST /api/transfer/[id]/retry", () => {
   it("returns 404 when transfer.user_id !== session.user.id", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "other",
         status: "failed",
         attempt_count: 10,
@@ -100,7 +110,7 @@ describe("POST /api/transfer/[id]/retry", () => {
       },
       error: null,
     });
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(404);
   });
 
@@ -109,7 +119,7 @@ describe("POST /api/transfer/[id]/retry", () => {
     async (status) => {
       supabase._results.set("book_transfers.select", {
         data: {
-          id: "t-1",
+          id: "11111111-1111-4111-8111-111111111111",
           user_id: "u-1",
           status,
           attempt_count: 0,
@@ -117,7 +127,9 @@ describe("POST /api/transfer/[id]/retry", () => {
         },
         error: null,
       });
-      const res = await POST(buildEvent("t-1"));
+      const res = await POST(
+        buildEvent("11111111-1111-4111-8111-111111111111"),
+      );
       expect(res.status).toBe(409);
       const body = await res.json();
       expect(body.error).toBe("not_failed");
@@ -132,7 +144,7 @@ describe("POST /api/transfer/[id]/retry", () => {
   it("on failed row: UPDATE resets fields, returns 200, emits transfer.retry_reset (info)", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "failed",
         attempt_count: 10,
@@ -141,11 +153,11 @@ describe("POST /api/transfer/[id]/retry", () => {
       error: null,
     });
     supabase._results.set("book_transfers.update", {
-      data: [{ id: "t-1" }],
+      data: [{ id: "11111111-1111-4111-8111-111111111111" }],
       error: null,
     });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
@@ -153,7 +165,7 @@ describe("POST /api/transfer/[id]/retry", () => {
     const call = logWrites.find((w) => w.event === "transfer.retry_reset");
     expect(call).toBeDefined();
     expect(call).toMatchObject({
-      transferId: "t-1",
+      transferId: "11111111-1111-4111-8111-111111111111",
       userId: "u-1",
       previousAttemptCount: 10,
       previousLastError: "Couldn't deliver to your device after 10 attempts.",
@@ -163,7 +175,7 @@ describe("POST /api/transfer/[id]/retry", () => {
   it("on UPDATE returning zero rows (TOCTOU race): returns 409 retry_race and warns", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "failed",
         attempt_count: 10,
@@ -173,7 +185,7 @@ describe("POST /api/transfer/[id]/retry", () => {
     });
     supabase._results.set("book_transfers.update", { data: [], error: null });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error).toBe("retry_race");
@@ -188,7 +200,7 @@ describe("POST /api/transfer/[id]/retry", () => {
   it("maps Postgres 23505 on UPDATE to 409 duplicate_pending_transfer", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "failed",
         attempt_count: 10,
@@ -201,7 +213,7 @@ describe("POST /api/transfer/[id]/retry", () => {
       error: { code: "23505", message: "duplicate key" },
     });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error).toBe("duplicate_pending_transfer");
@@ -210,7 +222,7 @@ describe("POST /api/transfer/[id]/retry", () => {
   it("returns 500 when UPDATE errors with non-23505 code", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "failed",
         attempt_count: 10,
@@ -223,7 +235,7 @@ describe("POST /api/transfer/[id]/retry", () => {
       error: { message: "down", code: "08006" },
     });
 
-    const res = await POST(buildEvent("t-1"));
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
     expect(res.status).toBe(500);
   });
 });

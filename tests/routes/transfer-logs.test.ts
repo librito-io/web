@@ -108,11 +108,11 @@ describe("transfer log catalog — defensive shape freeze", () => {
     supabase._results.set("book_transfers.select", {
       data: [
         {
-          id: "t-1",
+          id: "11111111-1111-4111-8111-111111111111",
           user_id: "u-1",
           device_id: null,
           status: "pending",
-          storage_path: "u-1/t-1/book.epub",
+          storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
           sha256: "f".repeat(64),
           filename: "book.epub",
           file_size: 100,
@@ -124,10 +124,13 @@ describe("transfer log catalog — defensive shape freeze", () => {
     const { GET } =
       await import("../../src/routes/api/transfer/[id]/download-url/+server");
     const evt = {
-      request: new Request("http://x/api/transfer/t-1/download-url", {
-        headers: { Authorization: "Bearer sk_device_xxx" },
-      }),
-      params: { id: "t-1" },
+      request: new Request(
+        "http://x/api/transfer/11111111-1111-4111-8111-111111111111/download-url",
+        {
+          headers: { Authorization: "Bearer sk_device_xxx" },
+        },
+      ),
+      params: { id: "11111111-1111-4111-8111-111111111111" },
     } as unknown as Parameters<typeof GET>[0];
 
     await GET(evt);
@@ -137,7 +140,7 @@ describe("transfer log catalog — defensive shape freeze", () => {
     );
     expect(call).toBeDefined();
     const payload = call as Record<string, unknown>;
-    expect(payload.transferId).toBe("t-1");
+    expect(payload.transferId).toBe("11111111-1111-4111-8111-111111111111");
     expect(payload.userId).toBe("u-1");
     expect(payload.deviceId).toBe("d-1");
     expect(typeof payload.ttl).toBe("number");
@@ -146,7 +149,7 @@ describe("transfer log catalog — defensive shape freeze", () => {
   it("emits transfer.retry_reset at info with {transferId, userId, previousAttemptCount, previousLastError}", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
-        id: "t-1",
+        id: "11111111-1111-4111-8111-111111111111",
         user_id: "u-1",
         status: "failed",
         attempt_count: 10,
@@ -155,17 +158,20 @@ describe("transfer log catalog — defensive shape freeze", () => {
       error: null,
     });
     supabase._results.set("book_transfers.update", {
-      data: [{ id: "t-1" }],
+      data: [{ id: "11111111-1111-4111-8111-111111111111" }],
       error: null,
     });
 
     const { POST } =
       await import("../../src/routes/api/transfer/[id]/retry/+server");
     const evt = {
-      params: { id: "t-1" },
-      request: new Request("http://x/api/transfer/t-1/retry", {
-        method: "POST",
-      }),
+      params: { id: "11111111-1111-4111-8111-111111111111" },
+      request: new Request(
+        "http://x/api/transfer/11111111-1111-4111-8111-111111111111/retry",
+        {
+          method: "POST",
+        },
+      ),
       locals: {
         safeGetSession: async () => ({ user: { id: "u-1" }, session: null }),
       },
@@ -175,7 +181,7 @@ describe("transfer log catalog — defensive shape freeze", () => {
     const call = logWrites.find((w) => w.event === "transfer.retry_reset");
     expect(call).toBeDefined();
     const payload = call as Record<string, unknown>;
-    expect(payload.transferId).toBe("t-1");
+    expect(payload.transferId).toBe("11111111-1111-4111-8111-111111111111");
     expect(payload.userId).toBe("u-1");
     expect(payload.previousAttemptCount).toBe(10);
     expect(payload.previousLastError).toBe("x");

@@ -14,6 +14,8 @@ import {
   transferDownloadLimiter,
   transferConfirmLimiter,
   transferRetryLimiter,
+  transferCancelLimiter,
+  transferListLimiter,
   realtimeTokenLimiter,
   realtimeTokenUserLimiter,
 } from "$lib/server/ratelimit";
@@ -34,6 +36,8 @@ describe("rate-limit policy snapshot", () => {
     expect(transferDownloadLimiter.failMode).toBe("open");
     expect(transferConfirmLimiter.failMode).toBe("open");
     expect(transferRetryLimiter.failMode).toBe("open");
+    expect(transferCancelLimiter.failMode).toBe("open");
+    expect(transferListLimiter.failMode).toBe("open");
     expect(realtimeTokenLimiter.failMode).toBe("closed");
     expect(realtimeTokenUserLimiter.failMode).toBe("closed");
   });
@@ -47,6 +51,8 @@ describe("rate-limit policy snapshot", () => {
     expect(transferDownloadLimiter.label).toBe("transfer:download");
     expect(transferConfirmLimiter.label).toBe("transfer:confirm");
     expect(transferRetryLimiter.label).toBe("transfer:retry");
+    expect(transferCancelLimiter.label).toBe("transfer:cancel");
+    expect(transferListLimiter.label).toBe("transfer:list");
     expect(realtimeTokenLimiter.label).toBe("realtime:token");
     expect(realtimeTokenUserLimiter.label).toBe("realtime:token:user");
   });

@@ -8,6 +8,7 @@ import {
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { DOWNLOAD_URL_TTL } from "$lib/server/transfer";
 import { logger } from "$lib/server/log";
+import { UUID_RE } from "$lib/server/validation";
 
 export const GET: RequestHandler = async ({ request, params }) => {
   const supabase = createAdminClient();
@@ -18,6 +19,10 @@ export const GET: RequestHandler = async ({ request, params }) => {
   }
 
   const { device } = authResult;
+
+  if (!UUID_RE.test(params.id)) {
+    return jsonError(404, "not_found", "Transfer not found");
+  }
 
   const limited = await enforceRateLimit(
     transferDownloadLimiter,

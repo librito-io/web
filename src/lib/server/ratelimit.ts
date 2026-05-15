@@ -363,6 +363,26 @@ export const transferRetryLimiter = createLimiter({
   failMode: "open",
 });
 
+// Transfer: cancel/DELETE (browser, per user). DELETE is non-idempotent
+// (Storage remove + DB row delete) and callable in a loop. Fail-open
+// matches sibling browser transfer limiters — downstream ownership
+// check still gates row deletion under an Upstash outage.
+export const transferCancelLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(30, "1m"),
+  prefix: "rl:transfer:cancel",
+  failMode: "open",
+});
+
+// Transfer: list/GET (browser, per user). Natural polling target for the
+// transfer UI — cap per-user fan-out so a stuck client cannot drive the
+// Supabase row scan in a tight loop. Fail-open mirrors the rest of the
+// transfer browser surface.
+export const transferListLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(60, "1m"),
+  prefix: "rl:transfer:list",
+  failMode: "open",
+});
+
 // /api/realtime-token — two limiters layered for defense in depth.
 // Per-device: 1 mint / 60 s. Bounds firmware-bug reconnect storms.
 // Per-user: 30 mints / 1 h. Bounds re-pair-loop bypass (a logged-in user

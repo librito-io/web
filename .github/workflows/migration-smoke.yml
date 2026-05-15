@@ -7,6 +7,8 @@ on:
       - "supabase/seed.sql"
       - "supabase/config.toml"
       - "src/lib/types/database.ts"
+      - "tests/integration/**"
+      - "vitest.integration.config.ts"
   push:
     branches:
       - main
@@ -15,11 +17,13 @@ on:
       - "supabase/seed.sql"
       - "supabase/config.toml"
       - "src/lib/types/database.ts"
+      - "tests/integration/**"
+      - "vitest.integration.config.ts"
 
 jobs:
   db-reset:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -49,6 +53,12 @@ jobs:
             echo "Run 'npm run gen:types' locally and commit the result."
             exit 1
           fi
+
+      # Behavior-level migration assertions (issue #101). Reuses the already-
+      # running local Supabase. Suite is gated on INTEGRATION=1 (set by the
+      # npm script) so it never runs in the default unit suite.
+      - name: Run integration suite (behavior-level migration tests)
+        run: npm run test:integration
 
       - if: always()
         run: supabase stop

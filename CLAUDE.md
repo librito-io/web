@@ -68,13 +68,27 @@ npm test
 # Run a specific test file
 npx vitest run tests/lib/sync.test.ts
 
+# Behavior-level migration integration suite (requires local Supabase running)
+npm run test:integration
+
 # Supabase local
 supabase start          # Start local Supabase
 supabase db reset       # Reset and re-apply all migrations
 supabase stop           # Stop local Supabase
 ```
 
-**Migration CI gate**: `.github/workflows/migration-smoke.yml` runs `supabase start && supabase db reset --local` on every PR (and `main` push) that touches `supabase/migrations/**`, `supabase/seed.sql`, or `supabase/config.toml`. The CLI is pinned to the version used for local dev and production `supabase db push` so parser-class regressions surface in CI rather than at production push time. **Pin must stay ≥ v2.91.1** — earlier versions carry the [`atomic` parser bug](https://github.com/supabase/cli/pull/5064) that mishandles function names containing the substring "atomic" and trips Postgres SQLSTATE 42601 on subsequent statements (this hit production via PR #40 → hotfix PR #41). Bumping the pin requires a coordinated bump of every contributor's local CLI and the laptop that runs `supabase db push`. If you edit a migration file mid-review, **re-run `supabase db reset --local` locally** before pushing — CI is the safety net, not the primary signal.
+### Integration suite (`tests/integration/`)
+
+The default `npm test` (`vitest.config.ts`) runs the fast, hermetic unit suite under `tests/lib/` and `tests/routes/` against mocks. The **integration suite** lives in `tests/integration/` and exercises real Postgres behavior against a running local Supabase (port `54322`):
+
+- **Trigger**: `npm run test:integration`, which sets `INTEGRATION=1` and points Vitest at `vitest.integration.config.ts`. Without `INTEGRATION=1`, every `describe` is `.skipIf`'d so the suite is a no-op.
+- **Prerequisites**: `supabase start` must be running before invocation. The helpers shell out to `supabase status -o env` to discover `DB_URL` / `API_URL` / `SERVICE_ROLE_KEY` — fresh CI boots and local machines both work without env wiring.
+- **Scope**: behavior-level guards that string-match unit tests cannot catch — RPC tombstone filtering, `pg_cron` job presence + canonical schedule, `supabase_realtime` publication membership, `REPLICA IDENTITY FULL` on replicated tables. A future migration that drops `AND n.deleted_at IS NULL` from an RPC join or removes a table from the publication will fail integration without touching unit tests.
+- **Out of scope**: RLS policy assertions. The suite connects as superuser via raw `postgres-js` and, where `auth.uid()` matters, sets `request.jwt.claims` / `SET LOCAL ROLE authenticated` to impersonate. RLS itself is not exercised here; an RLS suite is a separate concern.
+- **Serial execution**: the entire suite shares a single Postgres instance. `vitest.integration.config.ts` pins `pool: 'forks'`, `singleFork: true`, and disables `sequence.concurrent` so tests don't trample each other.
+- **CI**: extends `migration-smoke.yml`'s `db-reset` job — same `supabase start`, runs after the type-gen verification step. Path filters include `tests/integration/**` and `vitest.integration.config.ts` so PRs that only edit integration tests still run the suite.
+
+**Migration CI gate**: `.github/workflows/migration-smoke.yml` runs `supabase start && supabase db reset --local` on every PR (and `main` push) that touches `supabase/migrations/**`, `supabase/seed.sql`, `supabase/config.toml`, `tests/integration/**`, or `vitest.integration.config.ts`. The same job also runs the behavior-level integration suite (`npm run test:integration`) after the type-gen verification step — see "Integration suite" above for scope. The CLI is pinned to the version used for local dev and production `supabase db push` so parser-class regressions surface in CI rather than at production push time. **Pin must stay ≥ v2.91.1** — earlier versions carry the [`atomic` parser bug](https://github.com/supabase/cli/pull/5064) that mishandles function names containing the substring "atomic" and trips Postgres SQLSTATE 42601 on subsequent statements (this hit production via PR #40 → hotfix PR #41). Bumping the pin requires a coordinated bump of every contributor's local CLI and the laptop that runs `supabase db push`. If you edit a migration file mid-review, **re-run `supabase db reset --local` locally** before pushing — CI is the safety net, not the primary signal.
 
 ## Local dev setup — Realtime signing key
 

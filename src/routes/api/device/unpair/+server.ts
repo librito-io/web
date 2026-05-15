@@ -1,6 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { authenticateDevice } from "$lib/server/auth";
+import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
 // POST /api/device/unpair
@@ -23,7 +23,7 @@ export const POST: RequestHandler = async ({ request }) => {
     ) {
       return jsonSuccess({ ok: true });
     }
-    return jsonError(401, authResult.error, "Authentication required");
+    return authErrorResponse(authResult.error);
   }
 
   const { device } = authResult;

@@ -12,6 +12,7 @@ import {
 import { getCatalogMutex } from "$lib/server/catalog/mutex";
 import { CRON_SECRET, CATALOG_WARMUP_ENABLED } from "$env/static/private";
 import { env as privateEnv } from "$env/dynamic/private";
+import { logger } from "$lib/server/log";
 
 const MAX_PER_RUN = 100;
 
@@ -55,24 +56,29 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
       }
       resolved += 1;
     } catch (err) {
-      console.warn("catalog_warmup_resolve_failed", {
-        isbn,
-        error: String(err),
-      });
+      logger().warn(
+        {
+          event: "catalog_warmup_resolve_failed",
+          isbn,
+          error: String(err),
+        },
+        "catalog_warmup_resolve_failed",
+      );
     }
   }
 
   const source = bodyIsbns ? "body" : "nyt";
   const durationMs = Date.now() - start;
-  console.log(
-    JSON.stringify({
-      cron: "catalog-warmup",
+  logger().info(
+    {
+      event: "cron.catalog_warmup",
       source,
       candidates: candidates.length,
       resolved,
       rateLimited,
       durationMs,
-    }),
+    },
+    "cron.catalog_warmup",
   );
   return jsonSuccess({
     source,

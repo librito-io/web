@@ -32,6 +32,7 @@ import {
 import { uploadCover as defaultUploadCover } from "$lib/server/cover-storage";
 import { sha256Hex } from "./sha";
 import { type CatalogMutex, noopMutex } from "./mutex";
+import { logger } from "$lib/server/log";
 
 export class InvalidIsbnError extends Error {
   constructor(raw: string) {
@@ -180,7 +181,7 @@ async function persistCover(
  *     Cover fallback runs regardless — publisher takedowns target
  *     marketing copy, not cover images, so a takedown'd ISBN with no OL
  *     cover must not end up permanently coverless.
- *   - All upstream errors are caught and logged via `console.warn` with
+ *   - All upstream errors are caught and logged via `logger().warn` with
  *     a stable code (`catalog_googlebooks_failed`,
  *     `catalog_googlebooks_cover_failed`). Failures degrade to the
  *     pre-helper state of `metadata` + `coverBytes`.
@@ -230,10 +231,14 @@ async function enrichWithGoogleBooks(
               fetchFn: opts.deps.fetchFn,
             });
           } catch (err) {
-            console.warn("catalog_googlebooks_cover_failed", {
-              ...opts.logCtx,
-              error: String(err),
-            });
+            logger().warn(
+              {
+                event: "catalog_googlebooks_cover_failed",
+                ...opts.logCtx,
+                error: String(err),
+              },
+              "catalog_googlebooks_cover_failed",
+            );
             coverBytes = null;
           }
           if (coverBytes) coverSource = "google_books";
@@ -241,10 +246,14 @@ async function enrichWithGoogleBooks(
       }
     }
   } catch (err) {
-    console.warn("catalog_googlebooks_failed", {
-      ...opts.logCtx,
-      error: String(err),
-    });
+    logger().warn(
+      {
+        event: "catalog_googlebooks_failed",
+        ...opts.logCtx,
+        error: String(err),
+      },
+      "catalog_googlebooks_failed",
+    );
   }
   return { coverBytes, coverSource };
 }
@@ -312,10 +321,14 @@ async function resolveOpenLibraryCover(
     try {
       search = await searchOpenLibraryByIsbn(isbn, { fetchFn: deps.fetchFn });
     } catch (err) {
-      console.warn("catalog_openlibrary_search_failed", {
-        isbn,
-        error: String(err),
-      });
+      logger().warn(
+        {
+          event: "catalog_openlibrary_search_failed",
+          isbn,
+          error: String(err),
+        },
+        "catalog_openlibrary_search_failed",
+      );
     }
     if (search?.cover_i) {
       coverId = search.cover_i;
@@ -334,11 +347,15 @@ async function resolveOpenLibraryCover(
         fetchFn: deps.fetchFn,
       });
     } catch (err) {
-      console.warn("catalog_openlibrary_cover_failed", {
-        isbn,
-        coverId,
-        error: String(err),
-      });
+      logger().warn(
+        {
+          event: "catalog_openlibrary_cover_failed",
+          isbn,
+          coverId,
+          error: String(err),
+        },
+        "catalog_openlibrary_cover_failed",
+      );
       coverBytes = null;
     }
     metadata.openlibrary_cover_id = coverId;
@@ -527,11 +544,15 @@ export async function resolveTitleAuthor(
         fetchFn: deps.fetchFn,
       });
     } catch (err) {
-      console.warn("catalog_openlibrary_search_failed", {
-        title,
-        author,
-        error: String(err),
-      });
+      logger().warn(
+        {
+          event: "catalog_openlibrary_search_failed",
+          title,
+          author,
+          error: String(err),
+        },
+        "catalog_openlibrary_search_failed",
+      );
     }
 
     const metadata: CatalogMetadata = {};
@@ -544,12 +565,16 @@ export async function resolveTitleAuthor(
           fetchFn: deps.fetchFn,
         });
       } catch (err) {
-        console.warn("catalog_openlibrary_cover_failed", {
-          title,
-          author,
-          coverId: search.cover_i,
-          error: String(err),
-        });
+        logger().warn(
+          {
+            event: "catalog_openlibrary_cover_failed",
+            title,
+            author,
+            coverId: search.cover_i,
+            error: String(err),
+          },
+          "catalog_openlibrary_cover_failed",
+        );
         coverBytes = null;
       }
       if (search.title) metadata.title = search.title;

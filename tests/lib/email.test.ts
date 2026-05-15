@@ -19,7 +19,6 @@ vi.mock("resend", () => {
 
 // Must import after mock setup
 import { sendWelcomeEmail, _getResendClient } from "$lib/server/email";
-import { Resend } from "resend";
 
 describe("sendWelcomeEmail", () => {
   beforeEach(() => {

@@ -5,7 +5,6 @@ import {
   validateTransferSize,
   buildStoragePath,
   MAX_FILE_SIZE,
-  MAX_FILENAME_LENGTH,
 } from "../../src/lib/server/transfer";
 
 describe("validateTransferFilename", () => {

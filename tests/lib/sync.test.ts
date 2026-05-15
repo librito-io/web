@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { validateSyncPayload, processSync } from "$lib/server/sync";
 import { createMockSupabase } from "../helpers";
 import { __setTestDestination, __resetTestDestination } from "$lib/server/log";

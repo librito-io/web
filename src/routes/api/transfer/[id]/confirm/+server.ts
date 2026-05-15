@@ -7,6 +7,7 @@ import {
 } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { recordConfirmFailure } from "$lib/server/transfer";
+import { logger } from "$lib/server/log";
 
 export const POST: RequestHandler = async ({ request, params }) => {
   const supabase = createAdminClient();
@@ -76,11 +77,20 @@ export const POST: RequestHandler = async ({ request, params }) => {
     });
 
     if (log.kind === "cap_hit_failed") {
-      console.error("transfer.cap_hit_failed", log.payload);
+      logger().error(
+        { event: "transfer.cap_hit_failed", ...log.payload },
+        "transfer.cap_hit_failed",
+      );
     } else if (log.kind === "confirm_failure") {
-      console.warn("transfer.confirm_failure", log.payload);
+      logger().warn(
+        { event: "transfer.confirm_failure", ...log.payload },
+        "transfer.confirm_failure",
+      );
     } else if (log.kind === "no_change") {
-      console.warn("transfer.confirm_failure_no_change", log.payload);
+      logger().warn(
+        { event: "transfer.confirm_failure_no_change", ...log.payload },
+        "transfer.confirm_failure_no_change",
+      );
     }
 
     return jsonError(500, "server_error", "Failed to update transfer status");
@@ -90,11 +100,15 @@ export const POST: RequestHandler = async ({ request, params }) => {
   // matches zero rows — i.e. the row left `pending` between SELECT and
   // UPDATE. Treat as a TOCTOU race; do not log success or delete storage.
   if (!updateRows || updateRows.length === 0) {
-    console.warn("transfer.confirm_race", {
-      transferId: transfer.id,
-      userId: device.userId,
-      deviceId: device.id,
-    });
+    logger().warn(
+      {
+        event: "transfer.confirm_race",
+        transferId: transfer.id,
+        userId: device.userId,
+        deviceId: device.id,
+      },
+      "transfer.confirm_race",
+    );
     return jsonError(
       409,
       "already_confirmed",
@@ -102,12 +116,16 @@ export const POST: RequestHandler = async ({ request, params }) => {
     );
   }
 
-  console.info("transfer.confirm_success", {
-    transferId: transfer.id,
-    userId: device.userId,
-    deviceId: device.id,
-    attemptCountAtSuccess: transfer.attempt_count,
-  });
+  logger().info(
+    {
+      event: "transfer.confirm_success",
+      transferId: transfer.id,
+      userId: device.userId,
+      deviceId: device.id,
+      attemptCountAtSuccess: transfer.attempt_count,
+    },
+    "transfer.confirm_success",
+  );
 
   // Best-effort: delete file from storage
   if (transfer.storage_path) {

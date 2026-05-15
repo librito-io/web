@@ -1,10 +1,18 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
+import { transferListLimiter, enforceRateLimit } from "$lib/server/ratelimit";
 
 export const GET: RequestHandler = async ({ locals: { safeGetSession } }) => {
   const { user } = await safeGetSession();
   if (!user) return jsonError(401, "unauthorized", "Must be logged in");
+
+  const limited = await enforceRateLimit(
+    transferListLimiter,
+    user.id,
+    "Too many requests",
+  );
+  if (limited) return limited;
 
   const supabase = createAdminClient();
 

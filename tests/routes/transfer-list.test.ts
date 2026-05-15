@@ -2,6 +2,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
+vi.mock("$env/static/private", () => ({
+  UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
+  UPSTASH_REDIS_REST_TOKEN: "mock-token",
+}));
+
+vi.mock("$lib/server/ratelimit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
+  return {
+    ...actual,
+    transferListLimiter: {
+      ...actual.transferListLimiter,
+      limit: vi.fn(async () => ({
+        success: true,
+        reset: Date.now() + 60_000,
+        limit: 60,
+        remaining: 59,
+        pending: Promise.resolve(),
+      })),
+    },
+  };
+});
+
 const supabase = createMockSupabase();
 vi.mock("$lib/server/supabase", () => ({
   createAdminClient: () => supabase,
@@ -48,5 +70,25 @@ describe("GET /api/transfer/list — WS-D projection", () => {
       lastError: "Couldn't deliver to your device after 10 attempts.",
       lastAttemptAt: "2026-04-25T01:23:45Z",
     });
+  });
+
+  it("returns 429 with Retry-After header when rate-limited", async () => {
+    const rl = await import("$lib/server/ratelimit");
+    (
+      rl.transferListLimiter.limit as unknown as {
+        mockResolvedValueOnce: (v: unknown) => void;
+      }
+    ).mockResolvedValueOnce({ success: false, reset: Date.now() + 30_000 });
+
+    const evt = {
+      locals: {
+        safeGetSession: async () => ({ user: { id: "u-1" }, session: null }),
+      },
+    } as unknown as Parameters<typeof GET>[0];
+    const res = await GET(evt);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).not.toBeNull();
+    const body = await res.json();
+    expect(body.error).toBe("rate_limited");
   });
 });

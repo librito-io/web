@@ -114,7 +114,7 @@ type AtomicClaimRow = {
 };
 
 function isAtomicClaimRow(value: unknown): value is AtomicClaimRow {
-  if (typeof value !== "object" || value === null) return false;
+  if (value === null || typeof value !== "object") return false;
   const row = value as Record<string, unknown>;
   return (
     typeof row.device_id === "string" &&

@@ -1,6 +1,8 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
+import { transferCancelLimiter, enforceRateLimit } from "$lib/server/ratelimit";
+import { UUID_RE } from "$lib/server/validation";
 
 export const DELETE: RequestHandler = async ({
   params,
@@ -10,6 +12,17 @@ export const DELETE: RequestHandler = async ({
   if (!user) return jsonError(401, "unauthorized", "Must be logged in");
 
   const { id } = params;
+  if (!UUID_RE.test(id)) {
+    return jsonError(404, "not_found", "Transfer not found");
+  }
+
+  const limited = await enforceRateLimit(
+    transferCancelLimiter,
+    user.id,
+    "Too many cancellations",
+  );
+  if (limited) return limited;
+
   const supabase = createAdminClient();
 
   // Fetch the transfer and verify ownership

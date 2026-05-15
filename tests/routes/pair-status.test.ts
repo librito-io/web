@@ -1,0 +1,69 @@
+// tests/routes/pair-status.test.ts
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createMockSupabase } from "../helpers";
+
+vi.mock("$env/static/private", () => ({
+  UPSTASH_REDIS_REST_URL: "https://mock.upstash.example",
+  UPSTASH_REDIS_REST_TOKEN: "mock-token",
+}));
+
+vi.mock("$lib/server/ratelimit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/ratelimit")>();
+  return {
+    ...actual,
+    redis: { get: vi.fn(async () => null) },
+    pairStatusLimiter: {
+      ...actual.pairStatusLimiter,
+      limit: vi.fn(async () => ({
+        success: true,
+        reset: Date.now() + 60_000,
+        limit: 1,
+        remaining: 0,
+        pending: Promise.resolve(),
+      })),
+    },
+  };
+});
+
+const supabase = createMockSupabase();
+vi.mock("$lib/server/supabase", () => ({
+  createAdminClient: () => supabase,
+}));
+
+const { GET } =
+  await import("../../src/routes/api/pair/status/[pairingId]/+server");
+
+const VALID_ID = "11111111-1111-4111-8111-111111111111";
+
+function buildEvent(pairingId: string) {
+  return {
+    params: { pairingId },
+    getClientAddress: () => "1.2.3.4",
+  } as unknown as Parameters<typeof GET>[0];
+}
+
+describe("GET /api/pair/status/[pairingId]", () => {
+  beforeEach(() => {
+    supabase._results.clear();
+  });
+
+  it("returns 404 on malformed UUID with no DB or rate-limit call", async () => {
+    const rl = await import("$lib/server/ratelimit");
+    const res = await GET(buildEvent("not-a-uuid"));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe("not_found");
+    expect(rl.pairStatusLimiter.limit).not.toHaveBeenCalled();
+  });
+
+  it("delegates to checkPairingStatus on valid UUID", async () => {
+    supabase._results.set("pairing_codes.select", {
+      data: null,
+      error: null,
+    });
+    const res = await GET(buildEvent(VALID_ID));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe("not_found");
+  });
+});

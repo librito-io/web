@@ -3,9 +3,7 @@ import { createAdminClient } from "$lib/server/supabase";
 import { pairRequestLimiter, enforceRateLimit } from "$lib/server/ratelimit";
 import { requestPairingCode } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { UUID_RE } from "$lib/server/validation";
 
 export const POST: RequestHandler = async ({ request, getClientAddress }) => {
   // Rate limit by IP

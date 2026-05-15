@@ -7,8 +7,13 @@ import {
 } from "$lib/server/ratelimit";
 import { checkPairingStatus } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
+import { UUID_RE } from "$lib/server/validation";
 
 export const GET: RequestHandler = async ({ params, getClientAddress }) => {
+  if (!UUID_RE.test(params.pairingId)) {
+    return jsonError(404, "not_found", "Pairing session not found");
+  }
+
   // Rate limit by IP
   const ip = getClientAddress();
   const limited = await enforceRateLimit(

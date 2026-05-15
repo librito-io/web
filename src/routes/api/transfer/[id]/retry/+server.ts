@@ -3,6 +3,7 @@ import { createAdminClient } from "$lib/server/supabase";
 import { transferRetryLimiter, enforceRateLimit } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { logger } from "$lib/server/log";
+import { UUID_RE } from "$lib/server/validation";
 
 export const POST: RequestHandler = async ({
   params,
@@ -10,6 +11,10 @@ export const POST: RequestHandler = async ({
 }) => {
   const { user } = await safeGetSession();
   if (!user) return jsonError(401, "unauthorized", "Must be logged in");
+
+  if (!UUID_RE.test(params.id)) {
+    return jsonError(404, "not_found", "Transfer not found");
+  }
 
   const limited = await enforceRateLimit(
     transferRetryLimiter,

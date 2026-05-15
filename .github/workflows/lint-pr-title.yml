@@ -2,11 +2,17 @@ name: Lint PR title
 
 on:
   pull_request_target:
-    types: [opened, edited, synchronize]
+    # Add `synchronize` here only if this check is later made required-for-merge,
+    # so commit pushes re-run the workflow and refresh the SHA-bound check status.
+    types: [opened, reopened, edited]
 
+# Workflow-level scope is `pull-requests: write` because the sticky-comment
+# step needs write. The amannn action itself only needs `pull-requests: read`
+# (one `pulls.get` call); write is a superset. We do NOT enable `wip:` — the
+# WIP feature posts to `POST /statuses/:sha` which requires the separate
+# `statuses: write` scope. Drafts cover the WIP case natively.
 permissions:
   pull-requests: write
-  contents: read
 
 jobs:
   lint:
@@ -14,7 +20,7 @@ jobs:
     steps:
       - name: Validate PR title against Conventional Commits
         id: lint
-        uses: amannn/action-semantic-pull-request@v5
+        uses: amannn/action-semantic-pull-request@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -32,7 +38,6 @@ jobs:
           subjectPatternError: |
             The subject doesn't match the configured pattern.
             Subject must start with a lowercase character and must not end with a period.
-          wip: true
 
       - name: Post failure comment
         if: always() && (steps.lint.outputs.error_message != null)

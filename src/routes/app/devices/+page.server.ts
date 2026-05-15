@@ -1,10 +1,10 @@
-import { fail } from "@sveltejs/kit";
+import { fail, redirect } from "@sveltejs/kit";
 import type { PageServerLoad, Actions } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 
 export const load: PageServerLoad = async ({ locals: { safeGetSession } }) => {
   const { user } = await safeGetSession();
-  if (!user) return { devices: [] };
+  if (!user) redirect(303, "/auth/login");
 
   const supabase = createAdminClient();
   const { data: devices } = await supabase

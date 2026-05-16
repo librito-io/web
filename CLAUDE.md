@@ -177,7 +177,7 @@ Production deploys are automated via `.github/workflows/production-deploy.yml`. 
 1. **changes** job: detect if `supabase/migrations/**` changed.
 2. **migrate** job (conditional): if migrations changed, requires manual approval via the `production` GitHub environment, then runs `supabase db push --linked`. Migration failure blocks deploy.
 3. **deploy** job: runs after migrate succeeds or is skipped (no migration changes). Deploys via `vercel deploy --prod`.
-4. **smoke** job (post-deploy): probes every `crons[].path` in `vercel.ts` against `https://librito.io`, asserting `200` with a valid `Bearer ${CRON_SECRET}` and `401` without auth. Catches the regression class from issue #187 / PR #188 (cron route accidentally POST-only, returning 405 to every Vercel cron fire) at deploy time. Failure fails the workflow run but does not roll back — the deploy is already live; smoke is a loud signal to fix-forward, not a gate.
+4. **smoke** job (post-deploy): probes every `crons[].path` in `vercel.ts` against the production deployment URL emitted by the `deploy` job (`vercel deploy --prod` stdout), asserting `200` with a valid `Bearer ${CRON_SECRET}` and `401` without auth. Catches the regression class from issue #187 / PR #188 (cron route accidentally POST-only, returning 405 to every Vercel cron fire) at deploy time. Failure fails the workflow run but does not roll back — the deploy is already live; smoke is a loud signal to fix-forward, not a gate. Probing the captured deploy URL (vs. a hardcoded canonical domain) means the job keeps working through future custom-domain swaps without an edit.
 
 Vercel git auto-deploy on `main` is disabled in `vercel.ts` — the workflow is the single deploy source of truth. Preview deploys for PRs remain enabled.
 

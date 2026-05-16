@@ -42,10 +42,17 @@ export const POST: RequestHandler = async ({ request }) => {
     storage_path: string;
   }>) {
     await supabase.storage.from(BUCKET).remove([row.storage_path]);
+    // Re-apply the status filter on UPDATE to close a TOCTOU window between
+    // the SELECT above and this write — if the row transitioned out of a
+    // retired status (e.g. /retry flipped 'failed' → 'pending', though Pass
+    // A only selects 'expired'/'downloaded', a future migration could
+    // widen the candidate set), nulling storage_path would orphan the file
+    // on a live row.
     await supabase
       .from("book_transfers")
       .update({ storage_path: null })
-      .eq("id", row.id);
+      .eq("id", row.id)
+      .in("status", ["expired", "downloaded"]);
     passA += 1;
   }
   const passADurationMs = Date.now() - start;

@@ -29,9 +29,21 @@ export function createMockSupabase() {
   const upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }> =
     [];
 
+  // Records chain-method invocations on update/delete chains so tests can
+  // assert that a guarded write applied the expected filter (e.g. that a
+  // Pass A UPDATE included .in("status", [...]) to close a TOCTOU window).
+  // Filled lazily by makeChain when operation is "update" or "delete".
+  const chainCalls: Array<{
+    table: string;
+    operation: string;
+    method: string;
+    args: unknown[];
+  }> = [];
+
   function makeChain(table: string, operation: string, keySuffix = "") {
     const key = `${table}.${operation}${keySuffix}`;
     const chain: Record<string, unknown> = {};
+    const recordCalls = operation === "update" || operation === "delete";
 
     const terminal = () => {
       const raw = consume(key);
@@ -54,7 +66,12 @@ export function createMockSupabase() {
             Promise.resolve(onFulfilled(result));
         }
         if (prop === "single" || prop === "maybeSingle") return terminal;
-        return (..._args: unknown[]) => new Proxy(chain, handler);
+        return (...args: unknown[]) => {
+          if (recordCalls) {
+            chainCalls.push({ table, operation, method: prop, args });
+          }
+          return new Proxy(chain, handler);
+        };
       },
     };
 
@@ -190,6 +207,7 @@ export function createMockSupabase() {
     _upsertCalls: upsertCalls,
     _rpcCalls: rpcCalls,
     _updateCalls: updateCalls,
+    _chainCalls: chainCalls,
   };
 
   return client as unknown as SupabaseClient & {
@@ -200,6 +218,12 @@ export function createMockSupabase() {
     _upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }>;
     _rpcCalls: Array<{ name: string; args: unknown }>;
     _updateCalls: Array<{ table: string }>;
+    _chainCalls: Array<{
+      table: string;
+      operation: string;
+      method: string;
+      args: unknown[];
+    }>;
   };
 }
 

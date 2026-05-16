@@ -1,14 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { createMockSupabase } from "../../helpers";
 
-vi.mock("$env/static/private", () => ({
-  COVER_STORAGE_BACKEND: "supabase",
-}));
 vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_URL: "https://supabase.example.co",
 }));
 vi.mock("$env/dynamic/private", () => ({
-  env: {},
+  env: { COVER_STORAGE_BACKEND: "supabase" },
 }));
 vi.mock("$env/dynamic/public", () => ({
   env: {},

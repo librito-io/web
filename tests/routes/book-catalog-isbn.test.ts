@@ -3,7 +3,6 @@ import { createMockSupabase } from "../helpers";
 import { FAIL_CLOSED_RETRY_AFTER_SEC } from "$lib/server/ratelimit.constants";
 
 vi.mock("$env/static/private", () => ({
-  COVER_STORAGE_BACKEND: "supabase",
   UPSTASH_REDIS_REST_URL: "https://mock-upstash.example.com",
   UPSTASH_REDIS_REST_TOKEN: "mock-token",
 }));
@@ -11,7 +10,11 @@ vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_URL: "https://supabase.example.co",
 }));
 vi.mock("$env/dynamic/private", () => ({
-  env: { CLOUDFLARE_ACCOUNT_ID: "acct", CLOUDFLARE_IMAGES_API_TOKEN: "tok" },
+  env: {
+    COVER_STORAGE_BACKEND: "supabase",
+    CLOUDFLARE_ACCOUNT_ID: "acct",
+    CLOUDFLARE_IMAGES_API_TOKEN: "tok",
+  },
 }));
 vi.mock("$env/dynamic/public", () => ({
   env: { PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc" },

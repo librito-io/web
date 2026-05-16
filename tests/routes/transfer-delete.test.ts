@@ -116,6 +116,17 @@ describe("DELETE /api/transfer/[id]", () => {
     },
   );
 
+  // Scrubbed rows (filename/sha256 nulled, scrubbed_at set) keep their
+  // pre-scrub status. The SELECT's .is("scrubbed_at", null) filter excludes
+  // them, so the handler returns 404, matching /retry and /download-url.
+  it("returns 404 when row is scrubbed (filtered by .is(scrubbed_at, null))", async () => {
+    supabase._results.set("book_transfers.select", { data: null, error: null });
+    const res = await DELETE(buildEvent(VALID_ID));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toBe("not_found");
+  });
+
   it("on success: removes storage and deletes row", async () => {
     supabase._results.set("book_transfers.select", {
       data: {

@@ -242,7 +242,7 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     expect(cap).toBeUndefined();
   });
 
-  it("on update error AND RPC error: returns 500, emits no transfer.confirm_failure / cap_hit_failed log", async () => {
+  it("on update error AND RPC error: returns 500, emits transfer.confirm_increment_rpc_failed at error level", async () => {
     supabase._results.set("book_transfers.select", {
       data: {
         id: "11111111-1111-4111-8111-111111111111",
@@ -266,9 +266,25 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     expect(res.status).toBe(500);
 
     const warn = logWrites.find((w) => w.event === "transfer.confirm_failure");
-    const error = logWrites.find((w) => w.event === "transfer.cap_hit_failed");
+    const cap = logWrites.find((w) => w.event === "transfer.cap_hit_failed");
+    const noChange = logWrites.find(
+      (w) => w.event === "transfer.confirm_failure_no_change",
+    );
     expect(warn).toBeUndefined();
-    expect(error).toBeUndefined();
+    expect(cap).toBeUndefined();
+    expect(noChange).toBeUndefined();
+
+    const rpcFailed = logWrites.find(
+      (w) => w.event === "transfer.confirm_increment_rpc_failed",
+    );
+    expect(rpcFailed).toBeDefined();
+    expect(rpcFailed).toMatchObject({
+      level: "error",
+      transferId: "11111111-1111-4111-8111-111111111111",
+      userId: "u-1",
+      deviceId: "d-1",
+      updateError: { message: "first boom", code: "X" },
+    });
   });
 
   it("returns 401 via authErrorResponse when authenticateDevice errors", async () => {

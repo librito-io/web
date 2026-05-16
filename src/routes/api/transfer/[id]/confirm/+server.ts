@@ -96,6 +96,26 @@ export const POST: RequestHandler = async ({ request, params }) => {
         { event: "transfer.confirm_failure_no_change", ...log.payload },
         "transfer.confirm_failure_no_change",
       );
+    } else if (log.kind === "rpc_error") {
+      // recordConfirmFailure's own RPC call to increment_transfer_attempt
+      // failed — operators get no other signal that the attempt counter is
+      // drifting, so escalate to error.
+      logger().error(
+        {
+          event: "transfer.confirm_increment_rpc_failed",
+          transferId: transfer.id,
+          userId: device.userId,
+          deviceId: device.id,
+          updateError: { message: updateError.message, code: updateError.code },
+        },
+        "transfer.confirm_increment_rpc_failed",
+      );
+    } else {
+      // Compile-time exhaustiveness check — adding a new ConfirmFailureLog
+      // kind without handling it here fails typecheck instead of falling
+      // through silently.
+      const _exhaustive: never = log;
+      void _exhaustive;
     }
 
     return jsonError(500, "server_error", "Failed to update transfer status");

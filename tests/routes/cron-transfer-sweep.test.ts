@@ -52,14 +52,10 @@ describe("POST /api/cron/transfer-sweep", () => {
   });
 
   it("Pass A removes storage objects for retired rows (expired + downloaded) and nulls storage_path", async () => {
-    // Mock returns a mix of expired and downloaded rows — the handler's
-    // .in("status", ["expired", "downloaded"]) filter is exercised against
-    // the DB in production; the mock is status-agnostic and returns what
-    // it's told, so the assertion covers behavior for both statuses.
     supabase._results.set("book_transfers.select", {
       data: [
-        { id: "t1", storage_path: "u/t1/a.epub" }, // represents 'expired'
-        { id: "t2", storage_path: "u/t2/b.epub" }, // represents 'downloaded' where confirm's remove failed
+        { id: "t1", storage_path: "u/t1/a.epub" },
+        { id: "t2", storage_path: "u/t2/b.epub" },
       ],
       error: null,
     });
@@ -78,5 +74,37 @@ describe("POST /api/cron/transfer-sweep", () => {
     expect(res.status).toBe(200);
     expect(body.sweep.passA).toBe(2);
     expect(removeSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // Pass A's UPDATE must re-apply the status filter to close the SELECT→UPDATE
+  // TOCTOU window. Without it, a row that left a retired status between
+  // SELECT and UPDATE would have storage_path nulled on a live row.
+  it("Pass A UPDATE filters status IN (expired, downloaded) to close TOCTOU window", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: [{ id: "t1", storage_path: "u/t1/a.epub" }],
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", { data: null, error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    supabase.storage.from = () =>
+      ({
+        remove: vi.fn(async () => ({ data: null, error: null })),
+      }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
+
+    await POST(buildEvent({ Authorization: "Bearer test-secret" }));
+
+    const updateChainCalls = supabase._chainCalls.filter(
+      (c) => c.table === "book_transfers" && c.operation === "update",
+    );
+    const statusFilter = updateChainCalls.find(
+      (c) =>
+        c.method === "in" &&
+        c.args[0] === "status" &&
+        Array.isArray(c.args[1]) &&
+        (c.args[1] as string[]).includes("expired") &&
+        (c.args[1] as string[]).includes("downloaded"),
+    );
+    expect(statusFilter).toBeDefined();
   });
 });

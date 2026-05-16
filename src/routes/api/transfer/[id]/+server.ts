@@ -25,11 +25,14 @@ export const DELETE: RequestHandler = async ({
 
   const supabase = createAdminClient();
 
-  // Fetch the transfer and verify ownership
+  // Fetch the transfer and verify ownership. Filter scrubbed rows so the
+  // response shape matches sibling endpoints (retry, download-url) — a
+  // scrubbed row returns 404, not 409.
   const { data: transfer, error: fetchError } = await supabase
     .from("book_transfers")
     .select("id, user_id, storage_path, status")
     .eq("id", id)
+    .is("scrubbed_at", null)
     .maybeSingle();
 
   if (fetchError) {
@@ -58,11 +61,15 @@ export const DELETE: RequestHandler = async ({
       .remove([transfer.storage_path]);
   }
 
-  // Delete the database row
+  // Self-authorizing DELETE: include user_id arm so the write defends itself
+  // under RLS-bypassing service_role, matching the guarded-UPDATE pattern in
+  // /confirm and /retry. Authorization no longer rests solely on the prior
+  // SELECT-then-DELETE pair.
   const { error: deleteError } = await supabase
     .from("book_transfers")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   if (deleteError) {
     return jsonError(500, "server_error", "Failed to delete transfer");

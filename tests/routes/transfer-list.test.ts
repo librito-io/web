@@ -33,6 +33,7 @@ const { GET } = await import("../../src/routes/api/transfer/list/+server");
 
 beforeEach(() => {
   supabase._results.clear();
+  supabase._chainCalls.length = 0;
 });
 
 describe("GET /api/transfer/list — WS-D projection", () => {
@@ -70,6 +71,30 @@ describe("GET /api/transfer/list — WS-D projection", () => {
       lastError: "Couldn't deliver to your device after 10 attempts.",
       lastAttemptAt: "2026-04-25T01:23:45Z",
     });
+  });
+
+  it("applies .is('scrubbed_at', null) and .limit(100) to bound payload", async () => {
+    supabase._results.set("book_transfers.select", { data: [], error: null });
+
+    const evt = {
+      locals: {
+        safeGetSession: async () => ({ user: { id: "u-1" }, session: null }),
+      },
+    } as unknown as Parameters<typeof GET>[0];
+    await GET(evt);
+
+    const selectChainCalls = supabase._chainCalls.filter(
+      (c) => c.table === "book_transfers" && c.operation === "select",
+    );
+    const scrubbedFilter = selectChainCalls.find(
+      (c) =>
+        c.method === "is" && c.args[0] === "scrubbed_at" && c.args[1] === null,
+    );
+    const limitCall = selectChainCalls.find(
+      (c) => c.method === "limit" && c.args[0] === 100,
+    );
+    expect(scrubbedFilter).toBeDefined();
+    expect(limitCall).toBeDefined();
   });
 
   it("returns 429 with Retry-After header when rate-limited", async () => {

@@ -2,8 +2,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
-vi.mock("$env/static/private", () => ({
-  CRON_SECRET: "test-secret",
+vi.mock("$env/dynamic/private", () => ({
+  env: { CRON_SECRET: "test-secret" },
 }));
 
 const supabase = createMockSupabase();

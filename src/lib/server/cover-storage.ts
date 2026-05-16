@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "$lib/server/supabase";
 import { PUBLIC_SUPABASE_URL } from "$env/static/public";
-import { COVER_STORAGE_BACKEND } from "$env/static/private";
+// COVER_STORAGE_BACKEND is Sensitive in Vercel — static import bakes empty
+// into prebuilt deploys (vercel pull redacts sensitive vars), causing
+// silent fallback to the `supabase` default in production. Read at runtime.
 import { env as privateEnv } from "$env/dynamic/private";
 import { env as publicEnv } from "$env/dynamic/public";
 import type { CoverStorageBackend, CoverVariant } from "./catalog/types";
@@ -25,7 +27,7 @@ export interface UploadResult {
 }
 
 function activeBackend(): CoverStorageBackend {
-  return (COVER_STORAGE_BACKEND as CoverStorageBackend) === "cloudflare-images"
+  return privateEnv.COVER_STORAGE_BACKEND === "cloudflare-images"
     ? "cloudflare-images"
     : "supabase";
 }

@@ -10,7 +10,9 @@ import {
   catalogGoogleBooksLimiter,
 } from "$lib/server/ratelimit";
 import { getCatalogMutex } from "$lib/server/catalog/mutex";
-import { CRON_SECRET, CATALOG_WARMUP_ENABLED } from "$env/static/private";
+// CRON_SECRET and CATALOG_WARMUP_ENABLED are Sensitive in Vercel; static
+// imports bake empty values into prebuilt deploys (vercel pull redacts
+// sensitive vars). Read at runtime via dynamic/private instead.
 import { env as privateEnv } from "$env/dynamic/private";
 import { logger } from "$lib/server/log";
 
@@ -83,16 +85,21 @@ async function runWarmup(
 }
 
 function authorized(request: Request): boolean {
+  const secret = privateEnv.CRON_SECRET;
+  if (!secret) return false;
   const auth = request.headers.get("authorization") ?? "";
-  return constantTimeEqualString(auth, `Bearer ${CRON_SECRET}`);
+  return constantTimeEqualString(auth, `Bearer ${secret}`);
 }
 
 // Vercel cron invokes scheduled paths via GET (no body). See issue #187.
 export const GET: RequestHandler = async ({ request, fetch }) => {
+  if (!privateEnv.CRON_SECRET) {
+    return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
+  }
   if (!authorized(request)) {
     return jsonError(401, "unauthorized", "Cron secret mismatch");
   }
-  if (CATALOG_WARMUP_ENABLED !== "true") {
+  if (privateEnv.CATALOG_WARMUP_ENABLED !== "true") {
     return jsonSuccess({ skipped: true });
   }
   return runWarmup(null, fetch);
@@ -101,10 +108,13 @@ export const GET: RequestHandler = async ({ request, fetch }) => {
 // POST path retained for operator-triggered bulk seeds with explicit ISBN
 // list in the JSON body (scripts/data/README.md).
 export const POST: RequestHandler = async ({ request, fetch }) => {
+  if (!privateEnv.CRON_SECRET) {
+    return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
+  }
   if (!authorized(request)) {
     return jsonError(401, "unauthorized", "Cron secret mismatch");
   }
-  if (CATALOG_WARMUP_ENABLED !== "true") {
+  if (privateEnv.CATALOG_WARMUP_ENABLED !== "true") {
     return jsonSuccess({ skipped: true });
   }
   const bodyIsbns = await parseIsbnsFromBody(request);

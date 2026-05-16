@@ -57,6 +57,8 @@ jobs:
       needs.changes.result == 'success'
     runs-on: ubuntu-latest
     environment: production
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -77,12 +79,22 @@ jobs:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
         run: npx vercel build --prod --token="$VERCEL_TOKEN"
-      - name: Deploy prebuilt to Vercel
+      - id: deploy
+        name: Deploy prebuilt to Vercel
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-        run: npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        run: |
+          set -euo pipefail
+          # `vercel deploy` prints the deployment URL on its final stdout line.
+          url=$(npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" | tee /dev/stderr | tail -1)
+          if [[ ! "$url" =~ ^https://[a-z0-9.-]+\.vercel\.app$ ]]; then
+            echo "::error::Could not parse deployment URL from vercel deploy output (got: $url)"
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed to: $url"
 
   smoke:
     # Post-deploy smoke probe for cron paths. Vercel cron invokes scheduled
@@ -113,19 +125,27 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           PATHS_JSON: ${{ steps.paths.outputs.json }}
+          BASE: ${{ needs.deploy.outputs.url }}
         run: |
           set -euo pipefail
           if [ -z "${CRON_SECRET:-}" ]; then
             echo "::error::CRON_SECRET secret is not set in the production environment"
             exit 1
           fi
-          BASE="https://librito.io"
+          if [ -z "${BASE:-}" ]; then
+            echo "::error::deploy job did not emit a URL output"
+            exit 1
+          fi
+          echo "Probing $BASE"
           fail=0
+          # `curl --write-out %{http_code}` always emits 3 digits (000 on
+          # connect failure), so let it report its own status without an
+          # `|| echo` fallback that would double the output.
           while read -r p; do
             url="$BASE$p"
             # With valid auth → 200
             status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 \
-              -H "Authorization: Bearer $CRON_SECRET" "$url" || echo "000")
+              -H "Authorization: Bearer $CRON_SECRET" "$url" || true)
             if [ "$status" != "200" ]; then
               echo "::error::$p returned $status with valid CRON_SECRET (expected 200)"
               fail=1
@@ -133,7 +153,7 @@ jobs:
               echo "✓ $p → 200 (with auth)"
             fi
             # Without auth → 401 (catches accidental auth bypass)
-            status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 "$url" || echo "000")
+            status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 "$url" || true)
             if [ "$status" != "401" ]; then
               echo "::error::$p returned $status with no auth (expected 401)"
               fail=1

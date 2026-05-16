@@ -29,10 +29,13 @@ export function createMockSupabase() {
   const upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }> =
     [];
 
-  // Records chain-method invocations on update/delete chains so tests can
-  // assert that a guarded write applied the expected filter (e.g. that a
-  // Pass A UPDATE included .in("status", [...]) to close a TOCTOU window).
-  // Filled lazily by makeChain when operation is "update" or "delete".
+  // Records chain-method invocations on select/update/delete chains so
+  // tests can assert that a guarded write applied the expected filter
+  // (e.g. that a Pass A UPDATE included .in("status", [...]) to close a
+  // TOCTOU window) or that a read applied a payload-bounding cap
+  // (.is("scrubbed_at", null), .limit(N)). The notes-specific select
+  // chain (makeNotesSelectChain) does not feed this — tests that need
+  // notes introspection should be added there explicitly.
   const chainCalls: Array<{
     table: string;
     operation: string;
@@ -43,7 +46,10 @@ export function createMockSupabase() {
   function makeChain(table: string, operation: string, keySuffix = "") {
     const key = `${table}.${operation}${keySuffix}`;
     const chain: Record<string, unknown> = {};
-    const recordCalls = operation === "update" || operation === "delete";
+    const recordCalls =
+      operation === "update" ||
+      operation === "delete" ||
+      operation === "select";
 
     const terminal = () => {
       const raw = consume(key);

@@ -7,6 +7,8 @@ export const load: PageServerLoad = async ({
   const { session } = await safeGetSession();
   if (!session) redirect(303, "/auth/login");
 
+  // .limit(100) bounds initial SSR payload — mirrors /api/transfer/list's
+  // cap so the post-action refresh path agrees with the page-load path.
   const { data: transfers } = await supabase
     .from("book_transfers")
     .select(
@@ -14,7 +16,8 @@ export const load: PageServerLoad = async ({
     )
     .eq("user_id", session.user.id)
     .is("scrubbed_at", null)
-    .order("uploaded_at", { ascending: false });
+    .order("uploaded_at", { ascending: false })
+    .limit(100);
 
   return {
     transfers: (transfers ?? []).map((t) => ({

@@ -222,13 +222,13 @@ describe("GET /api/cron/catalog-warmup (Vercel cron path)", () => {
   function buildGetEvent(
     headers: Record<string, string> = {},
     fetchFn: typeof fetch = makeFetchSpy() as unknown as typeof fetch,
+    query: string = "",
   ) {
+    const fullUrl = `http://x/api/cron/catalog-warmup${query}`;
     return {
-      request: new Request("http://x/api/cron/catalog-warmup", {
-        method: "GET",
-        headers,
-      }),
+      request: new Request(fullUrl, { method: "GET", headers }),
       fetch: fetchFn,
+      url: new URL(fullUrl),
     } as unknown as Parameters<typeof GET>[0];
   }
 
@@ -243,5 +243,28 @@ describe("GET /api/cron/catalog-warmup (Vercel cron path)", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.source).toBe("nyt");
+  });
+
+  it("?probe=1 short-circuits after auth without running warmup", async () => {
+    const fetchSpy = makeFetchSpy();
+    const res = await GET(
+      buildGetEvent(
+        { Authorization: "Bearer secret" },
+        fetchSpy as unknown as typeof fetch,
+        "?probe=1",
+      ),
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.probe).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(resolveIsbnSpy).not.toHaveBeenCalled();
+  });
+
+  it("?probe=1 without auth still returns 401", async () => {
+    const res = await GET(
+      buildGetEvent({}, makeFetchSpy() as unknown as typeof fetch, "?probe=1"),
+    );
+    expect(res.status).toBe(401);
   });
 });

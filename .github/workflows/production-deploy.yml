@@ -142,18 +142,25 @@ jobs:
           # connect failure), so let it report its own status without an
           # `|| echo` fallback that would double the output.
           while read -r p; do
-            url="$BASE$p"
-            # With valid auth → 200
+            # `?probe=1` short-circuits the handler after auth — no side
+            # effects (no Storage writes, no NYT/OpenLibrary/GoogleBooks
+            # calls, no actual sweep). Gated server-side behind valid auth,
+            # so the no-auth probe below is unaffected.
+            with_auth_url="$BASE$p?probe=1"
+            no_auth_url="$BASE$p"
+            # With valid auth → 200 (probe short-circuit)
             status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 \
-              -H "Authorization: Bearer $CRON_SECRET" "$url" || true)
+              -H "Authorization: Bearer $CRON_SECRET" "$with_auth_url" || true)
             if [ "$status" != "200" ]; then
-              echo "::error::$p returned $status with valid CRON_SECRET (expected 200)"
+              echo "::error::$p?probe=1 returned $status with valid CRON_SECRET (expected 200)"
               fail=1
             else
-              echo "✓ $p → 200 (with auth)"
+              echo "✓ $p?probe=1 → 200 (with auth)"
             fi
-            # Without auth → 401 (catches accidental auth bypass)
-            status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 "$url" || true)
+            # Without auth → 401 (catches accidental auth bypass).
+            # Note: hits the canonical path (no ?probe), since probe is
+            # gated behind auth — the 401 happens before the query check.
+            status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 "$no_auth_url" || true)
             if [ "$status" != "401" ]; then
               echo "::error::$p returned $status with no auth (expected 401)"
               fail=1

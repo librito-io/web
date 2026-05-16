@@ -14,7 +14,7 @@ const PASS_A_BATCH = 500;
 
 // Vercel cron invokes scheduled paths via GET. A POST-only handler returns
 // 405 every fire and never executes Pass A/B. See issue #187.
-export const GET: RequestHandler = async ({ request }) => {
+export const GET: RequestHandler = async ({ request, url }) => {
   const cronSecret = privateEnv.CRON_SECRET;
   if (!cronSecret) {
     return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
@@ -23,6 +23,14 @@ export const GET: RequestHandler = async ({ request }) => {
   const expected = `Bearer ${cronSecret}`;
   if (!constantTimeEqualString(auth, expected)) {
     return jsonError(401, "unauthorized", "Cron secret mismatch");
+  }
+
+  // ?probe=1 lets the deploy-time smoke check exercise auth + reachability
+  // without doing the actual sweep (Storage deletes, DB writes). Gated
+  // behind successful auth so an unauthenticated caller can never trigger
+  // the short-circuit.
+  if (url.searchParams.get("probe") === "1") {
+    return jsonSuccess({ probe: true });
   }
 
   const start = Date.now();

@@ -177,7 +177,7 @@ Production deploys are automated via `.github/workflows/production-deploy.yml`. 
 1. **changes** job: detect if `supabase/migrations/**` changed.
 2. **migrate** job (conditional): if migrations changed, requires manual approval via the `production` GitHub environment, then runs `supabase db push --linked`. Migration failure blocks deploy.
 3. **deploy** job: runs after migrate succeeds or is skipped (no migration changes). Deploys via `vercel deploy --prod`.
-4. **smoke** job (post-deploy): probes every `crons[].path` in `vercel.ts` against the production deployment URL emitted by the `deploy` job (`vercel deploy --prod` stdout), asserting `200` with a valid `Bearer ${CRON_SECRET}` and `401` without auth. Catches the regression class from issue #187 / PR #188 (cron route accidentally POST-only, returning 405 to every Vercel cron fire) at deploy time. Failure fails the workflow run but does not roll back — the deploy is already live; smoke is a loud signal to fix-forward, not a gate. Probing the captured deploy URL (vs. a hardcoded canonical domain) means the job keeps working through future custom-domain swaps without an edit.
+4. **smoke** job (post-deploy): probes every `crons[].path` in `vercel.ts` against the production deployment URL emitted by the `deploy` job (`vercel deploy --prod` stdout), asserting `200` with a valid `Bearer ${CRON_SECRET}` on `?probe=1` (handler short-circuits after auth) and `401` without auth on the canonical path. Catches the regression class from issue #187 / PR #188 (cron route accidentally POST-only, returning 405 to every Vercel cron fire) at deploy time. Failure fails the workflow run but does not roll back — the deploy is already live; smoke is a loud signal to fix-forward, not a gate. Probing the captured deploy URL (vs. a hardcoded canonical domain) means the job keeps working through future custom-domain swaps without an edit. See "Cron handlers" below for the `?probe=1` contract.
 
 Vercel git auto-deploy on `main` is disabled in `vercel.ts` — the workflow is the single deploy source of truth. Preview deploys for PRs remain enabled.
 
@@ -592,6 +592,28 @@ Self-hosters: leave `COVER_STORAGE_BACKEND` unset (defaults to `supabase`).
 The cron is opt-in (`CATALOG_WARMUP_ENABLED=false`); without it, the
 catalog populates entirely lazily as users open books.
 
+## Cron handlers
+
+Cron paths are declared in `vercel.ts` (`crons[]`) and live under `src/routes/api/cron/*/+server.ts`. Two invariants every cron handler must hold:
+
+1. **Export `GET` (Vercel cron invokes via GET).** A POST-only handler returns 405 to every fire and is invisible until something downstream notices the work isn't happening. Cost us 18 days of broken scrub — issue #187 / PR #188. The deploy-time `smoke` job catches this regression class going forward.
+
+2. **`?probe=1` short-circuit, gated after auth.** Smoke probes hit `?probe=1` with valid `Bearer ${CRON_SECRET}`; handler must return `200 {probe: true}` immediately, _after_ the auth check, _before_ any work (DB writes, Storage uploads, external API calls, rate-limit budget). Without this, every deploy would trigger a real cron run as a side effect — burning NYT/OpenLibrary/GoogleBooks budget and uploading covers for no reason. Pattern (lines 102-108 of `catalog-warmup/+server.ts`, 22-28 of `transfer-sweep/+server.ts`):
+
+   ```ts
+   if (!privateEnv.CRON_SECRET)
+     return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
+   if (!authorized(request))
+     return jsonError(401, "unauthorized", "Cron secret mismatch");
+   if (url.searchParams.get("probe") === "1")
+     return jsonSuccess({ probe: true });
+   // ... real work
+   ```
+
+3. **Read `CRON_SECRET` via `$env/dynamic/private`, never `$env/static/private`.** CRON_SECRET is marked Sensitive in Vercel; static-imported sensitive vars bake empty strings into prebuilt deploys and every cron fire 401s. See "Environment Variables" below.
+
+If you add a new cron path: update `vercel.ts`, follow these three rules, and the smoke job picks it up automatically without a workflow edit.
+
 ## Environment Variables
 
 See `.env.example`. Required:
@@ -603,6 +625,12 @@ See `.env.example`. Required:
 - `UPSTASH_REDIS_REST_TOKEN` — Upstash Redis token
 - `LIBRITO_JWT_PRIVATE_KEY_JWK` — Full JWK JSON (single line, includes `d`) of the Supabase standby signing key. Server-side only. Signs `/api/realtime-token` ES256 tokens; Realtime verifies via Supabase's project JWKS where the public side is published. Rotation runbook: `docs/ws-rt-follow-ups.md` item 8.
 - `PUBLIC_SITE_URL` — _Optional._ Canonical site URL for outbound email links (defaults to `https://librito.io` when unset). Self-hosters should set this to their deployed origin.
+
+### Vercel "Sensitive" env vars require `$env/dynamic/private`
+
+Vercel env vars have a per-var `type`: `encrypted` (default, decryptable via CLI) or `sensitive` (locked, never decryptable post-creation — even by Vercel CLI). `vercel pull` redacts sensitive vars to empty strings. Our production-deploy.yml uses `vercel pull` → `vercel build --prebuilt` → `vercel deploy --prebuilt`, so any sensitive var read via `$env/static/private` gets baked into the deployed bundle as `""` and the route silently misbehaves at runtime (401 forever on auth-checked routes, silent fallback to defaults on config gates).
+
+**Rule:** sensitive Vercel envs must be read via `$env/dynamic/private` (runtime read), never `$env/static/private` (build-time inlined). Verify type via `npx vercel env ls -F json production | jq '.envs[] | select(.key=="X") | .type'`. Currently sensitive in this project (must use dynamic): `CRON_SECRET`, `CATALOG_WARMUP_ENABLED`, `COVER_STORAGE_BACKEND`, `NYT_BOOKS_API_KEY`, `LIBRITO_JWT_PRIVATE_KEY_JWK`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_IMAGES_API_TOKEN`, `PUBLIC_CLOUDFLARE_IMAGES_HASH`. The smoke job catches CRON_SECRET regressions; other sensitive vars rely on this rule + code review. Add explicit `server_misconfigured` (500) guards at handler entry for the value you read, so a config drift surfaces loudly rather than silently. See `src/routes/api/cron/*/+server.ts` and `src/lib/server/cover-storage.ts` for the established pattern. Background: the bug surfaced via #195 / #196 after PR #195 added the smoke probe; rule applies to both production and any future preview-build flows that use `--prebuilt`.
 
 ## Code Style
 

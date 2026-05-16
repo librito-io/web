@@ -8,7 +8,9 @@ import { logger } from "$lib/server/log";
 const BUCKET = "book-transfers";
 const PASS_A_BATCH = 500;
 
-export const POST: RequestHandler = async ({ request }) => {
+// Vercel cron invokes scheduled paths via GET. A POST-only handler returns
+// 405 every fire and never executes Pass A/B. See issue #187.
+export const GET: RequestHandler = async ({ request }) => {
   const auth = request.headers.get("authorization") ?? "";
   const expected = `Bearer ${CRON_SECRET}`;
   if (!constantTimeEqualString(auth, expected)) {

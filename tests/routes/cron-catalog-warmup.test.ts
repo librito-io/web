@@ -44,7 +44,7 @@ beforeEach(() => {
   resolveIsbnSpy.mockClear();
 });
 
-const { POST } =
+const { GET, POST } =
   await import("../../src/routes/api/cron/catalog-warmup/+server");
 
 function buildEvent(
@@ -213,5 +213,33 @@ describe("POST /api/cron/catalog-warmup", () => {
     expect(fetchSpy).toHaveBeenCalled();
     const calledUrl = (fetchSpy.mock.calls[0] as [string, ...unknown[]])[0];
     expect(calledUrl).toContain("api.nytimes.com/svc/books/v3/lists/current/");
+  });
+});
+
+describe("GET /api/cron/catalog-warmup (Vercel cron path)", () => {
+  function buildGetEvent(
+    headers: Record<string, string> = {},
+    fetchFn: typeof fetch = makeFetchSpy() as unknown as typeof fetch,
+  ) {
+    return {
+      request: new Request("http://x/api/cron/catalog-warmup", {
+        method: "GET",
+        headers,
+      }),
+      fetch: fetchFn,
+    } as unknown as Parameters<typeof GET>[0];
+  }
+
+  it("401 without bearer", async () => {
+    const res = await GET(buildGetEvent());
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 200 source=nyt when enabled (no body parsing on GET)", async () => {
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+    const res = await GET(buildGetEvent({ Authorization: "Bearer secret" }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.source).toBe("nyt");
   });
 });

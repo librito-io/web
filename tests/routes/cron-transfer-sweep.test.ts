@@ -11,16 +11,16 @@ vi.mock("$lib/server/supabase", () => ({
   createAdminClient: () => supabase,
 }));
 
-const { POST } =
+const { GET } =
   await import("../../src/routes/api/cron/transfer-sweep/+server");
 
 function buildEvent(headers: Record<string, string> = {}) {
   return {
     request: new Request("http://x/api/cron/transfer-sweep", {
-      method: "POST",
+      method: "GET",
       headers,
     }),
-  } as unknown as Parameters<typeof POST>[0];
+  } as unknown as Parameters<typeof GET>[0];
 }
 
 beforeEach(() => {
@@ -28,14 +28,14 @@ beforeEach(() => {
   supabase._storage.clear();
 });
 
-describe("POST /api/cron/transfer-sweep", () => {
+describe("GET /api/cron/transfer-sweep", () => {
   it("returns 401 when Authorization header missing", async () => {
-    const res = await POST(buildEvent());
+    const res = await GET(buildEvent());
     expect(res.status).toBe(401);
   });
 
   it("returns 401 on wrong CRON_SECRET", async () => {
-    const res = await POST(buildEvent({ Authorization: "Bearer wrong" }));
+    const res = await GET(buildEvent({ Authorization: "Bearer wrong" }));
     expect(res.status).toBe(401);
   });
 
@@ -43,7 +43,7 @@ describe("POST /api/cron/transfer-sweep", () => {
     supabase._results.set("book_transfers.select", { data: [], error: null });
     supabase._results.set("book_transfers.delete", { data: null, error: null });
 
-    const res = await POST(buildEvent({ Authorization: "Bearer test-secret" }));
+    const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -68,7 +68,7 @@ describe("POST /api/cron/transfer-sweep", () => {
         remove: removeSpy,
       }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
 
-    const res = await POST(buildEvent({ Authorization: "Bearer test-secret" }));
+    const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -92,7 +92,7 @@ describe("POST /api/cron/transfer-sweep", () => {
         remove: vi.fn(async () => ({ data: null, error: null })),
       }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
 
-    await POST(buildEvent({ Authorization: "Bearer test-secret" }));
+    await GET(buildEvent({ Authorization: "Bearer test-secret" }));
 
     const updateChainCalls = supabase._chainCalls.filter(
       (c) => c.table === "book_transfers" && c.operation === "update",

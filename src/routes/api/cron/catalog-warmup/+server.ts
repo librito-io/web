@@ -16,17 +16,10 @@ import { logger } from "$lib/server/log";
 
 const MAX_PER_RUN = 100;
 
-export const POST: RequestHandler = async ({ request, fetch }) => {
-  const auth = request.headers.get("authorization") ?? "";
-  if (!constantTimeEqualString(auth, `Bearer ${CRON_SECRET}`)) {
-    return jsonError(401, "unauthorized", "Cron secret mismatch");
-  }
-  if (CATALOG_WARMUP_ENABLED !== "true") {
-    return jsonSuccess({ skipped: true });
-  }
-
-  const bodyIsbns = await parseIsbnsFromBody(request);
-
+async function runWarmup(
+  bodyIsbns: string[] | null,
+  fetch: typeof globalThis.fetch,
+): Promise<Response> {
   const supabase = createAdminClient();
   const start = Date.now();
   const nytKey = privateEnv.NYT_BOOKS_API_KEY ?? "";
@@ -87,4 +80,33 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
     rateLimited,
     durationMs,
   });
+}
+
+function authorized(request: Request): boolean {
+  const auth = request.headers.get("authorization") ?? "";
+  return constantTimeEqualString(auth, `Bearer ${CRON_SECRET}`);
+}
+
+// Vercel cron invokes scheduled paths via GET (no body). See issue #187.
+export const GET: RequestHandler = async ({ request, fetch }) => {
+  if (!authorized(request)) {
+    return jsonError(401, "unauthorized", "Cron secret mismatch");
+  }
+  if (CATALOG_WARMUP_ENABLED !== "true") {
+    return jsonSuccess({ skipped: true });
+  }
+  return runWarmup(null, fetch);
+};
+
+// POST path retained for operator-triggered bulk seeds with explicit ISBN
+// list in the JSON body (scripts/data/README.md).
+export const POST: RequestHandler = async ({ request, fetch }) => {
+  if (!authorized(request)) {
+    return jsonError(401, "unauthorized", "Cron secret mismatch");
+  }
+  if (CATALOG_WARMUP_ENABLED !== "true") {
+    return jsonSuccess({ skipped: true });
+  }
+  const bodyIsbns = await parseIsbnsFromBody(request);
+  return runWarmup(bodyIsbns, fetch);
 };

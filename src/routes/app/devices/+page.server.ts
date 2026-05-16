@@ -55,7 +55,6 @@ export const actions: Actions = {
         return fail(404, { error: "Device not found" });
       return fail(500, { error: "Failed to rename device" });
     }
-    if (!data) return fail(404, { error: "Device not found" });
     return { success: true };
   },
 
@@ -69,11 +68,18 @@ export const actions: Actions = {
     if (!deviceId || typeof deviceId !== "string")
       return fail(400, { error: "Device ID is required" });
 
+    // .is("revoked_at", null) collapses three cases into the same 404:
+    // device id doesn't exist, device belongs to another user, or device
+    // is already revoked. Aligns with the load query's filter so the
+    // "revoke an already-revoked row" code path doesn't refresh
+    // revoked_at (also enforced at the DB layer by trigger
+    // devices_prevent_unrevoke, but cheap to fast-path here).
     const { data, error } = await supabase
       .from("devices")
       .update({ revoked_at: new Date().toISOString() })
       .eq("id", deviceId)
       .eq("user_id", user.id)
+      .is("revoked_at", null)
       .select("id")
       .single();
 
@@ -82,7 +88,6 @@ export const actions: Actions = {
         return fail(404, { error: "Device not found" });
       return fail(500, { error: "Failed to revoke device" });
     }
-    if (!data) return fail(404, { error: "Device not found" });
     return { success: true };
   },
 };

@@ -185,4 +185,21 @@ describe("action revoke /app/devices", () => {
     const res = await actions.revoke(buildActionEvent({ deviceId: "d-1" }));
     expect(res).toMatchObject({ status: 500 });
   });
+
+  it("returns 404 for an already-revoked device (idempotent revoke)", async () => {
+    // The route adds .is("revoked_at", null) to the UPDATE chain, so
+    // an already-revoked row matches no candidates and PostgREST yields
+    // PGRST116 from .single(). Behaviorally indistinguishable from
+    // "device id doesn't exist" — both collapse to 404 by design.
+    // Backstop at the DB layer is trigger devices_prevent_unrevoke,
+    // verified separately in the integration suite.
+    supabase._results.set("devices.update", {
+      data: null,
+      error: { code: "PGRST116" },
+    });
+    const res = await actions.revoke(
+      buildActionEvent({ deviceId: "d-already-revoked" }),
+    );
+    expect(res).toMatchObject({ status: 404 });
+  });
 });

@@ -14,12 +14,11 @@ vi.mock("$lib/server/supabase", () => ({
 const { GET } =
   await import("../../src/routes/api/cron/transfer-sweep/+server");
 
-function buildEvent(headers: Record<string, string> = {}) {
+function buildEvent(headers: Record<string, string> = {}, query: string = "") {
+  const fullUrl = `http://x/api/cron/transfer-sweep${query}`;
   return {
-    request: new Request("http://x/api/cron/transfer-sweep", {
-      method: "GET",
-      headers,
-    }),
+    request: new Request(fullUrl, { method: "GET", headers }),
+    url: new URL(fullUrl),
   } as unknown as Parameters<typeof GET>[0];
 }
 
@@ -36,6 +35,20 @@ describe("GET /api/cron/transfer-sweep", () => {
 
   it("returns 401 on wrong CRON_SECRET", async () => {
     const res = await GET(buildEvent({ Authorization: "Bearer wrong" }));
+    expect(res.status).toBe(401);
+  });
+
+  it("?probe=1 short-circuits after auth without touching DB or Storage", async () => {
+    const res = await GET(
+      buildEvent({ Authorization: "Bearer test-secret" }, "?probe=1"),
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.probe).toBe(true);
+  });
+
+  it("?probe=1 without auth still returns 401 (gate runs before probe)", async () => {
+    const res = await GET(buildEvent({}, "?probe=1"));
     expect(res.status).toBe(401);
   });
 

@@ -90,7 +90,11 @@ jobs:
     # only exports POST silently returns 405 every fire — see issue #187 /
     # PR #188. This job catches that class of regression at deploy time.
     needs: deploy
-    if: needs.deploy.result == 'success'
+    # `always() &&` is required because the transitive ancestor `migrate` is
+    # skipped on non-migration deploys. Without it, GH's implicit success()
+    # gate on the transitive needs chain skips smoke even though deploy
+    # itself succeeded — same pattern the `deploy` job uses above.
+    if: always() && needs.deploy.result == 'success'
     runs-on: ubuntu-latest
     environment: production
     steps:

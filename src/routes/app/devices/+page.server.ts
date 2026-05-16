@@ -1,12 +1,12 @@
 import { fail, redirect } from "@sveltejs/kit";
 import type { PageServerLoad, Actions } from "./$types";
-import { createAdminClient } from "$lib/server/supabase";
 
-export const load: PageServerLoad = async ({ locals: { safeGetSession } }) => {
+export const load: PageServerLoad = async ({
+  locals: { safeGetSession, supabase },
+}) => {
   const { user } = await safeGetSession();
   if (!user) redirect(303, "/auth/login");
 
-  const supabase = createAdminClient();
   const { data: devices } = await supabase
     .from("devices")
     .select(
@@ -20,7 +20,7 @@ export const load: PageServerLoad = async ({ locals: { safeGetSession } }) => {
 };
 
 export const actions: Actions = {
-  rename: async ({ request, locals: { safeGetSession } }) => {
+  rename: async ({ request, locals: { safeGetSession, supabase } }) => {
     const { user } = await safeGetSession();
     if (!user) return fail(401, { error: "Not authenticated" });
 
@@ -36,28 +36,30 @@ export const actions: Actions = {
     if (name.length > 50)
       return fail(400, { error: "Name must be 50 characters or less" });
 
-    const supabase = createAdminClient();
-
-    // Verify device belongs to user
-    const { data: device } = await supabase
-      .from("devices")
-      .select("id")
-      .eq("id", deviceId)
-      .eq("user_id", user.id)
-      .single();
-
-    if (!device) return fail(404, { error: "Device not found" });
-
-    const { error } = await supabase
+    // Atomic ownership UPDATE: RLS WITH CHECK enforces user_id = auth.uid();
+    // the explicit .eq("user_id", user.id) predicate is kept as
+    // defense-in-depth so a future RLS regression cannot widen the blast
+    // radius on its own. PGRST116 = "no rows" from .single(), which here
+    // means the device id doesn't exist OR belongs to another user; we
+    // collapse both into a 404 to avoid leaking existence.
+    const { data, error } = await supabase
       .from("devices")
       .update({ name })
-      .eq("id", deviceId);
+      .eq("id", deviceId)
+      .eq("user_id", user.id)
+      .select("id")
+      .single();
 
-    if (error) return fail(500, { error: "Failed to rename device" });
+    if (error) {
+      if (error.code === "PGRST116")
+        return fail(404, { error: "Device not found" });
+      return fail(500, { error: "Failed to rename device" });
+    }
+    if (!data) return fail(404, { error: "Device not found" });
     return { success: true };
   },
 
-  revoke: async ({ request, locals: { safeGetSession } }) => {
+  revoke: async ({ request, locals: { safeGetSession, supabase } }) => {
     const { user } = await safeGetSession();
     if (!user) return fail(401, { error: "Not authenticated" });
 
@@ -67,24 +69,20 @@ export const actions: Actions = {
     if (!deviceId || typeof deviceId !== "string")
       return fail(400, { error: "Device ID is required" });
 
-    const supabase = createAdminClient();
-
-    // Verify device belongs to user
-    const { data: device } = await supabase
-      .from("devices")
-      .select("id")
-      .eq("id", deviceId)
-      .eq("user_id", user.id)
-      .single();
-
-    if (!device) return fail(404, { error: "Device not found" });
-
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("devices")
       .update({ revoked_at: new Date().toISOString() })
-      .eq("id", deviceId);
+      .eq("id", deviceId)
+      .eq("user_id", user.id)
+      .select("id")
+      .single();
 
-    if (error) return fail(500, { error: "Failed to revoke device" });
+    if (error) {
+      if (error.code === "PGRST116")
+        return fail(404, { error: "Device not found" });
+      return fail(500, { error: "Failed to revoke device" });
+    }
+    if (!data) return fail(404, { error: "Device not found" });
     return { success: true };
   },
 };

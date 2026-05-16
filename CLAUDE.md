@@ -177,6 +177,7 @@ Production deploys are automated via `.github/workflows/production-deploy.yml`. 
 1. **changes** job: detect if `supabase/migrations/**` changed.
 2. **migrate** job (conditional): if migrations changed, requires manual approval via the `production` GitHub environment, then runs `supabase db push --linked`. Migration failure blocks deploy.
 3. **deploy** job: runs after migrate succeeds or is skipped (no migration changes). Deploys via `vercel deploy --prod`.
+4. **smoke** job (post-deploy): probes every `crons[].path` in `vercel.ts` against `https://librito.io`, asserting `200` with a valid `Bearer ${CRON_SECRET}` and `401` without auth. Catches the regression class from issue #187 / PR #188 (cron route accidentally POST-only, returning 405 to every Vercel cron fire) at deploy time. Failure fails the workflow run but does not roll back — the deploy is already live; smoke is a loud signal to fix-forward, not a gate.
 
 Vercel git auto-deploy on `main` is disabled in `vercel.ts` — the workflow is the single deploy source of truth. Preview deploys for PRs remain enabled.
 
@@ -189,6 +190,7 @@ Create environment named `production` (Settings → Environments) with at least 
 | Secret   | `SUPABASE_ACCESS_TOKEN` | [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) |
 | Secret   | `SUPABASE_DB_PASSWORD`  | Supabase project → Settings → Database                                                 |
 | Secret   | `VERCEL_TOKEN`          | [vercel.com/account/tokens](https://vercel.com/account/tokens)                         |
+| Secret   | `CRON_SECRET`           | Same value as the `CRON_SECRET` Vercel production env var (used by `smoke` job)        |
 | Variable | `SUPABASE_PROJECT_REF`  | `<ref>` portion of your Supabase project URL                                           |
 | Variable | `VERCEL_ORG_ID`         | `team_97PZEmFN50tinLPzmLF0ql0O` (from `.vercel/project.json`)                          |
 | Variable | `VERCEL_PROJECT_ID`     | `prj_wl2OutUDRlAtw9N222fGzfg10uJQ` (from `.vercel/project.json`)                       |

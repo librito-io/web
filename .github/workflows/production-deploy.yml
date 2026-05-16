@@ -83,3 +83,58 @@ jobs:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
         run: npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+
+  smoke:
+    # Post-deploy smoke probe for cron paths. Vercel cron invokes scheduled
+    # paths via GET with `Authorization: Bearer ${CRON_SECRET}`. A route that
+    # only exports POST silently returns 405 every fire — see issue #187 /
+    # PR #188. This job catches that class of regression at deploy time.
+    needs: deploy
+    if: needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+      - id: paths
+        name: Extract cron paths from vercel.ts
+        run: |
+          set -euo pipefail
+          json=$(node --input-type=module -e "import('./vercel.ts').then(m => process.stdout.write(JSON.stringify((m.config.crons ?? []).map(c => c.path))))")
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+          echo "Cron paths: $json"
+      - name: Probe cron paths on production
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          PATHS_JSON: ${{ steps.paths.outputs.json }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET secret is not set in the production environment"
+            exit 1
+          fi
+          BASE="https://librito.io"
+          fail=0
+          while read -r p; do
+            url="$BASE$p"
+            # With valid auth → 200
+            status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 \
+              -H "Authorization: Bearer $CRON_SECRET" "$url" || echo "000")
+            if [ "$status" != "200" ]; then
+              echo "::error::$p returned $status with valid CRON_SECRET (expected 200)"
+              fail=1
+            else
+              echo "✓ $p → 200 (with auth)"
+            fi
+            # Without auth → 401 (catches accidental auth bypass)
+            status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 "$url" || echo "000")
+            if [ "$status" != "401" ]; then
+              echo "::error::$p returned $status with no auth (expected 401)"
+              fail=1
+            else
+              echo "✓ $p → 401 (no auth)"
+            fi
+          done < <(printf '%s' "$PATHS_JSON" | python3 -c "import json,sys; [print(p) for p in json.load(sys.stdin)]")
+          exit $fail

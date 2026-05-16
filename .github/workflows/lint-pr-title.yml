@@ -43,7 +43,7 @@ jobs:
         if: always() && (steps.lint.outputs.error_message != null)
         env:
           LINT_ERROR: ${{ steps.lint.outputs.error_message }}
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: pr-title-lint
           message: |
@@ -61,7 +61,7 @@ jobs:
 
       - name: Remove failure comment on pass
         if: ${{ steps.lint.outputs.error_message == null }}
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: pr-title-lint
           delete: true

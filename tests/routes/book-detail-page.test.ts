@@ -179,3 +179,105 @@ describe("load /app/book/[bookHash] — per-user catalog limiter", () => {
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("load /app/book/[bookHash] — title/author fallback (no ISBN)", () => {
+  const SIDELOADED_BOOK = {
+    id: "book-2",
+    book_hash: BOOK_HASH,
+    title: "Sideloaded Book",
+    author: "Some Author",
+    isbn: null,
+  };
+
+  it("hits the title/author cache and renders the resolved cover", async () => {
+    supabase._results.set("books.select", {
+      data: [SIDELOADED_BOOK],
+      error: null,
+    });
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: null,
+          title: SIDELOADED_BOOK.title,
+          author: SIDELOADED_BOOK.author,
+          description: "blurb",
+          description_provider: "openlibrary",
+          publisher: null,
+          page_count: null,
+          subjects: null,
+          published_date: null,
+          language: null,
+          series_name: null,
+          series_position: null,
+          storage_path: "tt/aa.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+    userLimitMock.mockResolvedValue({
+      success: false,
+      reset: Date.now() + 30_000,
+      limit: 10,
+      remaining: 0,
+      pending: Promise.resolve(),
+    });
+
+    const result = await loadResult(buildEvent());
+
+    expect(result.catalog.cover_url).toContain("tt/aa.jpg");
+    expect(result.catalog.description).toBe("blurb");
+    // Hit path must not consult the user limiter nor schedule work.
+    expect(userLimitMock).not.toHaveBeenCalled();
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+  });
+
+  it("schedules background resolveTitleAuthor on cold miss when limiter allows", async () => {
+    supabase._results.set("books.select", {
+      data: [SIDELOADED_BOOK],
+      error: null,
+    });
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+
+    await load(buildEvent());
+
+    expect(userLimitMock).toHaveBeenCalledTimes(1);
+    expect(userLimitMock).toHaveBeenCalledWith(USER_ID);
+    expect(runInBackgroundSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders placeholder + skips runInBackground when limiter denies", async () => {
+    supabase._results.set("books.select", {
+      data: [SIDELOADED_BOOK],
+      error: null,
+    });
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+    userLimitMock.mockResolvedValueOnce({
+      success: false,
+      reset: Date.now() + 30_000,
+      limit: 10,
+      remaining: 0,
+      pending: Promise.resolve(),
+    });
+
+    const result = await loadResult(buildEvent());
+
+    expect(result.catalog.cover_url).toBe("/cover-placeholder.svg");
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+  });
+
+  it("renders placeholder without scheduling when title or author is missing", async () => {
+    supabase._results.set("books.select", {
+      data: [{ ...SIDELOADED_BOOK, author: null }],
+      error: null,
+    });
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+
+    const result = await loadResult(buildEvent());
+
+    expect(result.catalog.cover_url).toBe("/cover-placeholder.svg");
+    // Nothing to resolve — limiter not consulted, no background work.
+    expect(userLimitMock).not.toHaveBeenCalled();
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+  });
+});

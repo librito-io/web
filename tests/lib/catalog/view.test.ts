@@ -11,8 +11,12 @@ vi.mock("$env/dynamic/public", () => ({
   env: {},
 }));
 
-const { getCatalogForBrowser, getCoverUrlsByIsbns } =
-  await import("../../../src/lib/server/catalog/view");
+const {
+  getCatalogForBrowser,
+  getCoverUrlsByIsbns,
+  getCatalogForBrowserByTitleAuthor,
+  getCoverUrlsByTitleAuthor,
+} = await import("../../../src/lib/server/catalog/view");
 
 const ISBN = "9780743273565";
 
@@ -346,5 +350,205 @@ describe("getCoverUrlsByIsbns", () => {
     });
 
     await expect(getCoverUrlsByIsbns(supabase, [ISBN_A])).rejects.toBeTruthy();
+  });
+});
+
+describe("getCatalogForBrowserByTitleAuthor", () => {
+  const TITLE = "The Great Gatsby";
+  const AUTHOR = "F. Scott Fitzgerald";
+
+  it("returns null when title or author normalises to nothing", async () => {
+    const supabase = createMockSupabase();
+    // Booby-trap: should never hit the DB on a null key.
+    supabase._results.set("book_catalog.select", {
+      data: [{ isbn: null }],
+      error: null,
+    });
+    const result = await getCatalogForBrowserByTitleAuthor(supabase, "", "x");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when no row exists for normalised (title, author)", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+    const result = await getCatalogForBrowserByTitleAuthor(
+      supabase,
+      TITLE,
+      AUTHOR,
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns CatalogView with cover_url for positive row", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: null,
+          title: TITLE,
+          author: AUTHOR,
+          description: "blurb",
+          description_provider: "openlibrary",
+          publisher: "Scribner",
+          page_count: 180,
+          subjects: null,
+          published_date: "1925",
+          language: "en",
+          series_name: null,
+          series_position: null,
+          storage_path: "ab/cd.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getCatalogForBrowserByTitleAuthor(
+      supabase,
+      TITLE,
+      AUTHOR,
+      "large",
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.isbn).toBeNull();
+    expect(result!.title).toBe(TITLE);
+    expect(result!.cover_url).toContain("ab/cd.jpg");
+  });
+
+  it("returns CatalogView with cover_url=null for negative-cache row", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: null,
+          title: TITLE,
+          author: AUTHOR,
+          description: null,
+          description_provider: null,
+          publisher: null,
+          page_count: null,
+          subjects: null,
+          published_date: null,
+          language: null,
+          series_name: null,
+          series_position: null,
+          storage_path: null,
+          cover_storage_backend: null,
+        },
+      ],
+      error: null,
+    });
+    const result = await getCatalogForBrowserByTitleAuthor(
+      supabase,
+      TITLE,
+      AUTHOR,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.cover_url).toBeNull();
+  });
+
+  it("throws when the Supabase query errors", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: null,
+      error: { message: "DB down" },
+    });
+    await expect(
+      getCatalogForBrowserByTitleAuthor(supabase, TITLE, AUTHOR),
+    ).rejects.toBeTruthy();
+  });
+});
+
+describe("getCoverUrlsByTitleAuthor", () => {
+  it("returns empty Map without hitting the DB when input is empty", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          normalized_title_author: "x|y",
+          storage_path: "x",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getCoverUrlsByTitleAuthor(supabase, []);
+    expect(result.size).toBe(0);
+  });
+
+  it("skips pairs whose normalisation yields null; still queries if any survive", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          normalized_title_author: "the great gatsby|f scott fitzgerald",
+          storage_path: "ab/cd.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getCoverUrlsByTitleAuthor(supabase, [
+      { title: "", author: "missing" },
+      { title: "The Great Gatsby", author: "F. Scott Fitzgerald" },
+    ]);
+
+    expect(result.size).toBe(1);
+    expect(result.get("the great gatsby|f scott fitzgerald")).toContain(
+      "ab/cd.jpg",
+    );
+  });
+
+  it("does not hit the DB when every pair normalises to null", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          normalized_title_author: "x|y",
+          storage_path: "x",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+    const result = await getCoverUrlsByTitleAuthor(supabase, [
+      { title: "", author: "" },
+      { title: "only title", author: "" },
+    ]);
+    expect(result.size).toBe(0);
+  });
+
+  it("omits negative-cache rows from the returned Map", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          normalized_title_author: "the great gatsby|f scott fitzgerald",
+          storage_path: null,
+          cover_storage_backend: null,
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getCoverUrlsByTitleAuthor(supabase, [
+      { title: "The Great Gatsby", author: "F. Scott Fitzgerald" },
+    ]);
+
+    expect(result.size).toBe(0);
+  });
+
+  it("throws when the Supabase query errors", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: null,
+      error: { message: "DB down" },
+    });
+    await expect(
+      getCoverUrlsByTitleAuthor(supabase, [{ title: "T", author: "A" }]),
+    ).rejects.toBeTruthy();
   });
 });

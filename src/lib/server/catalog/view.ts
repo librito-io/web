@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { coverUrl } from "$lib/server/cover-storage";
+import { normalizeTitleAuthor } from "./title-author";
 import {
   hasCoverStorage,
   type BookCatalogRow,
@@ -205,6 +206,126 @@ export async function getCoverUrlsByIsbns(
     if (!hasCoverStorage(row)) continue;
     result.set(
       row.isbn,
+      coverUrl(row.storage_path, row.cover_storage_backend, variant),
+    );
+  }
+  return result;
+}
+
+/**
+ * Title+author sibling of `getCatalogForBrowser`. Looks up the ISBN-less
+ * row keyed on `normalized_title_author` (partial unique index, scope
+ * `isbn IS NULL`). Returns null when title/author cannot be normalized
+ * (one side empty after stripping) or when no row exists.
+ *
+ * Same return shape as `getCatalogForBrowser` so call sites can branch on
+ * ISBN presence without diverging downstream view-model construction.
+ */
+export async function getCatalogForBrowserByTitleAuthor(
+  supabase: SupabaseClient,
+  title: string,
+  author: string,
+  variant: CoverVariant = "medium",
+): Promise<CatalogView | null> {
+  const key = normalizeTitleAuthor(title, author);
+  if (!key) return null;
+
+  const { data: rawData, error } = await supabase
+    .from("book_catalog")
+    .select(CATALOG_SELECT)
+    .is("isbn", null)
+    .eq("normalized_title_author", key)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!rawData) return null;
+
+  const row = rawData as unknown as Pick<
+    BookCatalogRow,
+    | "isbn"
+    | "title"
+    | "author"
+    | "description"
+    | "description_provider"
+    | "publisher"
+    | "page_count"
+    | "subjects"
+    | "published_date"
+    | "language"
+    | "series_name"
+    | "series_position"
+    | "storage_path"
+    | "cover_storage_backend"
+  >;
+
+  const resolvedCoverUrl = hasCoverStorage(row)
+    ? coverUrl(row.storage_path, row.cover_storage_backend, variant)
+    : null;
+
+  return {
+    isbn: row.isbn,
+    title: row.title,
+    author: row.author,
+    description: row.description,
+    description_provider: row.description_provider,
+    publisher: row.publisher,
+    page_count: row.page_count,
+    subjects: row.subjects,
+    published_date: row.published_date,
+    language: row.language,
+    series_name: row.series_name,
+    series_position: row.series_position,
+    storage_path: row.storage_path,
+    cover_storage_backend: row.cover_storage_backend,
+    cover_url: resolvedCoverUrl,
+  };
+}
+
+/**
+ * Batch-resolve cover URLs for ISBN-less books keyed on (title, author).
+ * Mirrors `getCoverUrlsByIsbns` for the title/author branch of the
+ * feed-enrichment path. Pairs whose normalization yields null (one side
+ * empty after stripping) are silently skipped — caller renders placeholder.
+ *
+ * @returns Map keyed on `normalized_title_author` (the partial-unique-index
+ *   key). Caller is expected to recompute the same key per row to look up.
+ *   Only positive (cover-bearing) rows produce an entry; negative-cache rows
+ *   are omitted.
+ */
+export async function getCoverUrlsByTitleAuthor(
+  supabase: SupabaseClient,
+  pairs: { title: string; author: string }[],
+  variant: CoverVariant = "thumbnail",
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (pairs.length === 0) return result;
+
+  const keys = new Set<string>();
+  for (const p of pairs) {
+    const k = normalizeTitleAuthor(p.title, p.author);
+    if (k) keys.add(k);
+  }
+  if (keys.size === 0) return result;
+
+  const { data: rawData, error } = await supabase
+    .from("book_catalog")
+    .select("normalized_title_author, storage_path, cover_storage_backend")
+    .is("isbn", null)
+    .in("normalized_title_author", Array.from(keys));
+
+  if (error) throw error;
+  if (!rawData) return result;
+
+  const rows = rawData as unknown as Pick<
+    BookCatalogRow,
+    "normalized_title_author" | "storage_path" | "cover_storage_backend"
+  >[];
+
+  for (const row of rows) {
+    if (!row.normalized_title_author) continue;
+    if (!hasCoverStorage(row)) continue;
+    result.set(
+      row.normalized_title_author,
       coverUrl(row.storage_path, row.cover_storage_backend, variant),
     );
   }

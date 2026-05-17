@@ -47,17 +47,48 @@ export async function fetchGoogleBooksByTitleAuthor(
   return body?.items?.[0] ?? null;
 }
 
+/** Pick the highest-resolution imageLinks URL available. Order: extraLarge →
+ * large → medium → small → thumbnail. Skips smallThumbnail (~80px wide; never
+ * useful even as a last resort). Returns undefined when nothing usable. */
+export function selectBestGoogleImageLink(
+  links: NonNullable<GoogleBooksItem["volumeInfo"]["imageLinks"]>,
+): string | undefined {
+  return (
+    links.extraLarge ??
+    links.large ??
+    links.medium ??
+    links.small ??
+    links.thumbnail
+  );
+}
+
+/** Rewrite a GoogleBooks cover URL for max resolution.
+ *  - zoom=1 → zoom=0 (or insert zoom=0 when absent); zoom=0 returns the
+ *    underlying full-resolution scan while zoom=1 caps around 256px wide.
+ *  - strip edge=curl (cosmetic page-curl effect, undesirable on stored covers).
+ *  - force https. */
+export function massageGoogleBooksCoverUrl(raw: string): string {
+  let url = raw.replace(/^http:/, "https:").replace(/[?&]edge=curl/, "");
+  if (/[?&]zoom=\d+/.test(url)) {
+    url = url.replace(/([?&]zoom=)\d+/, "$10");
+  } else {
+    url += (url.includes("?") ? "&" : "?") + "zoom=0";
+  }
+  return url;
+}
+
 export async function fetchGoogleBooksCoverBytes(
   rawUrl: string,
-  deps: GoogleBooksDeps = {},
+  deps: GoogleBooksDeps & { minWidth?: number } = {},
 ): Promise<{ bytes: Uint8Array; mime: string } | null> {
-  // Host check runs on the post-replacement URL for consistency.
+  // Host check runs on the massaged URL for consistency.
   // books.google.com: primary cover CDN (fixture-confirmed).
   // lh3.googleusercontent.com: observed serving covers while omitting Content-Length.
-  return downloadCover(rawUrl.replace(/^http:/, "https:"), {
+  return downloadCover(massageGoogleBooksCoverUrl(rawUrl), {
     fetchFn: deps.fetchFn,
     minBytes: COVER_MIN_BYTES,
     maxBytes: COVER_MAX_BYTES,
+    minWidth: deps.minWidth,
     source: "googlebooks",
     allowedHosts: ["books.google.com", "lh3.googleusercontent.com"],
   });

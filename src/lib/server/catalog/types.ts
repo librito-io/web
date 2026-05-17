@@ -46,7 +46,14 @@ export interface GoogleBooksItem {
     pageCount?: number;
     language?: string;
     categories?: string[];
-    imageLinks?: { thumbnail?: string; large?: string };
+    imageLinks?: {
+      smallThumbnail?: string;
+      thumbnail?: string;
+      small?: string;
+      medium?: string;
+      large?: string;
+      extraLarge?: string;
+    };
     industryIdentifiers?: { type: string; identifier: string }[];
   };
 }

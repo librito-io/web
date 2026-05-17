@@ -73,13 +73,20 @@ export async function fetchOpenLibraryWork(
 
 export async function fetchOpenLibraryCoverBytes(
   coverId: number,
-  deps: OpenLibraryDeps = {},
+  deps: OpenLibraryDeps & { minWidth?: number } = {},
 ): Promise<{ bytes: Uint8Array; mime: string } | null> {
-  return downloadCover(`https://covers.openlibrary.org/b/id/${coverId}-L.jpg`, {
-    fetchFn: deps.fetchFn,
-    minBytes: COVER_MIN_BYTES,
-    maxBytes: COVER_MAX_BYTES,
-    source: "openlibrary",
-    allowedHosts: ["covers.openlibrary.org"],
-  });
+  // default=false: OL returns 404 instead of falling back to -M when -L is
+  // unavailable. Without this, OL silently serves the smaller size and our
+  // byte-size floor lets it through (issue #199).
+  return downloadCover(
+    `https://covers.openlibrary.org/b/id/${coverId}-L.jpg?default=false`,
+    {
+      fetchFn: deps.fetchFn,
+      minBytes: COVER_MIN_BYTES,
+      maxBytes: COVER_MAX_BYTES,
+      minWidth: deps.minWidth,
+      source: "openlibrary",
+      allowedHosts: ["covers.openlibrary.org"],
+    },
+  );
 }

@@ -1,7 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { createMockSupabase } from "../../helpers";
+import {
+  __setTestDestination,
+  __resetTestDestination,
+} from "../../../src/lib/server/log";
 
 vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_URL: "https://supabase.example.co",
@@ -1287,5 +1291,455 @@ describe("resolveIsbn – selectBySha dedup", () => {
     await expect(
       resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn })),
     ).rejects.toThrow(/selectBySha/);
+  });
+});
+
+// ─── #203: GoogleBooks volume reuse across cover chain + description ─────────
+
+describe("resolveIsbn – GB volume reuse (#203)", () => {
+  function coldMissSupabase() {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+    return supabase;
+  }
+
+  function gbBothCoverAndDescription() {
+    const GB_URL =
+      "https://books.google.com/books/content?id=hailmary&img=1&zoom=0";
+    return vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: GB_URL },
+            { description: "A scientist wakes up alone on a spaceship." },
+          ),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("itunes.apple.com/lookup")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("books.google.com")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  it("fetches the GB volume only once when cover and description both need it", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = gbBothCoverAndDescription();
+    const d = deps({ fetchFn });
+
+    await resolveIsbn(supabase as never, "9780593135228", d);
+
+    const gbCalls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => String(args[0]).includes("googleapis.com/books"),
+    );
+    expect(gbCalls).toHaveLength(1);
+  });
+
+  it("consumes the GB rate-limit token only once per resolve", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = gbBothCoverAndDescription();
+    const d = deps({ fetchFn });
+
+    await resolveIsbn(supabase as never, "9780593135228", d);
+
+    expect(d.rateLimiters.googleBooks.limit).toHaveBeenCalledTimes(1);
+  });
+
+  it("still populates description from the reused GB volume", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = gbBothCoverAndDescription();
+    const d = deps({ fetchFn });
+
+    await resolveIsbn(supabase as never, "9780593135228", d);
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.description_provider).toBe("google_books");
+    expect(typeof p_row.description).toBe("string");
+    expect((p_row.description as string).length).toBeGreaterThan(0);
+    expect(p_row.cover_source).toBe("google_books");
+  });
+
+  it("description path still tries when cover-chain GB was rate-limited", async () => {
+    // Edge case from issue #203: tryAcquire fails for the first attempt,
+    // memo stays unset, description path's own attempt is allowed.
+    // Limiter denies the first call only; the second succeeds.
+    const supabase = coldMissSupabase();
+    let limitCallNo = 0;
+    const googleBooks = {
+      limit: vi.fn(async () => {
+        limitCallNo += 1;
+        return { success: limitCallNo > 1 } as never;
+      }),
+    };
+    const fetchFn = gbBothCoverAndDescription();
+    const d = deps({
+      fetchFn,
+      rateLimiters: {
+        openLibrary: { limit: vi.fn(async () => ({ success: true }) as never) },
+        googleBooks,
+        itunes: { limit: vi.fn(async () => ({ success: true }) as never) },
+      },
+    });
+
+    await resolveIsbn(supabase as never, "9780593135228", d);
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    // Description filled in from the description-path's own GB attempt
+    expect(p_row.description_provider).toBe("google_books");
+    // Two GB tokens consumed (one rejected, one accepted)
+    expect(googleBooks.limit).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── #207: GoogleBooks placeholder sha blacklist ────────────────────────────
+
+describe("resolveIsbn – GB placeholder sha blacklist (#207)", () => {
+  function coldMissSupabase() {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+    return supabase;
+  }
+
+  it("rejects a GB cover whose sha is on the placeholder blacklist; chain advances to iTunes", async () => {
+    // GB serves the 1500×2250 fixture — we register its sha as a known
+    // placeholder for this test, so the chain must reject the GB cover
+    // and fall through to iTunes (which also serves 1500×2250).
+    const { KNOWN_GB_PLACEHOLDER_SHAS } =
+      await import("../../../src/lib/server/catalog/fetcher");
+    const { sha256Hex } = await import("../../../src/lib/server/catalog/sha");
+    const fixtureSha = await sha256Hex(FIXTURE_1500x2250);
+    KNOWN_GB_PLACEHOLDER_SHAS.add(fixtureSha);
+
+    try {
+      const supabase = coldMissSupabase();
+      const GB_URL =
+        "https://books.google.com/books/content?id=ph&img=1&zoom=0";
+      const ITUNES_URL =
+        "https://is1-ssl.mzstatic.com/image/thumb/x/100x100bb.jpg";
+      const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("openlibrary.org/api/books")) {
+          return new Response(olNoCoverResponse(), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("openlibrary.org/search.json")) {
+          return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("openlibrary.org/works/")) {
+          return new Response(JSON.stringify({}), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("googleapis.com/books")) {
+          return new Response(gbVolumesResponse({ extraLarge: GB_URL }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("itunes.apple.com/lookup")) {
+          return new Response(itunesResponse(ITUNES_URL), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("books.google.com")) {
+          return new Response(FIXTURE_1500x2250, {
+            status: 200,
+            headers: { "content-type": "image/jpeg" },
+          });
+        }
+        if (url.includes("mzstatic.com")) {
+          return new Response(FIXTURE_1500x2250, {
+            status: 200,
+            headers: { "content-type": "image/jpeg" },
+          });
+        }
+        return new Response(new Uint8Array(512), {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }) as unknown as typeof fetch;
+
+      await resolveIsbn(supabase as never, "9781250827005", deps({ fetchFn }));
+
+      const upsertCall = supabase._rpcCalls.find(
+        (c) => c.name === "upsert_book_catalog_by_isbn",
+      );
+      const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+        .p_row;
+      expect(p_row.cover_source).toBe("itunes");
+    } finally {
+      KNOWN_GB_PLACEHOLDER_SHAS.delete(fixtureSha);
+    }
+  });
+
+  it("ships with the known production placeholder sha pre-registered", async () => {
+    const { KNOWN_GB_PLACEHOLDER_SHAS } =
+      await import("../../../src/lib/server/catalog/fetcher");
+    expect(
+      KNOWN_GB_PLACEHOLDER_SHAS.has(
+        "3efa8c43e5b4348f303a528c81adf435f0111ea752fe9f0f6241478b60987fa6",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("resolveTitleAuthor – GB volume reuse (#203)", () => {
+  function coldMissSupabase() {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+    return supabase;
+  }
+
+  it("fetches the GB volume only once when cover and description both need it", async () => {
+    const supabase = coldMissSupabase();
+    const GB_URL =
+      "https://books.google.com/books/content?id=gatsby&img=1&zoom=0";
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(
+          JSON.stringify({
+            numFound: 1,
+            docs: [{ title: "Gatsby", author_name: ["Fitzgerald"] }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: GB_URL },
+            { description: "Jazz Age." },
+          ),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("books.google.com")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+    const d = deps({ fetchFn });
+
+    await resolveTitleAuthor(
+      supabase as never,
+      "The Great Gatsby",
+      "F. Scott Fitzgerald",
+      d,
+    );
+
+    const gbCalls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => String(args[0]).includes("googleapis.com/books"),
+    );
+    expect(gbCalls).toHaveLength(1);
+    expect(d.rateLimiters.googleBooks.limit).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── #206: description-skip observability logs ──────────────────────────────
+
+describe("enrichDescriptionWithGoogleBooks – skip-point logs (#206)", () => {
+  let logWrites: Array<Record<string, unknown>>;
+
+  beforeEach(() => {
+    logWrites = [];
+    __setTestDestination((line) => logWrites.push(JSON.parse(line)));
+  });
+  afterEach(() => __resetTestDestination());
+
+  function coldMissSupabase(extra: Record<string, unknown> = {}) {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      {
+        data: [
+          {
+            isbn: "9780743273565",
+            storage_path: null,
+            last_attempted_at: "2026-03-01T00:00:00Z",
+            attempt_count: 1,
+            ...extra,
+          },
+        ],
+        error: null,
+      },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+    return supabase;
+  }
+
+  function baseFetchFn(
+    gbOverride: (url: string) => Response | null = () => null,
+  ) {
+    return vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const gbResp = gbOverride(url);
+      if (gbResp) return gbResp;
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("itunes.apple.com/lookup")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  it("warns when do_not_refetch_description=true short-circuits enrichment", async () => {
+    const supabase = coldMissSupabase({ do_not_refetch_description: true });
+    const fetchFn = baseFetchFn((url) =>
+      url.includes("googleapis.com/books")
+        ? new Response(
+            gbVolumesResponse({}, { description: "Should not be used." }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          )
+        : null,
+    );
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const skipLog = logWrites.find(
+      (l) => l.event === "catalog_description_skipped_takedown_flag",
+    );
+    expect(skipLog).toBeDefined();
+    expect(skipLog?.level).toBe("warn");
+    expect(skipLog?.isbn).toBe("9780743273565");
+  });
+
+  it("warns when GB volume fetch returns null", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = baseFetchFn((url) =>
+      url.includes("googleapis.com/books")
+        ? new Response(
+            JSON.stringify({ kind: "books#volumes", totalItems: 0 }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          )
+        : null,
+    );
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const skipLog = logWrites.find(
+      (l) => l.event === "catalog_description_no_gb_volume",
+    );
+    expect(skipLog).toBeDefined();
+    expect(skipLog?.level).toBe("warn");
+    expect(skipLog?.isbn).toBe("9780743273565");
+  });
+
+  it("logs info when GB volume exists but has no description text", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = baseFetchFn((url) =>
+      url.includes("googleapis.com/books")
+        ? new Response(gbVolumesResponse({}, {}), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        : null,
+    );
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const skipLog = logWrites.find(
+      (l) => l.event === "catalog_description_gb_volume_no_description",
+    );
+    expect(skipLog).toBeDefined();
+    expect(skipLog?.level).toBe("info");
+    expect(skipLog?.google_volume_id).toBe("gbid1");
   });
 });

@@ -145,6 +145,37 @@ async function tryAcquire(
 }
 
 /**
+ * Build a memoized GB volume fetcher used by both the cover chain and the
+ * description-enrichment path within a single resolve (issue #203).
+ *
+ * Caches only on a successful fetch. Rate-limit denial or upstream error
+ * does NOT mark the slot consumed, so a second consumer is free to retry
+ * its own tryAcquire — matches the issue's explicit edge case where the
+ * cover chain was denied but description still wants to try.
+ *
+ * Side-effect: when this fetcher runs, it consumes one GB rate-limit
+ * token via `tryAcquire`. Subsequent calls within the same resolve hit
+ * the memo (zero additional tokens) once a fetch has succeeded.
+ */
+function memoizeGoogleBooksVolume(
+  deps: ResolveDeps,
+  fetcher: () => Promise<GoogleBooksItem | null>,
+): () => Promise<GoogleBooksItem | null> {
+  let cached: GoogleBooksItem | null = null;
+  return async () => {
+    if (cached) return cached;
+    if (!(await tryAcquire(deps.rateLimiters.googleBooks))) return null;
+    try {
+      const v = await fetcher();
+      if (v) cached = v;
+      return v;
+    } catch {
+      return null;
+    }
+  };
+}
+
+/**
  * Materialize cover bytes into the storage backend, deduping by sha256.
  *
  * The dedup check pairs with the DB-level `image_sha256` index: if any
@@ -181,6 +212,27 @@ async function persistCover(
 const FLOOR_PREMIUM = 1200;
 const FLOOR_BASIC = 300;
 
+/**
+ * Known Google Books "generic placeholder" cover sha256s (issue #207).
+ *
+ * GoogleBooks returns a fallback image for some volumes that have no real
+ * cover; the bytes clear the basic-tier width floor (300 px) so the chain
+ * accepts them and unrelated ISBNs end up sharing one image. We reject by
+ * sha — when matched, `tryGoogleBooksExtraLarge` returns null and the
+ * resolver chain advances to iTunes / OpenLibrary.
+ *
+ * Exported so tests can register additional fixture-derived shas; the
+ * exported Set is the runtime source of truth, NOT a snapshot.
+ * Production code must never mutate it outside the initial population
+ * below — extend the literal list when a new placeholder hash is
+ * confirmed.
+ */
+export const KNOWN_GB_PLACEHOLDER_SHAS = new Set<string>([
+  // First confirmed placeholder — shared by 4 unrelated ISBNs in the
+  // PR #205 backfill batch (2026-05-17). 575 px wide.
+  "3efa8c43e5b4348f303a528c81adf435f0111ea752fe9f0f6241478b60987fa6",
+]);
+
 interface CoverResolution {
   bytes: Uint8Array;
   mime: string;
@@ -198,6 +250,12 @@ interface CoverChainContext {
   /** OL cover_id discovered upstream (search-by-isbn or data document);
    *  the chain uses this when falling back to OL `-L`. */
   openLibraryCoverId?: number;
+  /** Memoized GB volume fetcher (issue #203). The chain's GB attempt and
+   *  description enrichment share the same callback; the first successful
+   *  fetch caches the volume so the second consumer hits memo instead of
+   *  burning a second upstream call and rate-limit token. Caller (resolve*)
+   *  owns the memo via closure capture. */
+  fetchGbVolume: () => Promise<GoogleBooksItem | null>;
 }
 
 async function tryGoogleBooksExtraLarge(
@@ -205,21 +263,7 @@ async function tryGoogleBooksExtraLarge(
   ctx: CoverChainContext,
   minWidth: number,
 ): Promise<CoverResolution | null> {
-  if (!(await tryAcquire(deps.rateLimiters.googleBooks))) return null;
-  let gb: GoogleBooksItem | null;
-  try {
-    gb = ctx.isbn
-      ? await fetchGoogleBooksByIsbn(ctx.isbn, {
-          fetchFn: deps.fetchFn,
-          apiKey: deps.googleBooksApiKey,
-        })
-      : await fetchGoogleBooksByTitleAuthor(ctx.title ?? "", ctx.author ?? "", {
-          fetchFn: deps.fetchFn,
-          apiKey: deps.googleBooksApiKey,
-        });
-  } catch {
-    return null;
-  }
+  const gb = await ctx.fetchGbVolume();
   if (!gb?.volumeInfo?.imageLinks) return null;
   const link = selectBestGoogleImageLink(gb.volumeInfo.imageLinks);
   if (!link) return null;
@@ -235,6 +279,27 @@ async function tryGoogleBooksExtraLarge(
   if (!bytes) return null;
   const dims = decodeImageDimensions(bytes.bytes);
   if (!dims) return null;
+
+  // Reject known GB placeholder bytes (issue #207). The sha is computed
+  // again later in `persistCover` for byte-level dedup; the redundancy
+  // is intentional — checking earlier lets the chain fall through to
+  // iTunes / OpenLibrary instead of materializing a generic image.
+  const sha = await sha256Hex(bytes.bytes);
+  if (KNOWN_GB_PLACEHOLDER_SHAS.has(sha)) {
+    logger().warn(
+      {
+        event: "catalog_googlebooks_placeholder_rejected",
+        isbn: ctx.isbn,
+        title: ctx.title,
+        author: ctx.author,
+        sha,
+        width: dims.width,
+      },
+      "catalog_googlebooks_placeholder_rejected",
+    );
+    return null;
+  }
+
   return {
     bytes: bytes.bytes,
     mime: bytes.mime,
@@ -362,25 +427,56 @@ async function enrichDescriptionWithGoogleBooks(
   metadata: CatalogMetadata,
   fetchVolume: () => Promise<GoogleBooksItem | null>,
   opts: {
-    deps: ResolveDeps;
     do_not_refetch_description: boolean;
     logCtx: Record<string, unknown>;
   },
 ): Promise<void> {
   if (metadata.description) return;
-  if (opts.do_not_refetch_description) return;
-  if (!(await tryAcquire(opts.deps.rateLimiters.googleBooks))) return;
+  if (opts.do_not_refetch_description) {
+    // Issue #206: surface the takedown-flag skip so a row that has the
+    // flag set unexpectedly (e.g. carryover after a reset that didn't
+    // touch `do_not_refetch_description = false`) is visible in logs
+    // rather than only via a downstream NULL description.
+    logger().warn(
+      {
+        event: "catalog_description_skipped_takedown_flag",
+        ...opts.logCtx,
+      },
+      "catalog_description_skipped_takedown_flag",
+    );
+    return;
+  }
+  // Rate-limit gating moved into the memoized `fetchVolume` callback
+  // (issue #203). If the cover chain already paid the token, this is a
+  // memo hit; if it didn't, `fetchVolume` will tryAcquire on its own.
   try {
     const gb = await fetchVolume();
-    if (gb) {
-      const gbMeta = extractGoogleBooksMetadata(gb);
-      if (gbMeta.description) {
-        metadata.description_raw = gbMeta.description;
-        metadata.description = stripMarketingCruft(gbMeta.description);
-        metadata.description_provider = "google_books";
-        metadata.google_volume_id = gbMeta.google_volume_id;
-      }
+    if (!gb) {
+      logger().warn(
+        {
+          event: "catalog_description_no_gb_volume",
+          ...opts.logCtx,
+        },
+        "catalog_description_no_gb_volume",
+      );
+      return;
     }
+    const gbMeta = extractGoogleBooksMetadata(gb);
+    if (!gbMeta.description) {
+      logger().info(
+        {
+          event: "catalog_description_gb_volume_no_description",
+          ...opts.logCtx,
+          google_volume_id: gbMeta.google_volume_id,
+        },
+        "catalog_description_gb_volume_no_description",
+      );
+      return;
+    }
+    metadata.description_raw = gbMeta.description;
+    metadata.description = stripMarketingCruft(gbMeta.description);
+    metadata.description_provider = "google_books";
+    metadata.google_volume_id = gbMeta.google_volume_id;
   } catch (err) {
     logger().warn(
       {
@@ -524,27 +620,29 @@ export async function resolveIsbn(
       deps,
     );
 
+    // Memoized GB volume fetcher shared by cover chain + description path
+    // (issue #203). Caches only on successful fetch — a rate-limit denial
+    // or upstream error leaves the slot open for a retry from the next
+    // consumer (e.g. cover chain denied, description still wants to try).
+    const fetchGbVolume = memoizeGoogleBooksVolume(deps, () =>
+      fetchGoogleBooksByIsbn(isbn, {
+        fetchFn: deps.fetchFn,
+        apiKey: deps.googleBooksApiKey,
+      }),
+    );
+
     // 3. Resolve cover via chain (GB extraLarge → iTunes → OL)
     const cover = await resolveCoverWithTiering(deps, {
       isbn,
       openLibraryCoverId: openLibraryCoverId ?? undefined,
+      fetchGbVolume,
     });
 
     // 4. Description fallback via GB (cover is decoupled from description now)
-    await enrichDescriptionWithGoogleBooks(
-      metadata,
-      () =>
-        fetchGoogleBooksByIsbn(isbn, {
-          fetchFn: deps.fetchFn,
-          apiKey: deps.googleBooksApiKey,
-        }),
-      {
-        deps,
-        do_not_refetch_description:
-          existing?.do_not_refetch_description ?? false,
-        logCtx: { isbn },
-      },
-    );
+    await enrichDescriptionWithGoogleBooks(metadata, fetchGbVolume, {
+      do_not_refetch_description: existing?.do_not_refetch_description ?? false,
+      logCtx: { isbn },
+    });
 
     // 5. Persist cover bytes (with byte-level dedup)
     const storage = await persistCover(
@@ -679,29 +777,28 @@ export async function resolveTitleAuthor(
     if (search?.author_name?.length)
       metadata.author = search.author_name.join(", ");
 
+    // Memoized GB volume fetcher (issue #203) — see resolveIsbn for design.
+    const fetchGbVolume = memoizeGoogleBooksVolume(deps, () =>
+      fetchGoogleBooksByTitleAuthor(title, author, {
+        fetchFn: deps.fetchFn,
+        apiKey: deps.googleBooksApiKey,
+      }),
+    );
+
     // 2. Resolve cover via chain (title/author flow has no ISBN → no iTunes;
     //    chain falls through to OL via search.cover_i)
     const cover = await resolveCoverWithTiering(deps, {
       title,
       author,
       openLibraryCoverId: search?.cover_i ?? undefined,
+      fetchGbVolume,
     });
 
     // 3. Description fallback via GB
-    await enrichDescriptionWithGoogleBooks(
-      metadata,
-      () =>
-        fetchGoogleBooksByTitleAuthor(title, author, {
-          fetchFn: deps.fetchFn,
-          apiKey: deps.googleBooksApiKey,
-        }),
-      {
-        deps,
-        do_not_refetch_description:
-          existing?.do_not_refetch_description ?? false,
-        logCtx: { title, author },
-      },
-    );
+    await enrichDescriptionWithGoogleBooks(metadata, fetchGbVolume, {
+      do_not_refetch_description: existing?.do_not_refetch_description ?? false,
+      logCtx: { title, author },
+    });
 
     // 4. Persist cover bytes (with byte-level dedup)
     const storage = await persistCover(

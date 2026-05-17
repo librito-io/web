@@ -70,9 +70,8 @@ describe("fetchOpenLibraryWork", () => {
 describe("fetchOpenLibraryCoverBytes", () => {
   it("requests OL cover with default=false to suppress -M downgrade", async () => {
     let capturedUrl: string | null = null;
-    const fetchFn = vi.fn(async (url: string) => {
-      capturedUrl = url;
-      // Return a valid response so we focus on URL shape
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      capturedUrl = typeof input === "string" ? input : input.toString();
       return new Response(new Uint8Array(2048), {
         status: 200,
         headers: {

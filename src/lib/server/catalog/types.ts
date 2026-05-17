@@ -59,13 +59,14 @@ export interface GoogleBooksItem {
 }
 
 export type CoverStorageBackend = "cloudflare-images" | "supabase";
-export type CoverVariant = "thumbnail" | "medium" | "large";
+export type CoverVariant = "thumbnail" | "medium" | "large" | "xlarge";
 export type DescriptionProvider = "openlibrary" | "google_books" | "manual";
 export type CoverSource =
   | "openlibrary_isbn"
   | "openlibrary_search_isbn"
   | "openlibrary_search_title"
-  | "google_books";
+  | "google_books"
+  | "itunes";
 
 export interface CatalogMetadata {
   title?: string;

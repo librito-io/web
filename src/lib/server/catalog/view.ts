@@ -28,6 +28,7 @@ export type CatalogView = Pick<
   | "series_position"
   | "storage_path"
   | "cover_storage_backend"
+  | "cover_max_width"
 > & {
   // Resolved cover URL — null for negative-cache rows (storage_path is null).
   cover_url: string | null;
@@ -64,7 +65,7 @@ export type BookDetailCatalog = Pick<
 const CATALOG_SELECT =
   "isbn, title, author, description, description_provider, publisher, " +
   "page_count, subjects, published_date, language, series_name, series_position, " +
-  "storage_path, cover_storage_backend";
+  "storage_path, cover_storage_backend, cover_max_width";
 
 /**
  * Fetch a single book_catalog row for browser-facing surfaces and resolve its
@@ -120,10 +121,16 @@ export async function getCatalogForBrowser(
     | "series_position"
     | "storage_path"
     | "cover_storage_backend"
+    | "cover_max_width"
   >;
 
   const resolvedCoverUrl = hasCoverStorage(row)
-    ? coverUrl(row.storage_path, row.cover_storage_backend, variant)
+    ? coverUrl(
+        row.storage_path,
+        row.cover_storage_backend,
+        variant,
+        row.cover_max_width,
+      )
     : null;
 
   return {
@@ -141,6 +148,7 @@ export async function getCatalogForBrowser(
     series_position: row.series_position,
     storage_path: row.storage_path,
     cover_storage_backend: row.cover_storage_backend,
+    cover_max_width: row.cover_max_width,
     cover_url: resolvedCoverUrl,
   };
 }
@@ -181,7 +189,7 @@ export async function getCoverUrlsByIsbns(
 
   const { data: rawData, error } = await supabase
     .from("book_catalog")
-    .select("isbn, storage_path, cover_storage_backend")
+    .select("isbn, storage_path, cover_storage_backend, cover_max_width")
     .in("isbn", unique);
 
   if (error) {
@@ -194,7 +202,7 @@ export async function getCoverUrlsByIsbns(
   // narrows cleanly without escaping to the full row type.
   const rows = rawData as unknown as Pick<
     BookCatalogRow,
-    "isbn" | "storage_path" | "cover_storage_backend"
+    "isbn" | "storage_path" | "cover_storage_backend" | "cover_max_width"
   >[];
 
   for (const row of rows) {
@@ -206,7 +214,12 @@ export async function getCoverUrlsByIsbns(
     if (!hasCoverStorage(row)) continue;
     result.set(
       row.isbn,
-      coverUrl(row.storage_path, row.cover_storage_backend, variant),
+      coverUrl(
+        row.storage_path,
+        row.cover_storage_backend,
+        variant,
+        row.cover_max_width,
+      ),
     );
   }
   return result;
@@ -256,10 +269,16 @@ export async function getCatalogForBrowserByTitleAuthor(
     | "series_position"
     | "storage_path"
     | "cover_storage_backend"
+    | "cover_max_width"
   >;
 
   const resolvedCoverUrl = hasCoverStorage(row)
-    ? coverUrl(row.storage_path, row.cover_storage_backend, variant)
+    ? coverUrl(
+        row.storage_path,
+        row.cover_storage_backend,
+        variant,
+        row.cover_max_width,
+      )
     : null;
 
   return {
@@ -277,6 +296,7 @@ export async function getCatalogForBrowserByTitleAuthor(
     series_position: row.series_position,
     storage_path: row.storage_path,
     cover_storage_backend: row.cover_storage_backend,
+    cover_max_width: row.cover_max_width,
     cover_url: resolvedCoverUrl,
   };
 }
@@ -309,7 +329,9 @@ export async function getCoverUrlsByTitleAuthor(
 
   const { data: rawData, error } = await supabase
     .from("book_catalog")
-    .select("normalized_title_author, storage_path, cover_storage_backend")
+    .select(
+      "normalized_title_author, storage_path, cover_storage_backend, cover_max_width",
+    )
     .is("isbn", null)
     .in("normalized_title_author", Array.from(keys));
 
@@ -318,7 +340,10 @@ export async function getCoverUrlsByTitleAuthor(
 
   const rows = rawData as unknown as Pick<
     BookCatalogRow,
-    "normalized_title_author" | "storage_path" | "cover_storage_backend"
+    | "normalized_title_author"
+    | "storage_path"
+    | "cover_storage_backend"
+    | "cover_max_width"
   >[];
 
   for (const row of rows) {
@@ -326,7 +351,12 @@ export async function getCoverUrlsByTitleAuthor(
     if (!hasCoverStorage(row)) continue;
     result.set(
       row.normalized_title_author,
-      coverUrl(row.storage_path, row.cover_storage_backend, variant),
+      coverUrl(
+        row.storage_path,
+        row.cover_storage_backend,
+        variant,
+        row.cover_max_width,
+      ),
     );
   }
   return result;

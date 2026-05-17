@@ -6,6 +6,7 @@ import { resolveIsbn } from "$lib/server/catalog/fetcher";
 import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
+  catalogITunesLimiter,
   catalogUserLimiter,
   enforceRateLimit,
 } from "$lib/server/ratelimit";
@@ -71,6 +72,7 @@ export const GET: RequestHandler = async (event) => {
         rateLimiters: {
           openLibrary: catalogOpenLibraryLimiter,
           googleBooks: catalogGoogleBooksLimiter,
+          itunes: catalogITunesLimiter,
         },
         mutex,
       }).then(() => undefined),

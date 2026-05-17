@@ -9,6 +9,7 @@ import { getCatalogMutex } from "./mutex";
 import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
+  catalogITunesLimiter,
   catalogUserLimiter,
   safeLimit,
 } from "$lib/server/ratelimit";
@@ -120,6 +121,7 @@ export async function enrichFeedRowsWithCovers(
       const rateLimiters = {
         openLibrary: catalogOpenLibraryLimiter,
         googleBooks: catalogGoogleBooksLimiter,
+        itunes: catalogITunesLimiter,
       };
       for (const isbn of missingIsbns) {
         runInBackground(event, async () => {

@@ -6,7 +6,8 @@ import { parseFeedRows } from "$lib/feed/types";
 import type { FeedItem, Sort } from "$lib/feed/types";
 import { createAdminClient } from "$lib/server/supabase";
 import { canonicalizeIsbn } from "$lib/server/catalog/isbn";
-import { resolveIsbn } from "$lib/server/catalog/fetcher";
+import { normalizeTitleAuthor } from "$lib/server/catalog/title-author";
+import { resolveIsbn, resolveTitleAuthor } from "$lib/server/catalog/fetcher";
 import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
@@ -16,7 +17,9 @@ import {
 import { runInBackground } from "$lib/server/wait-until";
 import {
   getCatalogForBrowser,
+  getCatalogForBrowserByTitleAuthor,
   type BookDetailCatalog,
+  type CatalogView,
 } from "$lib/server/catalog/view";
 import { getCatalogMutex } from "$lib/server/catalog/mutex";
 import { logger } from "$lib/server/log";
@@ -84,45 +87,101 @@ export const load: PageServerLoad = async (event) => {
     published_date: null,
   };
 
+  function projectCatalogView(view: CatalogView): BookDetailCatalog {
+    return {
+      // Caller is expected to have branched on view.cover_url !== null.
+      cover_url: view.cover_url as string,
+      description: view.description ?? null,
+      description_provider: view.description_provider ?? null,
+      publisher: view.publisher ?? null,
+      page_count: view.page_count ?? null,
+      subjects: view.subjects ?? null,
+      published_date: view.published_date ?? null,
+    };
+  }
+
+  // Per-user budget on cold-miss work-scheduling. Page loader treats any
+  // non-allowed outcome (denied, failClosed) as "skip schedule" and renders
+  // the existing placeholder catalog state — returning 429/503 from a load
+  // function would render an error page over already-readable data. See
+  // catalogUserLimiter doc in ratelimit.ts. Mutex acquisition runs inside
+  // the runInBackground callback so the page load does not block on the
+  // lazy Upstash singleton init.
+  const userId = user.id;
+  async function scheduleColdMissResolve(
+    work: (
+      mutex: Awaited<ReturnType<typeof getCatalogMutex>>,
+    ) => Promise<unknown>,
+  ): Promise<void> {
+    const outcome = await safeLimit(catalogUserLimiter, userId);
+    const allowed = outcome.kind === "ok" && outcome.result.success;
+    if (!allowed) return;
+    const mutexPromise = getCatalogMutex();
+    runInBackground(event, async () => {
+      const mutex = await mutexPromise;
+      await work(mutex);
+    });
+  }
+
   if (isbn) {
-    let cat = null;
-    let catFailed = false;
+    let view: CatalogView | null = null;
+    let failed = false;
     try {
-      cat = await getCatalogForBrowser(supabase, isbn, "large");
+      view = await getCatalogForBrowser(supabase, isbn, "large");
     } catch {
-      catFailed = true;
+      failed = true;
     }
-    if (!catFailed && cat && cat.cover_url !== null) {
-      catalog = {
-        cover_url: cat.cover_url,
-        description: cat.description ?? null,
-        description_provider: cat.description_provider ?? null,
-        publisher: cat.publisher ?? null,
-        page_count: cat.page_count ?? null,
-        subjects: cat.subjects ?? null,
-        published_date: cat.published_date ?? null,
-      };
-    } else if (!catFailed) {
-      // Per-user budget on cold-miss work-scheduling. Page loader treats
-      // any non-allowed outcome (denied, failClosed) as "skip schedule"
-      // and renders the existing placeholder catalog state — returning
-      // 429/503 from a load function would render an error page over
-      // already-readable data. See catalogUserLimiter doc in ratelimit.ts.
-      const outcome = await safeLimit(catalogUserLimiter, user.id);
-      const allowed = outcome.kind === "ok" && outcome.result.success;
-      if (allowed) {
+    if (!failed && view && view.cover_url !== null) {
+      catalog = projectCatalogView(view);
+    } else if (!failed) {
+      await scheduleColdMissResolve((mutex) => {
         const admin = createAdminClient();
-        const mutex = await getCatalogMutex();
-        runInBackground(event, () =>
-          resolveIsbn(admin, isbn, {
-            rateLimiters: {
-              openLibrary: catalogOpenLibraryLimiter,
-              googleBooks: catalogGoogleBooksLimiter,
-            },
-            mutex,
-          }).then(() => undefined),
-        );
-      }
+        return resolveIsbn(admin, isbn, {
+          rateLimiters: {
+            openLibrary: catalogOpenLibraryLimiter,
+            googleBooks: catalogGoogleBooksLimiter,
+          },
+          mutex,
+        });
+      });
+    }
+  } else if (
+    bookRow.title &&
+    bookRow.author &&
+    normalizeTitleAuthor(bookRow.title, bookRow.author)
+  ) {
+    // ISBN-null fallback for sideloaded EPUBs. Looks up the row keyed on
+    // book_catalog.normalized_title_author (partial unique index, scope
+    // `isbn IS NULL`); on cold miss schedules `resolveTitleAuthor` via the
+    // per-(title,author) mutex namespace `catalog:lock:ta:${key}`, distinct
+    // from `catalog:lock:isbn:${isbn}`.
+    const title = bookRow.title;
+    const author = bookRow.author;
+    let view: CatalogView | null = null;
+    let failed = false;
+    try {
+      view = await getCatalogForBrowserByTitleAuthor(
+        supabase,
+        title,
+        author,
+        "large",
+      );
+    } catch {
+      failed = true;
+    }
+    if (!failed && view && view.cover_url !== null) {
+      catalog = projectCatalogView(view);
+    } else if (!failed) {
+      await scheduleColdMissResolve((mutex) => {
+        const admin = createAdminClient();
+        return resolveTitleAuthor(admin, title, author, {
+          rateLimiters: {
+            openLibrary: catalogOpenLibraryLimiter,
+            googleBooks: catalogGoogleBooksLimiter,
+          },
+          mutex,
+        });
+      });
     }
   }
 

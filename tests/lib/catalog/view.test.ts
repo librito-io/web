@@ -574,6 +574,11 @@ describe("getCoverUrlsByTitleAuthor", () => {
 const { env: dynPrivateEnv } = await import("$env/dynamic/private");
 const { env: dynPublicEnv } = await import("$env/dynamic/public");
 
+// This describe block mutates a process-resident mock module object inside the
+// test and restores it in a finally. Safe ONLY because Vitest runs this file's
+// tests serially in declaration order. If `sequence.concurrent` is ever enabled
+// for this file or this block is reordered above other describes that depend on
+// the default backend, the mutation window may overlap another test's execution.
 describe("cover_max_width variant downgrade (cloudflare-images backend)", () => {
   it("downgrades requested xlarge to large when cover_max_width is 800", async () => {
     // Mutate the shared mock env objects to switch the backend for this test.

@@ -258,4 +258,21 @@ describe("massageGoogleBooksCoverUrl", () => {
     const raw = "https://books.google.com/books?id=X&zoom=0";
     expect(massageGoogleBooksCoverUrl(raw)).toBe(raw);
   });
+
+  it("preserves ?id=X when edge=curl is the first param", () => {
+    const out = massageGoogleBooksCoverUrl(
+      "https://books.google.com/books?edge=curl&id=X",
+    );
+    expect(out).toContain("?id=X");
+    expect(out).not.toContain("&id=X");
+    expect(out).not.toContain("edge=curl");
+  });
+
+  it("strips trailing ? when edge=curl was the only param", () => {
+    const out = massageGoogleBooksCoverUrl(
+      "https://books.google.com/books?edge=curl",
+    );
+    // After strip + zoom insertion, expect ?zoom=0 not &zoom=0 dangling-?
+    expect(out).toBe("https://books.google.com/books?zoom=0");
+  });
 });

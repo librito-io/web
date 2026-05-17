@@ -68,9 +68,17 @@ export function selectBestGoogleImageLink(
  *  - strip edge=curl (cosmetic page-curl effect, undesirable on stored covers).
  *  - force https. */
 export function massageGoogleBooksCoverUrl(raw: string): string {
-  let url = raw.replace(/^http:/, "https:").replace(/[?&]edge=curl/, "");
+  let url = raw
+    .replace(/^http:/, "https:")
+    .replace(/[?&]edge=curl/, "")
+    .replace(/\?$/, "");
+  // If `?edge=curl` was the first param, the `?` was consumed but remaining
+  // params still start with `&`. Re-promote the first `&` to `?`.
+  if (!url.includes("?") && url.includes("&")) {
+    url = url.replace("&", "?");
+  }
   if (/[?&]zoom=\d+/.test(url)) {
-    url = url.replace(/([?&]zoom=)\d+/, "$10");
+    url = url.replace(/([?&]zoom=)\d+/, (_, prefix: string) => `${prefix}0`);
   } else {
     url += (url.includes("?") ? "&" : "?") + "zoom=0";
   }

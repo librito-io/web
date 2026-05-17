@@ -34,7 +34,7 @@ const ALLOWED_HOSTS = [
 // premium-tier floor with margin. 1400x1400bb yields only ~900px wide
 // (insufficient); 1800x1800bb is borderline. 2400 is the sweet spot.
 export function upgradeArtworkUrl(url: string): string {
-  return url.replace(/\/\d+x\d+bb(\.[a-z]+)/i, "/2400x2400bb$1");
+  return url.replace(/\/\d+x\d+bb(\.[a-z]+)/gi, "/2400x2400bb$1");
 }
 
 export async function fetchItunesByIsbn(

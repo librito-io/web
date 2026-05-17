@@ -25,6 +25,17 @@ describe("upgradeArtworkUrl", () => {
     const raw = "https://example.com/no-pattern.jpg";
     expect(upgradeArtworkUrl(raw)).toBe(raw);
   });
+
+  it("replaces all size tokens when multiple are present", () => {
+    // Hypothetical mzstatic URL with two size tokens; ensures the regex is global
+    // so we never silently store a half-upgraded URL.
+    const out = upgradeArtworkUrl(
+      "https://is3-ssl.mzstatic.com/image/thumb/v4/100x100bb.jpg/source/200x200bb.png",
+    );
+    expect(out).toBe(
+      "https://is3-ssl.mzstatic.com/image/thumb/v4/2400x2400bb.jpg/source/2400x2400bb.png",
+    );
+  });
 });
 
 describe("fetchItunesByIsbn", () => {

@@ -91,57 +91,57 @@ describe("resolveVariant", () => {
   it("returns requested when source width unknown (null)", async () => {
     const { resolveVariant } =
       await import("../../src/lib/server/cover-storage");
-    expect(resolveVariant("xlarge" as CoverVariant, null)).toBe("xlarge");
+    expect(resolveVariant("xlarge", null)).toBe("xlarge");
   });
 
   it("returns xlarge when source >= 1200", async () => {
     const { resolveVariant } =
       await import("../../src/lib/server/cover-storage");
-    expect(resolveVariant("xlarge" as CoverVariant, 1500)).toBe("xlarge");
-    expect(resolveVariant("xlarge" as CoverVariant, 1200)).toBe("xlarge");
+    expect(resolveVariant("xlarge", 1500)).toBe("xlarge");
+    expect(resolveVariant("xlarge", 1200)).toBe("xlarge");
   });
 
   it("downgrades xlarge to large when source 600-1199", async () => {
     const { resolveVariant } =
       await import("../../src/lib/server/cover-storage");
-    expect(resolveVariant("xlarge" as CoverVariant, 800)).toBe("large");
-    expect(resolveVariant("xlarge" as CoverVariant, 1199)).toBe("large");
-    expect(resolveVariant("xlarge" as CoverVariant, 600)).toBe("large");
+    expect(resolveVariant("xlarge", 800)).toBe("large");
+    expect(resolveVariant("xlarge", 1199)).toBe("large");
+    expect(resolveVariant("xlarge", 600)).toBe("large");
   });
 
   it("downgrades xlarge to medium when source 300-599", async () => {
     const { resolveVariant } =
       await import("../../src/lib/server/cover-storage");
-    expect(resolveVariant("xlarge" as CoverVariant, 400)).toBe("medium");
-    expect(resolveVariant("xlarge" as CoverVariant, 599)).toBe("medium");
-    expect(resolveVariant("xlarge" as CoverVariant, 300)).toBe("medium");
+    expect(resolveVariant("xlarge", 400)).toBe("medium");
+    expect(resolveVariant("xlarge", 599)).toBe("medium");
+    expect(resolveVariant("xlarge", 300)).toBe("medium");
   });
 
   it("downgrades xlarge to thumbnail when source 240-299", async () => {
     const { resolveVariant } =
       await import("../../src/lib/server/cover-storage");
-    expect(resolveVariant("xlarge" as CoverVariant, 250)).toBe("thumbnail");
-    expect(resolveVariant("xlarge" as CoverVariant, 240)).toBe("thumbnail");
+    expect(resolveVariant("xlarge", 250)).toBe("thumbnail");
+    expect(resolveVariant("xlarge", 240)).toBe("thumbnail");
   });
 
   it("falls all the way back to thumbnail when source < all thresholds", async () => {
     const { resolveVariant } =
       await import("../../src/lib/server/cover-storage");
-    expect(resolveVariant("xlarge" as CoverVariant, 100)).toBe("thumbnail");
+    expect(resolveVariant("xlarge", 100)).toBe("thumbnail");
   });
 
   it("never returns a variant requiring more than source", async () => {
     const { resolveVariant } =
       await import("../../src/lib/server/cover-storage");
-    expect(resolveVariant("large" as CoverVariant, 500)).toBe("medium");
-    expect(resolveVariant("medium" as CoverVariant, 250)).toBe("thumbnail");
+    expect(resolveVariant("large", 500)).toBe("medium");
+    expect(resolveVariant("medium", 250)).toBe("thumbnail");
   });
 
   it("does not upgrade when requested variant is small", async () => {
     const { resolveVariant } =
       await import("../../src/lib/server/cover-storage");
-    expect(resolveVariant("thumbnail" as CoverVariant, 5000)).toBe("thumbnail");
-    expect(resolveVariant("medium" as CoverVariant, 2000)).toBe("medium");
+    expect(resolveVariant("thumbnail", 5000)).toBe("thumbnail");
+    expect(resolveVariant("medium", 2000)).toBe("medium");
   });
 });
 
@@ -152,7 +152,7 @@ describe("coverUrl with cover_max_width", () => {
     const url = coverUrl(
       "ab/cd",
       "cloudflare-images",
-      "xlarge" as CoverVariant,
+      "xlarge",
       1500,
     );
     expect(url).toBe("https://imagedelivery.net/hashabc/ab/cd/xlarge");
@@ -164,7 +164,7 @@ describe("coverUrl with cover_max_width", () => {
     const url = coverUrl(
       "ab/cd",
       "cloudflare-images",
-      "xlarge" as CoverVariant,
+      "xlarge",
       800,
     );
     expect(url).toBe("https://imagedelivery.net/hashabc/ab/cd/large");
@@ -176,7 +176,7 @@ describe("coverUrl with cover_max_width", () => {
     const url = coverUrl(
       "ab/cd",
       "cloudflare-images",
-      "xlarge" as CoverVariant,
+      "xlarge",
       null,
     );
     expect(url).toBe("https://imagedelivery.net/hashabc/ab/cd/xlarge");
@@ -187,7 +187,7 @@ describe("coverUrl with cover_max_width", () => {
     const url = coverUrl(
       "ab/cd.jpg",
       "supabase",
-      "xlarge" as CoverVariant,
+      "xlarge",
       800,
     );
     expect(url).toBe(

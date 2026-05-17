@@ -24,6 +24,11 @@ import {
 } from "$lib/server/catalog/view";
 import { getCatalogMutex } from "$lib/server/catalog/mutex";
 import { logger } from "$lib/server/log";
+// GOOGLE_BOOKS_API_KEY is Sensitive in Vercel; static-imported sensitive
+// vars bake empty strings into prebuilt deploys. Read at runtime via
+// dynamic/private. Anonymous Google Books quota is 0/day per project, so
+// missing key silently degrades the entire premium-cover + description path.
+import { env as privateEnv } from "$env/dynamic/private";
 
 export const load: PageServerLoad = async (event) => {
   const {
@@ -144,6 +149,7 @@ export const load: PageServerLoad = async (event) => {
             itunes: catalogITunesLimiter,
           },
           mutex,
+          googleBooksApiKey: privateEnv.GOOGLE_BOOKS_API_KEY,
         });
       });
     }
@@ -183,6 +189,7 @@ export const load: PageServerLoad = async (event) => {
             itunes: catalogITunesLimiter,
           },
           mutex,
+          googleBooksApiKey: privateEnv.GOOGLE_BOOKS_API_KEY,
         });
       });
     }

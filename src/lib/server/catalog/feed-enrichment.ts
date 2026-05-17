@@ -16,6 +16,11 @@ import {
 import { runInBackground } from "$lib/server/wait-until";
 import { createAdminClient } from "$lib/server/supabase";
 import { logger } from "$lib/server/log";
+// GOOGLE_BOOKS_API_KEY is Sensitive in Vercel; static-imported sensitive
+// vars bake empty strings into prebuilt deploys. Read at runtime via
+// dynamic/private. Anonymous Google Books quota is 0/day per project, so
+// missing key silently degrades the entire premium-cover + description path.
+import { env as privateEnv } from "$env/dynamic/private";
 
 /**
  * Batch-resolve cover thumbnails for a page of feed rows. Two cache paths
@@ -123,10 +128,15 @@ export async function enrichFeedRowsWithCovers(
         googleBooks: catalogGoogleBooksLimiter,
         itunes: catalogITunesLimiter,
       };
+      const googleBooksApiKey = privateEnv.GOOGLE_BOOKS_API_KEY;
       for (const isbn of missingIsbns) {
         runInBackground(event, async () => {
           const mutex = await mutexPromise;
-          await resolveIsbn(admin, isbn, { rateLimiters, mutex });
+          await resolveIsbn(admin, isbn, {
+            rateLimiters,
+            mutex,
+            googleBooksApiKey,
+          });
         });
       }
       for (const key of missingTaKeys) {
@@ -137,6 +147,7 @@ export async function enrichFeedRowsWithCovers(
           await resolveTitleAuthor(admin, pair.title, pair.author, {
             rateLimiters,
             mutex,
+            googleBooksApiKey,
           });
         });
       }

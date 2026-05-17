@@ -45,6 +45,7 @@ async function runWarmup(
           itunes: catalogITunesLimiter,
         },
         mutex,
+        googleBooksApiKey: privateEnv.GOOGLE_BOOKS_API_KEY,
       });
       if (r.rateLimited) {
         rateLimited += 1;

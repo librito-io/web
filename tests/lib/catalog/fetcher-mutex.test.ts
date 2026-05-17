@@ -69,6 +69,7 @@ function deps(
     rateLimiters: {
       openLibrary: { limit: vi.fn(async () => ok) },
       googleBooks: { limit: vi.fn(async () => ok) },
+      itunes: { limit: vi.fn(async () => ok) },
     },
     coverStorage: {
       uploadCover: vi.fn(async () => ({

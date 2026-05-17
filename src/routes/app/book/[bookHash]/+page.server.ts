@@ -11,6 +11,7 @@ import { resolveIsbn, resolveTitleAuthor } from "$lib/server/catalog/fetcher";
 import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
+  catalogITunesLimiter,
   catalogUserLimiter,
   safeLimit,
 } from "$lib/server/ratelimit";
@@ -140,6 +141,7 @@ export const load: PageServerLoad = async (event) => {
           rateLimiters: {
             openLibrary: catalogOpenLibraryLimiter,
             googleBooks: catalogGoogleBooksLimiter,
+            itunes: catalogITunesLimiter,
           },
           mutex,
         });
@@ -178,6 +180,7 @@ export const load: PageServerLoad = async (event) => {
           rateLimiters: {
             openLibrary: catalogOpenLibraryLimiter,
             googleBooks: catalogGoogleBooksLimiter,
+            itunes: catalogITunesLimiter,
           },
           mutex,
         });

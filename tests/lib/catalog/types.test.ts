@@ -42,6 +42,7 @@ function makePositive(): PositiveBookCatalogRow {
     last_attempted_at: "2026-01-01T00:00:00.000Z",
     attempt_count: 1,
     do_not_refetch_description: false,
+    cover_max_width: null,
   } satisfies PositiveBookCatalogRow;
 }
 
@@ -74,6 +75,7 @@ function makeNegative(): NegativeBookCatalogRow {
     last_attempted_at: "2026-01-01T00:00:00.000Z",
     attempt_count: 1,
     do_not_refetch_description: false,
+    cover_max_width: null,
   } satisfies NegativeBookCatalogRow;
 }
 

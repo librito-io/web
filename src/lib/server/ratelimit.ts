@@ -439,3 +439,13 @@ export const catalogGoogleBooksLimiter = createLimiter({
   prefix: "rl:catalog-googlebooks",
   failMode: "open",
 });
+
+// 18 req / 1 min — 10% margin under iTunes Search API's ~20 req/min per-IP
+// undocumented ceiling. Sliding window 1 minute (no daily cap documented).
+// Per-deployment single global bucket. Fail-open for the same reason as the
+// other catalog upstreams.
+export const catalogITunesLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(18, "1 m"),
+  prefix: "rl:catalog-itunes",
+  failMode: "open",
+});

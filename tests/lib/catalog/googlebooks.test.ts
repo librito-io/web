@@ -3,6 +3,8 @@ import {
   fetchGoogleBooksByIsbn,
   fetchGoogleBooksByTitleAuthor,
   fetchGoogleBooksCoverBytes,
+  selectBestGoogleImageLink,
+  massageGoogleBooksCoverUrl,
 } from "../../../src/lib/server/catalog/googlebooks";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -76,7 +78,7 @@ describe("fetchGoogleBooksCoverBytes", () => {
       { fetchFn },
     );
     expect(fetchFn).toHaveBeenCalledWith(
-      "https://books.google.com/cover.jpg",
+      "https://books.google.com/cover.jpg?zoom=0",
       expect.any(Object),
     );
     expect(r?.bytes.byteLength).toBe(1024);
@@ -165,5 +167,112 @@ describe("fetchGoogleBooksCoverBytes", () => {
     );
     expect(r).not.toBeNull();
     expect(r?.bytes.byteLength).toBe(200 * 1024);
+  });
+});
+
+describe("selectBestGoogleImageLink", () => {
+  it("prefers extraLarge over everything", () => {
+    expect(
+      selectBestGoogleImageLink({
+        thumbnail: "t",
+        small: "s",
+        large: "l",
+        extraLarge: "xl",
+      }),
+    ).toBe("xl");
+  });
+
+  it("falls back to large when extraLarge absent", () => {
+    expect(
+      selectBestGoogleImageLink({
+        thumbnail: "t",
+        small: "s",
+        large: "l",
+      }),
+    ).toBe("l");
+  });
+
+  it("falls back to medium when large absent", () => {
+    expect(
+      selectBestGoogleImageLink({
+        thumbnail: "t",
+        small: "s",
+        medium: "m",
+      }),
+    ).toBe("m");
+  });
+
+  it("falls back to small when medium absent", () => {
+    expect(
+      selectBestGoogleImageLink({
+        thumbnail: "t",
+        small: "s",
+      }),
+    ).toBe("s");
+  });
+
+  it("falls back to thumbnail when nothing else present", () => {
+    expect(selectBestGoogleImageLink({ thumbnail: "t" })).toBe("t");
+  });
+
+  it("returns undefined on empty imageLinks", () => {
+    expect(selectBestGoogleImageLink({})).toBeUndefined();
+  });
+
+  it("skips smallThumbnail (truly tiny, never useful)", () => {
+    expect(selectBestGoogleImageLink({ smallThumbnail: "st" })).toBeUndefined();
+  });
+});
+
+describe("massageGoogleBooksCoverUrl", () => {
+  it("rewrites zoom=1 to zoom=0", () => {
+    const out = massageGoogleBooksCoverUrl(
+      "https://books.google.com/books?id=X&printsec=frontcover&img=1&zoom=1",
+    );
+    expect(out).toContain("zoom=0");
+    expect(out).not.toContain("zoom=1");
+  });
+
+  it("strips edge=curl", () => {
+    const out = massageGoogleBooksCoverUrl(
+      "https://books.google.com/books?id=X&zoom=1&edge=curl",
+    );
+    expect(out).not.toContain("edge=curl");
+  });
+
+  it("inserts zoom=0 when zoom absent", () => {
+    const out = massageGoogleBooksCoverUrl(
+      "https://books.google.com/books?id=X&printsec=frontcover",
+    );
+    expect(out).toContain("zoom=0");
+  });
+
+  it("forces https on http URLs", () => {
+    const out = massageGoogleBooksCoverUrl(
+      "http://books.google.com/books?id=X&zoom=1",
+    );
+    expect(out.startsWith("https://")).toBe(true);
+  });
+
+  it("preserves the original URL when already at zoom=0 with no edge=curl on https", () => {
+    const raw = "https://books.google.com/books?id=X&zoom=0";
+    expect(massageGoogleBooksCoverUrl(raw)).toBe(raw);
+  });
+
+  it("preserves ?id=X when edge=curl is the first param", () => {
+    const out = massageGoogleBooksCoverUrl(
+      "https://books.google.com/books?edge=curl&id=X",
+    );
+    expect(out).toContain("?id=X");
+    expect(out).not.toContain("&id=X");
+    expect(out).not.toContain("edge=curl");
+  });
+
+  it("strips trailing ? when edge=curl was the only param", () => {
+    const out = massageGoogleBooksCoverUrl(
+      "https://books.google.com/books?edge=curl",
+    );
+    // After strip + zoom insertion, expect ?zoom=0 not &zoom=0 dangling-?
+    expect(out).toBe("https://books.google.com/books?zoom=0");
   });
 });

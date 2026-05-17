@@ -38,6 +38,7 @@ export type Database = {
         Row: {
           attempt_count: number
           author: string | null
+          cover_max_width: number | null
           cover_source: string | null
           cover_storage_backend: string | null
           description: string | null
@@ -67,6 +68,7 @@ export type Database = {
         Insert: {
           attempt_count?: number
           author?: string | null
+          cover_max_width?: number | null
           cover_source?: string | null
           cover_storage_backend?: string | null
           description?: string | null
@@ -96,6 +98,7 @@ export type Database = {
         Update: {
           attempt_count?: number
           author?: string | null
+          cover_max_width?: number | null
           cover_source?: string | null
           cover_storage_backend?: string | null
           description?: string | null

@@ -68,6 +68,24 @@ describe("fetchOpenLibraryWork", () => {
 });
 
 describe("fetchOpenLibraryCoverBytes", () => {
+  it("requests OL cover with default=false to suppress -M downgrade", async () => {
+    let capturedUrl: string | null = null;
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      capturedUrl = typeof input === "string" ? input : input.toString();
+      return new Response(new Uint8Array(2048), {
+        status: 200,
+        headers: {
+          "content-type": "image/jpeg",
+          "content-length": "2048",
+        },
+      });
+    });
+    await fetchOpenLibraryCoverBytes(12345, { fetchFn });
+    expect(capturedUrl).toBe(
+      "https://covers.openlibrary.org/b/id/12345-L.jpg?default=false",
+    );
+  });
+
   it("returns bytes when 200 and body is above the placeholder threshold", async () => {
     const bytes = new Uint8Array(2048).fill(0xff);
     const fetchFn = vi.fn(

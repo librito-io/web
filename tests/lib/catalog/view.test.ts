@@ -49,6 +49,7 @@ describe("getCatalogForBrowser", () => {
           series_position: null,
           storage_path: null,
           cover_storage_backend: null,
+          cover_max_width: null,
         },
       ],
       error: null,
@@ -84,6 +85,7 @@ describe("getCatalogForBrowser", () => {
           series_position: null,
           storage_path: "ab/cd.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
       ],
       error: null,
@@ -123,6 +125,7 @@ describe("getCatalogForBrowser", () => {
           series_position: null,
           storage_path: "ab/cd.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
       ],
       error: null,
@@ -176,6 +179,7 @@ describe("getCatalogForBrowser", () => {
           series_position: null,
           storage_path: "ab/cd.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
       ],
       error: null,
@@ -219,18 +223,21 @@ describe("getCoverUrlsByIsbns", () => {
           isbn: ISBN_A,
           storage_path: "ab/a.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
         // positive
         {
           isbn: ISBN_B,
           storage_path: "cd/b.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
         // negative-cache row — must be omitted from the Map
         {
           isbn: ISBN_C,
           storage_path: null,
           cover_storage_backend: null,
+          cover_max_width: null,
         },
       ],
       error: null,
@@ -261,11 +268,13 @@ describe("getCoverUrlsByIsbns", () => {
           isbn: ISBN_A,
           storage_path: "ab/a.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
         {
           isbn: ISBN_B,
           storage_path: "cd/b.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
       ],
       error: null,
@@ -291,6 +300,7 @@ describe("getCoverUrlsByIsbns", () => {
           isbn: ISBN_A,
           storage_path: "ab/a.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
       ],
       error: null,
@@ -316,6 +326,7 @@ describe("getCoverUrlsByIsbns", () => {
           isbn: ISBN_A,
           storage_path: "ab/cd.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
       ],
       error: null,
@@ -334,6 +345,7 @@ describe("getCoverUrlsByIsbns", () => {
           isbn: ISBN_A,
           storage_path: "ab/cd.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
       ],
       error: null,
@@ -398,6 +410,7 @@ describe("getCatalogForBrowserByTitleAuthor", () => {
           series_position: null,
           storage_path: "ab/cd.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
       ],
       error: null,
@@ -435,6 +448,7 @@ describe("getCatalogForBrowserByTitleAuthor", () => {
           series_position: null,
           storage_path: null,
           cover_storage_backend: null,
+          cover_max_width: null,
         },
       ],
       error: null,
@@ -486,6 +500,7 @@ describe("getCoverUrlsByTitleAuthor", () => {
           normalized_title_author: "the great gatsby|f scott fitzgerald",
           storage_path: "ab/cd.jpg",
           cover_storage_backend: "supabase",
+          cover_max_width: 1500,
         },
       ],
       error: null,
@@ -529,6 +544,7 @@ describe("getCoverUrlsByTitleAuthor", () => {
           normalized_title_author: "the great gatsby|f scott fitzgerald",
           storage_path: null,
           cover_storage_backend: null,
+          cover_max_width: null,
         },
       ],
       error: null,
@@ -550,5 +566,78 @@ describe("getCoverUrlsByTitleAuthor", () => {
     await expect(
       getCoverUrlsByTitleAuthor(supabase, [{ title: "T", author: "A" }]),
     ).rejects.toBeTruthy();
+  });
+});
+
+// Grab handles to the already-imported mock env objects so we can mutate them
+// within the downgrade test to simulate cloudflare-images backend.
+const { env: dynPrivateEnv } = await import("$env/dynamic/private");
+const { env: dynPublicEnv } = await import("$env/dynamic/public");
+
+// This describe block mutates a process-resident mock module object inside the
+// test and restores it in a finally. Safe ONLY because Vitest runs this file's
+// tests serially in declaration order. If `sequence.concurrent` is ever enabled
+// for this file or this block is reordered above other describes that depend on
+// the default backend, the mutation window may overlap another test's execution.
+describe("cover_max_width variant downgrade (cloudflare-images backend)", () => {
+  it("downgrades requested xlarge to large when cover_max_width is 800", async () => {
+    // Mutate the shared mock env objects to switch the backend for this test.
+    // cover-storage.ts reads these at call time, so mutation takes effect
+    // without a module re-import.
+    const origBackend = dynPrivateEnv.COVER_STORAGE_BACKEND;
+    const origHash = (dynPublicEnv as Record<string, string | undefined>)
+      .PUBLIC_CLOUDFLARE_IMAGES_HASH;
+    (dynPrivateEnv as Record<string, string>).COVER_STORAGE_BACKEND =
+      "cloudflare-images";
+    (dynPublicEnv as Record<string, string>).PUBLIC_CLOUDFLARE_IMAGES_HASH =
+      "testhash";
+
+    try {
+      const supabase = createMockSupabase();
+      supabase._results.set("book_catalog.select", {
+        data: [
+          {
+            isbn: "9780000000000",
+            storage_path: "abc/def",
+            cover_storage_backend: "cloudflare-images",
+            cover_max_width: 800,
+            title: null,
+            author: null,
+            description: null,
+            description_provider: null,
+            publisher: null,
+            page_count: null,
+            subjects: null,
+            published_date: null,
+            language: null,
+            series_name: null,
+            series_position: null,
+          },
+        ],
+        error: null,
+      });
+
+      const result = await getCatalogForBrowser(
+        supabase,
+        "9780000000000",
+        "xlarge",
+      );
+
+      // xlarge requires min 1200px source; 800px source must downgrade to large.
+      expect(result?.cover_url).toContain("/large");
+      expect(result?.cover_url).not.toContain("/xlarge");
+    } finally {
+      // Restore original env values so other tests are unaffected.
+      (
+        dynPrivateEnv as Record<string, string | undefined>
+      ).COVER_STORAGE_BACKEND = origBackend;
+      if (origHash === undefined) {
+        delete (dynPublicEnv as Record<string, string | undefined>)
+          .PUBLIC_CLOUDFLARE_IMAGES_HASH;
+      } else {
+        (dynPublicEnv as Record<string, string>).PUBLIC_CLOUDFLARE_IMAGES_HASH =
+          origHash;
+      }
+    }
   });
 });

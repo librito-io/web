@@ -15,6 +15,48 @@ import { sha256Hex } from "./catalog/sha";
 // Cloudflare Images backend uses named variants for true edge resize.
 export const COVER_BUCKET = "cover-cache";
 
+/** Minimum source width (px) that lets a variant render natively at its
+ * configured dimensions. Must stay in sync with the Cloudflare Images dashboard
+ * variant config; if dashboard config changes, update this table.
+ * See docs/superpowers/plans/2026-05-17-catalog-cover-resolution.md Phase 2. */
+const VARIANT_MIN_SOURCE_WIDTH: Record<CoverVariant, number> = {
+  thumbnail: 240,
+  medium: 300,
+  large: 600,
+  xlarge: 1200,
+};
+
+/** Variant order from largest to smallest, for fallback walking. */
+const VARIANTS_BY_SIZE: CoverVariant[] = [
+  "xlarge",
+  "large",
+  "medium",
+  "thumbnail",
+];
+
+/** Given a requested variant and the source's max width (or null when unknown,
+ * which we treat as "trust the request"), return the largest variant that
+ * renders natively from the source. Never upscales beyond source.
+ *
+ * Examples:
+ *   resolveVariant("xlarge", null) → "xlarge" (trust caller)
+ *   resolveVariant("xlarge", 1500) → "xlarge" (native fit)
+ *   resolveVariant("xlarge",  800) → "large"  (downgrade to fit)
+ *   resolveVariant("large",   500) → "medium" (downgrade)
+ *   resolveVariant("thumbnail", 5000) → "thumbnail" (don't upgrade) */
+export function resolveVariant(
+  requested: CoverVariant,
+  coverMaxWidth: number | null,
+): CoverVariant {
+  if (coverMaxWidth === null) return requested;
+  const reqIdx = VARIANTS_BY_SIZE.indexOf(requested);
+  for (let i = reqIdx; i < VARIANTS_BY_SIZE.length; i++) {
+    const v = VARIANTS_BY_SIZE[i];
+    if (coverMaxWidth >= VARIANT_MIN_SOURCE_WIDTH[v]) return v;
+  }
+  return "thumbnail"; // last resort — source below all floors
+}
+
 export interface UploadDeps {
   supabase?: SupabaseClient;
   fetchFn?: typeof fetch;
@@ -115,7 +157,9 @@ export function coverUrl(
   storagePath: string,
   backend: CoverStorageBackend,
   variant: CoverVariant,
+  coverMaxWidth: number | null = null,
 ): string {
+  const effectiveVariant = resolveVariant(variant, coverMaxWidth);
   if (backend === "cloudflare-images") {
     const hash = publicEnv.PUBLIC_CLOUDFLARE_IMAGES_HASH;
     if (!hash) {
@@ -123,11 +167,11 @@ export function coverUrl(
         "Cloudflare Images backend requires PUBLIC_CLOUDFLARE_IMAGES_HASH env var.",
       );
     }
-    return `https://imagedelivery.net/${hash}/${storagePath}/${variant}`;
+    return `https://imagedelivery.net/${hash}/${storagePath}/${effectiveVariant}`;
   }
   // Supabase backend: variant is a layout hint; the URL itself is the
   // full-size public object. Caller is responsible for sizing via
   // HTML width/height + CSS.
-  void variant;
+  void effectiveVariant;
   return `${PUBLIC_SUPABASE_URL}/storage/v1/object/public/${COVER_BUCKET}/${storagePath}`;
 }

@@ -8,6 +8,7 @@ import { constantTimeEqualString } from "$lib/server/cron-auth";
 import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
+  catalogITunesLimiter,
 } from "$lib/server/ratelimit";
 import { getCatalogMutex } from "$lib/server/catalog/mutex";
 // CRON_SECRET and CATALOG_WARMUP_ENABLED are Sensitive in Vercel; static
@@ -41,6 +42,7 @@ async function runWarmup(
         rateLimiters: {
           openLibrary: catalogOpenLibraryLimiter,
           googleBooks: catalogGoogleBooksLimiter,
+          itunes: catalogITunesLimiter,
         },
         mutex,
       });

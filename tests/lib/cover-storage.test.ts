@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockSupabase } from "../helpers";
+import type { CoverVariant } from "../../src/lib/server/catalog/types";
 
 vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_URL: "https://supabase.example.co",
@@ -83,5 +84,114 @@ describe("uploadCover (cloudflare-images backend)", () => {
       "https://api.cloudflare.com/client/v4/accounts/acct/images/v1",
     );
     expect(init.method).toBe("POST");
+  });
+});
+
+describe("resolveVariant", () => {
+  it("returns requested when source width unknown (null)", async () => {
+    const { resolveVariant } =
+      await import("../../src/lib/server/cover-storage");
+    expect(resolveVariant("xlarge" as CoverVariant, null)).toBe("xlarge");
+  });
+
+  it("returns xlarge when source >= 1200", async () => {
+    const { resolveVariant } =
+      await import("../../src/lib/server/cover-storage");
+    expect(resolveVariant("xlarge" as CoverVariant, 1500)).toBe("xlarge");
+    expect(resolveVariant("xlarge" as CoverVariant, 1200)).toBe("xlarge");
+  });
+
+  it("downgrades xlarge to large when source 600-1199", async () => {
+    const { resolveVariant } =
+      await import("../../src/lib/server/cover-storage");
+    expect(resolveVariant("xlarge" as CoverVariant, 800)).toBe("large");
+    expect(resolveVariant("xlarge" as CoverVariant, 1199)).toBe("large");
+    expect(resolveVariant("xlarge" as CoverVariant, 600)).toBe("large");
+  });
+
+  it("downgrades xlarge to medium when source 300-599", async () => {
+    const { resolveVariant } =
+      await import("../../src/lib/server/cover-storage");
+    expect(resolveVariant("xlarge" as CoverVariant, 400)).toBe("medium");
+    expect(resolveVariant("xlarge" as CoverVariant, 599)).toBe("medium");
+    expect(resolveVariant("xlarge" as CoverVariant, 300)).toBe("medium");
+  });
+
+  it("downgrades xlarge to thumbnail when source 240-299", async () => {
+    const { resolveVariant } =
+      await import("../../src/lib/server/cover-storage");
+    expect(resolveVariant("xlarge" as CoverVariant, 250)).toBe("thumbnail");
+    expect(resolveVariant("xlarge" as CoverVariant, 240)).toBe("thumbnail");
+  });
+
+  it("falls all the way back to thumbnail when source < all thresholds", async () => {
+    const { resolveVariant } =
+      await import("../../src/lib/server/cover-storage");
+    expect(resolveVariant("xlarge" as CoverVariant, 100)).toBe("thumbnail");
+  });
+
+  it("never returns a variant requiring more than source", async () => {
+    const { resolveVariant } =
+      await import("../../src/lib/server/cover-storage");
+    expect(resolveVariant("large" as CoverVariant, 500)).toBe("medium");
+    expect(resolveVariant("medium" as CoverVariant, 250)).toBe("thumbnail");
+  });
+
+  it("does not upgrade when requested variant is small", async () => {
+    const { resolveVariant } =
+      await import("../../src/lib/server/cover-storage");
+    expect(resolveVariant("thumbnail" as CoverVariant, 5000)).toBe("thumbnail");
+    expect(resolveVariant("medium" as CoverVariant, 2000)).toBe("medium");
+  });
+});
+
+describe("coverUrl with cover_max_width", () => {
+  it("constructs xlarge URL when source >= 1200", async () => {
+    process.env.COVER_STORAGE_BACKEND = "cloudflare-images";
+    const { coverUrl } = await import("../../src/lib/server/cover-storage");
+    const url = coverUrl(
+      "ab/cd",
+      "cloudflare-images",
+      "xlarge" as CoverVariant,
+      1500,
+    );
+    expect(url).toBe("https://imagedelivery.net/hashabc/ab/cd/xlarge");
+  });
+
+  it("downgrades to large URL when source < 1200", async () => {
+    process.env.COVER_STORAGE_BACKEND = "cloudflare-images";
+    const { coverUrl } = await import("../../src/lib/server/cover-storage");
+    const url = coverUrl(
+      "ab/cd",
+      "cloudflare-images",
+      "xlarge" as CoverVariant,
+      800,
+    );
+    expect(url).toBe("https://imagedelivery.net/hashabc/ab/cd/large");
+  });
+
+  it("trusts caller (uses requested variant) when cover_max_width unknown", async () => {
+    process.env.COVER_STORAGE_BACKEND = "cloudflare-images";
+    const { coverUrl } = await import("../../src/lib/server/cover-storage");
+    const url = coverUrl(
+      "ab/cd",
+      "cloudflare-images",
+      "xlarge" as CoverVariant,
+      null,
+    );
+    expect(url).toBe("https://imagedelivery.net/hashabc/ab/cd/xlarge");
+  });
+
+  it("supabase backend ignores variant entirely (full-size only)", async () => {
+    const { coverUrl } = await import("../../src/lib/server/cover-storage");
+    const url = coverUrl(
+      "ab/cd.jpg",
+      "supabase",
+      "xlarge" as CoverVariant,
+      800,
+    );
+    expect(url).toBe(
+      "https://supabase.example.co/storage/v1/object/public/cover-cache/ab/cd.jpg",
+    );
   });
 });

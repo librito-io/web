@@ -61,9 +61,15 @@ export interface GoogleBooksItem {
 export type CoverStorageBackend = "cloudflare-images" | "supabase";
 export type CoverVariant = "thumbnail" | "medium" | "large" | "xlarge";
 export type DescriptionProvider = "openlibrary" | "google_books" | "manual";
+// "openlibrary_search_isbn" was emitted by an earlier OL-primary resolver
+// that distinguished data-document-derived from search-derived cover_ids.
+// The current chain (issue #199) unifies both paths under "openlibrary_isbn"
+// because the search distinction has no consumer. Pre-issue-#199 rows in
+// production may still carry "openlibrary_search_isbn"; the DB column is
+// `text` (not enum), so legacy rows remain valid. Do not add this literal
+// back to the union — there's no code path producing it.
 export type CoverSource =
   | "openlibrary_isbn"
-  | "openlibrary_search_isbn"
   | "openlibrary_search_title"
   | "google_books"
   | "itunes";

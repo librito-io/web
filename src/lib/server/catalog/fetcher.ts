@@ -321,7 +321,17 @@ async function resolveCoverChain(
   );
 }
 
-/** Two-pass: try premium floor (1200), fall back to basic floor (300). */
+/** Two-pass: try premium floor (1200), fall back to basic floor (300).
+ *
+ * Worst-case budget consumption per ISBN is 6 upstream attempts (3 sources ×
+ * 2 passes). `tryAcquire` consumes a per-source rate-limit token on each pass
+ * regardless of whether the cover fetch succeeds, so an all-miss ISBN burns
+ * 2× the per-source budget vs a single-pass chain. Acceptable trade-off
+ * because: (a) most popular books succeed at the premium pass first try
+ * (one attempt per source), (b) the alternative of a single liberal floor
+ * would store low-res sources that fail the `xlarge` variant requirement,
+ * (c) per-source limiters fail-OPEN — exhaustion doesn't lock callers out.
+ * See issue #199 design notes for full tier rationale. */
 async function resolveCoverWithTiering(
   deps: ResolveDeps,
   ctx: CoverChainContext,

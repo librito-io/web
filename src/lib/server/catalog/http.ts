@@ -2,6 +2,8 @@
 // Provider-specific concerns (URL construction, response shape parsing, byte thresholds)
 // stay in their respective modules; shared plumbing lives here.
 
+import { decodeImageDimensions } from "./dimensions";
+
 const LIBRITO_UA = "librito-catalog/1.0 (+https://librito.io)";
 
 export interface FetchCatalogJsonDeps {
@@ -31,6 +33,9 @@ export interface DownloadCoverOptions {
   fetchFn?: typeof fetch;
   minBytes: number;
   maxBytes: number;
+  /** Reject (return null) if the decoded image width is below this threshold.
+   * Falsy = no floor. Composed with the byte-size guard; both must pass. */
+  minWidth?: number;
   source: string;
   // SSRF guard: only hosts in this list (lowercase) are allowed.
   // Checked before fetch so a spoofed/MitM upstream URL never reaches the network.
@@ -44,13 +49,14 @@ export interface DownloadCoverOptions {
  * resolver's per-source try/catch posture is preserved — same as non-ok
  * response, oversize, or undersize returns below.
  *
- * Two-layer size guard (PR 2 fix #9):
+ * Three-layer guard (PR 2 fix #9; dimension floor added Task 2):
  *   1. Content-Length pre-check — rejects without buffering when upstream
  *      advertises an oversize payload.
  *   2. Post-arrayBuffer backstop — catches chunked encoding / missing-CL
  *      responses (lh3.googleusercontent.com observed omitting Content-Length).
+ *   3. Dimension floor — rejects if decoded image width < opts.minWidth.
  *
- * Both layers must remain; the refactor restructures only.
+ * Layers 1 and 2 must remain; the refactor restructures only.
  */
 export async function downloadCover(
   url: string,
@@ -75,5 +81,9 @@ export async function downloadCover(
   const buf = new Uint8Array(await res.arrayBuffer());
   if (buf.byteLength < opts.minBytes) return null;
   if (buf.byteLength > opts.maxBytes) return null;
+  if (opts.minWidth) {
+    const dims = decodeImageDimensions(buf);
+    if (!dims || dims.width < opts.minWidth) return null;
+  }
   return { bytes: buf, mime: res.headers.get("content-type") ?? "image/jpeg" };
 }

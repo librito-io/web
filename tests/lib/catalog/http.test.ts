@@ -1,8 +1,16 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi } from "vitest";
 import {
   fetchCatalogJson,
   downloadCover,
 } from "../../../src/lib/server/catalog/http";
+
+const JPEG_143x218 = new Uint8Array(
+  readFileSync("tests/fixtures/catalog/143x218.jpg"),
+);
+const JPEG_600x900 = new Uint8Array(
+  readFileSync("tests/fixtures/catalog/600x900.jpg"),
+);
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -211,5 +219,68 @@ describe("downloadCover", () => {
     });
     expect(r).toBeNull();
     expect(fetchFn.mock.calls.length).toBe(0);
+  });
+
+  it("rejects sources below minWidth", async () => {
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(JPEG_143x218, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        }),
+    );
+    const result = await downloadCover(
+      "https://covers.openlibrary.org/test.jpg",
+      {
+        ...baseOpts,
+        minBytes: 100,
+        fetchFn,
+        minWidth: 600,
+        allowedHosts: ["covers.openlibrary.org"],
+      },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("accepts sources at or above minWidth", async () => {
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(JPEG_600x900, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        }),
+    );
+    const result = await downloadCover(
+      "https://covers.openlibrary.org/test.jpg",
+      {
+        ...baseOpts,
+        minBytes: 100,
+        fetchFn,
+        minWidth: 600,
+        allowedHosts: ["covers.openlibrary.org"],
+      },
+    );
+    expect(result).not.toBeNull();
+    expect(result?.bytes.byteLength).toBe(JPEG_600x900.byteLength);
+  });
+
+  it("ignores minWidth when option absent", async () => {
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(JPEG_143x218, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        }),
+    );
+    const result = await downloadCover(
+      "https://covers.openlibrary.org/test.jpg",
+      {
+        ...baseOpts,
+        minBytes: 100,
+        fetchFn,
+        allowedHosts: ["covers.openlibrary.org"],
+      },
+    );
+    expect(result).not.toBeNull();
   });
 });

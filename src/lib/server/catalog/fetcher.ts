@@ -354,6 +354,95 @@ interface CoverResolution {
   openLibraryCoverId?: number;
 }
 
+/**
+ * Emit a Sentry warning when an accepted GoogleBooks cover has
+ * bytes-per-pixel below COVER_LOW_BPP_THRESHOLD — the false-negative
+ * signal for the pdf.isAvailable filter (Task 8). Caller passes the
+ * identifying extras (e.g. `{ isbn }` or `{ normalizedTitleAuthor }`)
+ * so the same payload shape works from either resolver entry point.
+ *
+ * Awaits Sentry.flush(2000) because the surrounding `runInBackground`
+ * (Vercel waitUntil) only flushes on the .catch path; without an
+ * explicit flush here, success-path warnings would be dropped at
+ * function suspension. See memory note vercel-waituntil-flush-async-
+ * transports.
+ *
+ * No-op when the SDK is not initialised (self-hoster path).
+ */
+async function reportSuspectLowBpp(
+  cover: CoverResolution | null,
+  audit: ResolveAuditFields,
+  identifier: Record<string, string | undefined>,
+): Promise<void> {
+  if (
+    !cover ||
+    cover.source !== "google_books" ||
+    audit.cover_bytes_per_pixel === null ||
+    audit.cover_bytes_per_pixel >= COVER_LOW_BPP_THRESHOLD
+  ) {
+    return;
+  }
+  Sentry.captureMessage("catalog_cover_suspect_low_bpp", {
+    level: "warning",
+    tags: { catalog_audit: "suspect_cover" },
+    extra: {
+      ...identifier,
+      volumeId: cover.googleVolumeId,
+      width: cover.width,
+      height: cover.height,
+      byteCount: cover.byteCount,
+      cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
+      cover_aspect: audit.cover_aspect,
+      viewability: audit.gb_viewability,
+    },
+  });
+  await Sentry.flush(2000);
+}
+
+/**
+ * Shared tail for the OL / iTunes `try*` chain helpers: fetch bytes
+ * via a caller-supplied thunk, decode dimensions, build a
+ * `CoverResolution`. Each helper supplies its upstream-specific
+ * prelude (rate-limit gating, lookup, etc.) and hands
+ * `decodeCoverBytes` the actual byte-fetch thunk.
+ *
+ * Returns null on any failure path — upstream throw, undersized bytes
+ * (the inner fetcher returns null), dimension decode miss. Caller
+ * treats null as "no cover from this tier" and falls through to the
+ * next chain entry.
+ *
+ * Centralises `CoverResolution` construction so future shape changes
+ * edit one place rather than three.
+ *
+ * `tryGoogleBooksExtraLarge` intentionally does NOT use this helper:
+ * the GB placeholder-sha check (issue #207) sits between bytes-fetch
+ * and dimension-decode and does not generalise to non-GB sources.
+ */
+async function decodeCoverBytes(
+  source: CoverSource,
+  fetcher: () => Promise<{ bytes: Uint8Array; mime: string } | null>,
+  extras: Pick<CoverResolution, "googleVolumeId" | "openLibraryCoverId"> = {},
+): Promise<CoverResolution | null> {
+  let bytes: { bytes: Uint8Array; mime: string } | null;
+  try {
+    bytes = await fetcher();
+  } catch {
+    return null;
+  }
+  if (!bytes) return null;
+  const dims = decodeImageDimensions(bytes.bytes);
+  if (!dims) return null;
+  return {
+    bytes: bytes.bytes,
+    mime: bytes.mime,
+    source,
+    width: dims.width,
+    height: dims.height,
+    byteCount: bytes.bytes.length,
+    ...extras,
+  };
+}
+
 interface CoverChainContext {
   isbn?: string;
   title?: string;
@@ -467,27 +556,14 @@ async function tryItunes(
   } catch {
     return null;
   }
-  if (!lookup?.artworkUrl100) return null;
-  let bytes: { bytes: Uint8Array; mime: string } | null;
-  try {
-    bytes = await fetchItunesCoverBytes(lookup.artworkUrl100, {
+  const artworkUrl = lookup?.artworkUrl100;
+  if (!artworkUrl) return null;
+  return decodeCoverBytes("itunes", () =>
+    fetchItunesCoverBytes(artworkUrl, {
       fetchFn: deps.fetchFn,
       minWidth,
-    });
-  } catch {
-    return null;
-  }
-  if (!bytes) return null;
-  const dims = decodeImageDimensions(bytes.bytes);
-  if (!dims) return null;
-  return {
-    bytes: bytes.bytes,
-    mime: bytes.mime,
-    source: "itunes",
-    width: dims.width,
-    height: dims.height,
-    byteCount: bytes.bytes.length,
-  };
+    }),
+  );
 }
 
 async function tryOpenLibrary(
@@ -496,27 +572,15 @@ async function tryOpenLibrary(
   minWidth: number,
 ): Promise<CoverResolution | null> {
   if (!ctx.openLibraryCoverId) return null;
-  let bytes: { bytes: Uint8Array; mime: string } | null;
-  try {
-    bytes = await fetchOpenLibraryCoverBytes(ctx.openLibraryCoverId, {
-      fetchFn: deps.fetchFn,
-      minWidth,
-    });
-  } catch {
-    return null;
-  }
-  if (!bytes) return null;
-  const dims = decodeImageDimensions(bytes.bytes);
-  if (!dims) return null;
-  return {
-    bytes: bytes.bytes,
-    mime: bytes.mime,
-    source: ctx.isbn ? "openlibrary_isbn" : "openlibrary_search_title",
-    width: dims.width,
-    height: dims.height,
-    byteCount: bytes.bytes.length,
-    openLibraryCoverId: ctx.openLibraryCoverId,
-  };
+  return decodeCoverBytes(
+    ctx.isbn ? "openlibrary_isbn" : "openlibrary_search_title",
+    () =>
+      fetchOpenLibraryCoverBytes(ctx.openLibraryCoverId!, {
+        fetchFn: deps.fetchFn,
+        minWidth,
+      }),
+    { openLibraryCoverId: ctx.openLibraryCoverId },
+  );
 }
 
 async function tryOpenLibraryDirectIsbn(
@@ -526,26 +590,12 @@ async function tryOpenLibraryDirectIsbn(
 ): Promise<CoverResolution | null> {
   // Title/author flow has no ISBN — this tier auto-skips there.
   if (!ctx.isbn) return null;
-  let bytes: { bytes: Uint8Array; mime: string } | null;
-  try {
-    bytes = await fetchOpenLibraryCoverBytesByIsbn(ctx.isbn, {
+  return decodeCoverBytes("openlibrary_isbn_direct", () =>
+    fetchOpenLibraryCoverBytesByIsbn(ctx.isbn!, {
       fetchFn: deps.fetchFn,
       minWidth,
-    });
-  } catch {
-    return null;
-  }
-  if (!bytes) return null;
-  const dims = decodeImageDimensions(bytes.bytes);
-  if (!dims) return null;
-  return {
-    bytes: bytes.bytes,
-    mime: bytes.mime,
-    source: "openlibrary_isbn_direct",
-    width: dims.width,
-    height: dims.height,
-    byteCount: bytes.bytes.length,
-  };
+    }),
+  );
 }
 
 /** Walk sources in precision-first priority order; each source has the same
@@ -910,35 +960,7 @@ export async function resolveIsbn(
     // but bytes-per-pixel is below threshold — likely whitespace-template
     // false negative. See Task 10 / plan 2026-05-18. Outlier-only signal;
     // tune threshold from production audit data once weeks of history.
-    if (
-      cover &&
-      cover.source === "google_books" &&
-      audit.cover_bytes_per_pixel !== null &&
-      audit.cover_bytes_per_pixel < COVER_LOW_BPP_THRESHOLD
-    ) {
-      Sentry.captureMessage("catalog_cover_suspect_low_bpp", {
-        level: "warning",
-        tags: { catalog_audit: "suspect_cover" },
-        extra: {
-          isbn,
-          volumeId: cover.googleVolumeId,
-          width: cover.width,
-          height: cover.height,
-          byteCount: cover.byteCount,
-          cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
-          cover_aspect: audit.cover_aspect,
-          viewability: audit.gb_viewability,
-        },
-      });
-      // Vercel suspends the waitUntil-wrapped function once the work
-      // promise resolves. Without an explicit flush, Sentry's async
-      // transport may not finish transmitting before suspension and the
-      // event is lost. `runInBackground` only flushes from its `.catch`
-      // handler — the success path (this branch) has to flush itself.
-      // 2s is enough headroom for the ingest round-trip; no-op when SDK
-      // not initialized (self-hoster path).
-      await Sentry.flush(2000);
-    }
+    await reportSuspectLowBpp(cover, audit, { isbn });
 
     return { cached: false, rateLimited: false, row: upsertRow };
   } finally {
@@ -1094,29 +1116,7 @@ export async function resolveTitleAuthor(
     if (upErr) throw new Error(`book_catalog upsert: ${upErr.message}`);
 
     // Sentry warning: see resolveIsbn for rationale (Task 10).
-    if (
-      cover &&
-      cover.source === "google_books" &&
-      audit.cover_bytes_per_pixel !== null &&
-      audit.cover_bytes_per_pixel < COVER_LOW_BPP_THRESHOLD
-    ) {
-      Sentry.captureMessage("catalog_cover_suspect_low_bpp", {
-        level: "warning",
-        tags: { catalog_audit: "suspect_cover" },
-        extra: {
-          normalizedTitleAuthor: key,
-          volumeId: cover.googleVolumeId,
-          width: cover.width,
-          height: cover.height,
-          byteCount: cover.byteCount,
-          cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
-          cover_aspect: audit.cover_aspect,
-          viewability: audit.gb_viewability,
-        },
-      });
-      // Flush before returning — see resolveIsbn for rationale.
-      await Sentry.flush(2000);
-    }
+    await reportSuspectLowBpp(cover, audit, { normalizedTitleAuthor: key });
 
     return { cached: false, rateLimited: false, row: upsertRow };
   } finally {

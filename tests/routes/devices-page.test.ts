@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
-const supabase = createMockSupabase();
+let supabase: ReturnType<typeof createMockSupabase>;
 
 const { load, actions } =
   await import("../../src/routes/app/devices/+page.server");
@@ -49,8 +49,7 @@ function buildActionEvent(
 }
 
 beforeEach(() => {
-  supabase._results.clear();
-  supabase._updateCalls.length = 0;
+  supabase = createMockSupabase();
 });
 
 describe("load /app/devices", () => {

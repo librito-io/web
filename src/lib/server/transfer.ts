@@ -94,7 +94,14 @@ export async function recordConfirmFailure(
 }
 
 export function sanitizeFilename(filename: string): string {
-  return basename(filename);
+  // NFC canonical form for book_transfers.filename: macOS APFS stores
+  // filenames as NFD, Linux/Windows typically NFC. Without normalization
+  // the same title from different OSes produces unequal strings, breaking
+  // any future filename-based comparison or cross-client display.
+  // NFC alone does NOT satisfy Supabase Storage's key validator
+  // (\w = [A-Za-z0-9_]); the storage path bug is fixed separately by
+  // using a UUID-only key. See #216.
+  return basename(filename).normalize("NFC");
 }
 
 export type ValidationResult = { ok: true } | { ok: false; error: string };

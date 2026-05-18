@@ -65,6 +65,20 @@ describe("sanitizeFilename", () => {
   it("strips directory traversal attempts", () => {
     expect(sanitizeFilename("../../../etc/passwd.epub")).toBe("passwd.epub");
   });
+
+  it("normalizes NFD-decomposed combining accents to NFC", () => {
+    // "América" = NFD ('e' + U+0301 COMBINING ACUTE ACCENT).
+    // "América" = NFC (single U+00E9 LATIN SMALL LETTER E WITH ACUTE).
+    const nfd = "América.epub";
+    const nfc = "América.epub";
+    expect(nfd).not.toBe(nfc);
+    expect(sanitizeFilename(nfd)).toBe(nfc);
+  });
+
+  it("leaves already-NFC filenames unchanged", () => {
+    const nfc = "Nicolás.epub";
+    expect(sanitizeFilename(nfc)).toBe(nfc);
+  });
 });
 
 describe("validateTransferSize", () => {

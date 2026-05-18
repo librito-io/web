@@ -11,7 +11,11 @@ import {
   enforceRateLimit,
 } from "$lib/server/ratelimit";
 import { runInBackground } from "$lib/server/wait-until";
-import { getCatalogForBrowser } from "$lib/server/catalog/view";
+import {
+  getCatalogForBrowser,
+  toCatalogResponse,
+  type CatalogView,
+} from "$lib/server/catalog/view";
 import { getCatalogMutex } from "$lib/server/catalog/mutex";
 import type { CoverVariant } from "$lib/server/catalog/types";
 // GOOGLE_BOOKS_API_KEY is Sensitive in Vercel; static-imported sensitive
@@ -20,7 +24,15 @@ import type { CoverVariant } from "$lib/server/catalog/types";
 // missing key silently degrades the entire premium-cover + description path.
 import { env as privateEnv } from "$env/dynamic/private";
 
-const PLACEHOLDER_URL = "/cover-placeholder.svg";
+// Allowlist for the `variant` query param. The cloudflare-images backend
+// interpolates the variant into a URL path segment, so an unvalidated `as`
+// cast would let arbitrary strings flow through to the rendered cover URL.
+const VALID_VARIANTS = new Set<CoverVariant>([
+  "thumbnail",
+  "medium",
+  "large",
+  "xlarge",
+]);
 
 export const GET: RequestHandler = async (event) => {
   const { user } = await event.locals.safeGetSession();
@@ -30,35 +42,17 @@ export const GET: RequestHandler = async (event) => {
   if (!isbn) return jsonError(400, "invalid_isbn", "ISBN failed validation");
 
   const supabase = createAdminClient();
-  const variant = (event.url.searchParams.get("variant") ??
-    "medium") as CoverVariant;
+  const rawVariant = event.url.searchParams.get("variant");
+  const variant: CoverVariant = VALID_VARIANTS.has(rawVariant as CoverVariant)
+    ? (rawVariant as CoverVariant)
+    : "medium";
 
-  let catalogView;
+  let catalogView: CatalogView | null;
   try {
     catalogView = await getCatalogForBrowser(supabase, isbn, variant);
   } catch {
     return jsonError(500, "server_error", "catalog lookup failed");
   }
-
-  // Build the shared metadata shape once. Works for both null catalogView
-  // (no DB row) and non-null with cover_url === null (negative-cache row).
-  // The ?? null is a no-op on the hit path — CatalogView fields are already
-  // nullable. Add new catalog columns here only; both branches pick them up
-  // via spread. Audit issue #18.
-  const baseFields = {
-    isbn,
-    title: catalogView?.title ?? null,
-    author: catalogView?.author ?? null,
-    description: catalogView?.description ?? null,
-    description_provider: catalogView?.description_provider ?? null,
-    publisher: catalogView?.publisher ?? null,
-    page_count: catalogView?.page_count ?? null,
-    subjects: catalogView?.subjects ?? null,
-    published_date: catalogView?.published_date ?? null,
-    language: catalogView?.language ?? null,
-    series_name: catalogView?.series_name ?? null,
-    series_position: catalogView?.series_position ?? null,
-  };
 
   if (!catalogView || catalogView.cover_url === null) {
     // Per-user budget on cold-miss work-scheduling. Layered with the
@@ -83,16 +77,7 @@ export const GET: RequestHandler = async (event) => {
         googleBooksApiKey: privateEnv.GOOGLE_BOOKS_API_KEY,
       }).then(() => undefined),
     );
-    return jsonSuccess({
-      ...baseFields,
-      cover_url: PLACEHOLDER_URL,
-      cold_miss: true,
-    });
   }
 
-  return jsonSuccess({
-    ...baseFields,
-    cover_url: catalogView.cover_url,
-    cold_miss: false,
-  });
+  return jsonSuccess(toCatalogResponse(catalogView, isbn));
 };

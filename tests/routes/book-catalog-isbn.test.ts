@@ -56,12 +56,16 @@ beforeEach(() => {
   });
 });
 
-function buildEvent(isbn: string, session: unknown = { user: { id: "u1" } }) {
+function buildEvent(
+  isbn: string,
+  session: unknown = { user: { id: "u1" } },
+  searchParams = "",
+) {
   return {
     params: { isbn },
     locals: { safeGetSession: async () => session },
     platform: { context: { waitUntil: vi.fn() } },
-    url: new URL(`https://example.com/api/book-catalog/${isbn}`),
+    url: new URL(`https://example.com/api/book-catalog/${isbn}${searchParams}`),
   } as unknown as Parameters<typeof GET>[0];
 }
 
@@ -269,5 +273,56 @@ describe("GET /api/book-catalog/[isbn]", () => {
       String(FAIL_CLOSED_RETRY_AFTER_SEC),
     );
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown variant query param, defaults to medium", async () => {
+    // Untrusted user input flowing into a URL path segment on the
+    // cloudflare-images backend — must not pass through unvalidated.
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: "9780743273565",
+          title: "Gatsby",
+          author: "Fitzgerald",
+          storage_path: "ab/cd.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+    const res = await GET(
+      buildEvent(
+        "9780743273565",
+        { user: { id: "u1" } },
+        "?variant=../etc/passwd",
+      ),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Supabase backend renders the same public URL for any variant — the
+    // assertion that matters is "no arbitrary string in the URL path".
+    expect(body.cover_url).not.toContain("etc/passwd");
+    expect(body.cover_url).toContain(
+      "storage/v1/object/public/cover-cache/ab/cd.jpg",
+    );
+  });
+
+  it("accepts each allowlisted variant value", async () => {
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: "9780743273565",
+          storage_path: "ab/cd.jpg",
+          cover_storage_backend: "supabase",
+        },
+      ],
+      error: null,
+    });
+    for (const v of ["thumbnail", "medium", "large", "xlarge"] as const) {
+      const res = await GET(
+        buildEvent("9780743273565", { user: { id: "u1" } }, `?variant=${v}`),
+      );
+      expect(res.status).toBe(200);
+    }
   });
 });

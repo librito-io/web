@@ -73,14 +73,24 @@ export async function enrichFeedRowsWithCovers(
 
   let coverUrlsByCanon = new Map<string, string>();
   let coverUrlsByTa = new Map<string, string>();
+  let negativeIsbns = new Set<string>();
+  let negativeTaKeys = new Set<string>();
+  // Track lookup success per branch so a DB-blip on one branch does not
+  // cascade into N background resolves for every ISBN / pair on the page.
+  // On throw the branch's "missing" list collapses to empty — warmup cron
+  // is the retry path. Issue #110.
+  let isbnLookupOk = true;
+  let taLookupOk = true;
   const lookups: Promise<void>[] = [];
   if (uniqueCanon.length > 0) {
     lookups.push(
       getCoverUrlsByIsbns(supabase, uniqueCanon, "thumbnail")
-        .then((m) => {
-          coverUrlsByCanon = m;
+        .then((res) => {
+          coverUrlsByCanon = res.covers;
+          negativeIsbns = res.negativeIsbns;
         })
         .catch((err) => {
+          isbnLookupOk = false;
           logger().warn(
             { event: "feed_cover_lookup_failed", error: String(err) },
             "feed_cover_lookup_failed",
@@ -95,10 +105,12 @@ export async function enrichFeedRowsWithCovers(
         Array.from(taPairsByKey.values()),
         "thumbnail",
       )
-        .then((m) => {
-          coverUrlsByTa = m;
+        .then((res) => {
+          coverUrlsByTa = res.covers;
+          negativeTaKeys = res.negativeKeys;
         })
         .catch((err) => {
+          taLookupOk = false;
           logger().warn(
             { event: "feed_cover_lookup_ta_failed", error: String(err) },
             "feed_cover_lookup_ta_failed",
@@ -108,28 +120,57 @@ export async function enrichFeedRowsWithCovers(
   }
   if (lookups.length > 0) await Promise.all(lookups);
 
-  const missingIsbns = uniqueCanon.filter((c) => !coverUrlsByCanon.has(c));
-  const missingTaKeys = uniqueTaKeys.filter((k) => !coverUrlsByTa.has(k));
+  // Subtract both positive cache (covers) and negative cache (storage_path
+  // null) from cold-miss candidates. Negative-cache refire is the leak
+  // issue #110 calls out — the warmup cron handles retry on a longer cadence
+  // than per-request scheduling. A DB-blip on either branch collapses that
+  // branch's cold-miss list to empty so the failure doesn't fan out into
+  // N background resolves.
+  const missingIsbns = isbnLookupOk
+    ? uniqueCanon.filter(
+        (c) => !coverUrlsByCanon.has(c) && !negativeIsbns.has(c),
+      )
+    : [];
+  const missingTaKeys = taLookupOk
+    ? uniqueTaKeys.filter(
+        (k) => !coverUrlsByTa.has(k) && !negativeTaKeys.has(k),
+      )
+    : [];
 
   if (missingIsbns.length > 0 || missingTaKeys.length > 0) {
-    // Single limiter check for the combined fan-out. A row mix (some ISBN,
-    // some title/author) consumes one budget unit, not two.
-    const outcome = await safeLimit(catalogUserLimiter, userId);
-    const allowed = outcome.kind === "ok" && outcome.result.success;
-    if (allowed) {
-      const admin = createAdminClient();
-      // Mutex acquisition lives inside the runInBackground callbacks so the
-      // request-handling path does not wait on the lazy Upstash singleton
-      // init. The cached singleton means subsequent awaits are sync after
-      // first acquisition; the shared promise is reused across the cohort.
-      const mutexPromise = getCatalogMutex();
-      const rateLimiters = {
-        openLibrary: catalogOpenLibraryLimiter,
-        googleBooks: catalogGoogleBooksLimiter,
-        itunes: catalogITunesLimiter,
-      };
-      const googleBooksApiKey = privateEnv.GOOGLE_BOOKS_API_KEY;
-      for (const isbn of missingIsbns) {
+    const admin = createAdminClient();
+    // Mutex acquisition lives inside the runInBackground callbacks so the
+    // request-handling path does not wait on the lazy Upstash singleton
+    // init. The cached singleton means subsequent awaits are sync after
+    // first acquisition; the shared promise is reused across the cohort.
+    const mutexPromise = getCatalogMutex();
+    const rateLimiters = {
+      openLibrary: catalogOpenLibraryLimiter,
+      googleBooks: catalogGoogleBooksLimiter,
+      itunes: catalogITunesLimiter,
+    };
+    const googleBooksApiKey = privateEnv.GOOGLE_BOOKS_API_KEY;
+    // Per-resolve token consumption with short-circuit on deny. Issue #110:
+    // the prior single-token-per-request limiter let a 50-ISBN feed page
+    // consume 50 cold-miss resolves while only spending 1/10 of the user's
+    // per-minute budget. Sequential safeLimit + break enforces "10 cold-miss
+    // resolves/min/user max" matching the limiter's declared bound. Worst-
+    // case latency is bounded by the per-user budget (10 calls + 1 deny
+    // before bail) so the request-path cost is capped.
+    type Work =
+      | { kind: "isbn"; isbn: string }
+      | { kind: "ta"; key: string; pair: { title: string; author: string } };
+    const work: Work[] = [];
+    for (const isbn of missingIsbns) work.push({ kind: "isbn", isbn });
+    for (const key of missingTaKeys) {
+      const pair = taPairsByKey.get(key);
+      if (pair) work.push({ kind: "ta", key, pair });
+    }
+    for (const item of work) {
+      const outcome = await safeLimit(catalogUserLimiter, userId);
+      if (outcome.kind !== "ok" || !outcome.result.success) break;
+      if (item.kind === "isbn") {
+        const isbn = item.isbn;
         runInBackground(event, async () => {
           const mutex = await mutexPromise;
           await resolveIsbn(admin, isbn, {
@@ -138,10 +179,8 @@ export async function enrichFeedRowsWithCovers(
             googleBooksApiKey,
           });
         });
-      }
-      for (const key of missingTaKeys) {
-        const pair = taPairsByKey.get(key);
-        if (!pair) continue;
+      } else {
+        const { pair } = item;
         runInBackground(event, async () => {
           const mutex = await mutexPromise;
           await resolveTitleAuthor(admin, pair.title, pair.author, {

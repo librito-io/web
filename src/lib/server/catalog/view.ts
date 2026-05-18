@@ -153,6 +153,11 @@ export async function getCatalogForBrowser(
   };
 }
 
+export type CoverUrlsByIsbnsResult = {
+  covers: Map<string, string>;
+  negativeIsbns: Set<string>;
+};
+
 /**
  * Batch-resolve cover URLs for a list of ISBNs from `book_catalog`. Powers the
  * highlight-feed card thumbnails: one round-trip for the whole feed page rather
@@ -169,22 +174,25 @@ export async function getCatalogForBrowser(
  *   "thumbnail" for the feed-card use case (200×300 @ q80, retina @3x for the
  *   67×100 box). On the current Supabase Storage backend the variant is a
  *   layout hint only; on Cloudflare Images it picks the rendered size.
- * @returns Map keyed by canonical ISBN. Only ISBNs with a positive
- *   (`storage_path` non-null) row produce an entry; negative-cache rows and
- *   absent rows are both omitted, so the caller renders the placeholder for
- *   any missing key.
+ * @returns `{ covers, negativeIsbns }`.
+ *   - `covers`: Map keyed by canonical ISBN, populated for rows with a
+ *     positive (storage_path non-null) entry.
+ *   - `negativeIsbns`: Set of canonical ISBNs whose row exists but has
+ *     storage_path null (catalog tried, found nothing).
  *
- *   Negative-cache rows (catalog tried, found nothing) get no Map entry —
- *   caller renders placeholder. Catalog warmup cron is the retry path; cold-
- *   miss scheduling here would burn budget on a known-failing resolve.
+ *   ISBNs with no row at all appear in neither — caller schedules a
+ *   cold-miss resolve. Issue #110: returning both surfaces lets
+ *   feed-enrichment skip the cold-miss schedule for negative-cached
+ *   ISBNs, so the warmup cron (not the request path) handles retry.
  */
 export async function getCoverUrlsByIsbns(
   supabase: SupabaseClient,
   isbns: string[],
   variant: CoverVariant = "thumbnail",
-): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  if (isbns.length === 0) return result;
+): Promise<CoverUrlsByIsbnsResult> {
+  const covers = new Map<string, string>();
+  const negativeIsbns = new Set<string>();
+  if (isbns.length === 0) return { covers, negativeIsbns };
   const unique = Array.from(new Set(isbns));
 
   const { data: rawData, error } = await supabase
@@ -195,7 +203,7 @@ export async function getCoverUrlsByIsbns(
   if (error) {
     throw error;
   }
-  if (!rawData) return result;
+  if (!rawData) return { covers, negativeIsbns };
 
   // Cast at the boundary — same pattern as getCatalogForBrowser. The
   // Pick<> distributes across the discriminated union so hasCoverStorage()
@@ -211,18 +219,21 @@ export async function getCoverUrlsByIsbns(
     // contract is "lookup by ISBN". A null-isbn row arriving here would
     // imply a query bug; defensive skip.
     if (row.isbn === null) continue;
-    if (!hasCoverStorage(row)) continue;
-    result.set(
-      row.isbn,
-      coverUrl(
-        row.storage_path,
-        row.cover_storage_backend,
-        variant,
-        row.cover_max_width,
-      ),
-    );
+    if (hasCoverStorage(row)) {
+      covers.set(
+        row.isbn,
+        coverUrl(
+          row.storage_path,
+          row.cover_storage_backend,
+          variant,
+          row.cover_max_width,
+        ),
+      );
+    } else {
+      negativeIsbns.add(row.isbn);
+    }
   }
-  return result;
+  return { covers, negativeIsbns };
 }
 
 /**
@@ -301,31 +312,39 @@ export async function getCatalogForBrowserByTitleAuthor(
   };
 }
 
+export type CoverUrlsByTitleAuthorResult = {
+  covers: Map<string, string>;
+  negativeKeys: Set<string>;
+};
+
 /**
  * Batch-resolve cover URLs for ISBN-less books keyed on (title, author).
  * Mirrors `getCoverUrlsByIsbns` for the title/author branch of the
  * feed-enrichment path. Pairs whose normalization yields null (one side
  * empty after stripping) are silently skipped — caller renders placeholder.
  *
- * @returns Map keyed on `normalized_title_author` (the partial-unique-index
- *   key). Caller is expected to recompute the same key per row to look up.
- *   Only positive (cover-bearing) rows produce an entry; negative-cache rows
- *   are omitted.
+ * @returns `{ covers, negativeKeys }`.
+ *   - `covers`: Map keyed on `normalized_title_author` (the partial-unique-
+ *     index key), populated for positive (cover-bearing) rows.
+ *   - `negativeKeys`: Set of normalized keys whose row exists with
+ *     storage_path null. Issue #110: caller subtracts both from cold-miss
+ *     schedule so warmup cron handles negative-cache retry.
  */
 export async function getCoverUrlsByTitleAuthor(
   supabase: SupabaseClient,
   pairs: { title: string; author: string }[],
   variant: CoverVariant = "thumbnail",
-): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  if (pairs.length === 0) return result;
+): Promise<CoverUrlsByTitleAuthorResult> {
+  const covers = new Map<string, string>();
+  const negativeKeys = new Set<string>();
+  if (pairs.length === 0) return { covers, negativeKeys };
 
   const keys = new Set<string>();
   for (const p of pairs) {
     const k = normalizeTitleAuthor(p.title, p.author);
     if (k) keys.add(k);
   }
-  if (keys.size === 0) return result;
+  if (keys.size === 0) return { covers, negativeKeys };
 
   const { data: rawData, error } = await supabase
     .from("book_catalog")
@@ -336,7 +355,7 @@ export async function getCoverUrlsByTitleAuthor(
     .in("normalized_title_author", Array.from(keys));
 
   if (error) throw error;
-  if (!rawData) return result;
+  if (!rawData) return { covers, negativeKeys };
 
   const rows = rawData as unknown as Pick<
     BookCatalogRow,
@@ -348,16 +367,19 @@ export async function getCoverUrlsByTitleAuthor(
 
   for (const row of rows) {
     if (!row.normalized_title_author) continue;
-    if (!hasCoverStorage(row)) continue;
-    result.set(
-      row.normalized_title_author,
-      coverUrl(
-        row.storage_path,
-        row.cover_storage_backend,
-        variant,
-        row.cover_max_width,
-      ),
-    );
+    if (hasCoverStorage(row)) {
+      covers.set(
+        row.normalized_title_author,
+        coverUrl(
+          row.storage_path,
+          row.cover_storage_backend,
+          variant,
+          row.cover_max_width,
+        ),
+      );
+    } else {
+      negativeKeys.add(row.normalized_title_author);
+    }
   }
-  return result;
+  return { covers, negativeKeys };
 }

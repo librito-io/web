@@ -122,10 +122,13 @@ export function validateTransferSize(size: number): ValidationResult {
   return { ok: true };
 }
 
-export function buildStoragePath(
-  userId: string,
-  transferId: string,
-  filename: string,
-): string {
-  return `${userId}/${transferId}/${filename}`;
+// Storage path is internal addressing only — must be ASCII-safe so that
+// Supabase Storage's `isValidKey` regex (which rejects all non-ASCII via
+// JS `\w` = `[A-Za-z0-9_]`) accepts it at `createSignedUrl` time. The
+// user-facing filename lives in `book_transfers.filename` and is served
+// via `Content-Disposition` on the signed download URL — it never enters
+// the key. The first segment must remain the user's UUID to satisfy the
+// RLS policy on `storage.objects` (foldername[1] = auth.uid()). Issue #216.
+export function buildStoragePath(userId: string, transferId: string): string {
+  return `${userId}/${transferId}.epub`;
 }

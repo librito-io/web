@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 
 const captureException = vi.fn();
+const flush = vi.fn(async () => true);
 vi.mock("@sentry/sveltekit", () => ({
   captureException,
+  flush,
 }));
 
 // Import AFTER mock so the SDK's captureException is the mocked one.
@@ -16,6 +18,7 @@ describe("runInBackground", () => {
     logWrites = [];
     __setTestDestination((line) => logWrites.push(JSON.parse(line)));
     captureException.mockClear();
+    flush.mockClear();
   });
 
   afterEach(() => __resetTestDestination());

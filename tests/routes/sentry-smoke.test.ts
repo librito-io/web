@@ -5,8 +5,10 @@ vi.mock("$env/dynamic/private", () => ({
 }));
 
 const captureException = vi.fn();
+const flush = vi.fn(async () => true);
 vi.mock("@sentry/sveltekit", () => ({
   captureException,
+  flush,
 }));
 
 const { POST } =

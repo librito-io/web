@@ -56,6 +56,27 @@ export interface GoogleBooksItem {
     };
     industryIdentifiers?: { type: string; identifier: string }[];
   };
+  /**
+   * Volume access metadata. Sits at the GoogleBooks API response root,
+   * NOT inside `volumeInfo` — easy to misnest. Used by the resolver chain
+   * to discriminate "real cover scan exists" (pdf.isAvailable=true) from
+   * "metadata-only volume; imageLinks bytes are publisher InDesign
+   * template artifacts" (pdf.isAvailable=false). See issue #209 revised
+   * mechanism + 2026-05-18 n=9 empirical study.
+   *
+   * Only fields with current consumers are declared. Add more (embeddable,
+   * publicDomain, epub.isAvailable, pdf.acsTokenLink, webReaderLink) only
+   * when an actual reader appears — the GB API returns more than this.
+   */
+  accessInfo?: {
+    viewability?:
+      | "NO_PAGES"
+      | "PARTIAL"
+      | "ALL_PAGES"
+      | "ALL_PAGES_AVAILABLE"
+      | string;
+    pdf?: { isAvailable?: boolean };
+  };
 }
 
 export type CoverStorageBackend = "cloudflare-images" | "supabase";

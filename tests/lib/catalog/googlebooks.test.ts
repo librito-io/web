@@ -44,6 +44,29 @@ describe("fetchGoogleBooksByIsbn", () => {
   });
 });
 
+describe("fetchGoogleBooksByIsbn — accessInfo flow-through", () => {
+  it("returns accessInfo when present in API response", async () => {
+    const apiResponse = {
+      items: [
+        {
+          id: "TESTVOLID",
+          volumeInfo: { title: "Test", imageLinks: { thumbnail: "http://x" } },
+          accessInfo: {
+            viewability: "PARTIAL",
+            pdf: { isAvailable: false },
+          },
+        },
+      ],
+    };
+    const fetchFn = vi.fn(async () => jsonResponse(apiResponse));
+    const result = await fetchGoogleBooksByIsbn("9780000000001", {
+      fetchFn,
+    });
+    expect(result?.accessInfo?.pdf?.isAvailable).toBe(false);
+    expect(result?.accessInfo?.viewability).toBe("PARTIAL");
+  });
+});
+
 describe("fetchGoogleBooksByTitleAuthor", () => {
   it("URL-encodes the intitle and inauthor params", async () => {
     const fetchFn = vi.fn(async () => jsonResponse({ items: [] }));

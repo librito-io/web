@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import * as Sentry from "@sentry/sveltekit";
 import type { LimitResult, RateLimiter } from "$lib/server/ratelimit";
 import { canonicalizeIsbn } from "./isbn";
 import { stripMarketingCruft } from "./cleanup";
@@ -8,6 +9,7 @@ import {
   searchOpenLibraryByTitleAuthor,
   fetchOpenLibraryWork,
   fetchOpenLibraryCoverBytes,
+  fetchOpenLibraryCoverBytesByIsbn,
 } from "./openlibrary";
 import {
   fetchGoogleBooksByIsbn,
@@ -153,25 +155,39 @@ async function tryAcquire(
  * its own tryAcquire — matches the issue's explicit edge case where the
  * cover chain was denied but description still wants to try.
  *
- * Side-effect: when this fetcher runs, it consumes one GB rate-limit
- * token via `tryAcquire`. Subsequent calls within the same resolve hit
- * the memo (zero additional tokens) once a fetch has succeeded.
+ * Side-effect: when `fetch` runs, it consumes one GB rate-limit token via
+ * `tryAcquire`. Subsequent calls within the same resolve hit the memo
+ * (zero additional tokens) once a fetch has succeeded.
+ *
+ * `snapshot` returns the cached volume WITHOUT triggering a fetch.
+ * Returns null if the memo hasn't been populated yet (no consumer has
+ * called `fetch`, or all `fetch` calls failed / were rate-limit denied).
+ * Used by audit-field capture (plan 2026-05-18 Task 9): we want to record
+ * GB metadata regardless of which source wins, but we don't want to burn
+ * a fresh GB token just for audit if no cover/description path triggered
+ * a fetch.
  */
 function memoizeGoogleBooksVolume(
   deps: ResolveDeps,
   fetcher: () => Promise<GoogleBooksItem | null>,
-): () => Promise<GoogleBooksItem | null> {
+): {
+  fetch: () => Promise<GoogleBooksItem | null>;
+  snapshot: () => GoogleBooksItem | null;
+} {
   let cached: GoogleBooksItem | null = null;
-  return async () => {
-    if (cached) return cached;
-    if (!(await tryAcquire(deps.rateLimiters.googleBooks))) return null;
-    try {
-      const v = await fetcher();
-      if (v) cached = v;
-      return v;
-    } catch {
-      return null;
-    }
+  return {
+    fetch: async () => {
+      if (cached) return cached;
+      if (!(await tryAcquire(deps.rateLimiters.googleBooks))) return null;
+      try {
+        const v = await fetcher();
+        if (v) cached = v;
+        return v;
+      } catch {
+        return null;
+      }
+    },
+    snapshot: () => cached,
   };
 }
 
@@ -233,14 +249,198 @@ export const KNOWN_GB_PLACEHOLDER_SHAS = new Set<string>([
   "3efa8c43e5b4348f303a528c81adf435f0111ea752fe9f0f6241478b60987fa6",
 ]);
 
+/** Audit metadata captured per resolve, regardless of which source won.
+ *  See plan 2026-05-18 Task 9. */
+interface ResolveAuditFields {
+  gb_pdf_available: boolean | null;
+  gb_viewability: string | null;
+  gb_image_link_tiers: string[] | null;
+  cover_aspect: number | null;
+  cover_bytes_per_pixel: number | null;
+}
+
+function gbAuditFromVolume(
+  gb: GoogleBooksItem | null,
+): Pick<
+  ResolveAuditFields,
+  "gb_pdf_available" | "gb_viewability" | "gb_image_link_tiers"
+> {
+  if (!gb) {
+    return {
+      gb_pdf_available: null,
+      gb_viewability: null,
+      gb_image_link_tiers: null,
+    };
+  }
+  const tiers = gb.volumeInfo?.imageLinks
+    ? Object.keys(gb.volumeInfo.imageLinks)
+    : null;
+  return {
+    gb_pdf_available:
+      typeof gb.accessInfo?.pdf?.isAvailable === "boolean"
+        ? gb.accessInfo.pdf.isAvailable
+        : null,
+    gb_viewability: gb.accessInfo?.viewability ?? null,
+    gb_image_link_tiers: tiers,
+  };
+}
+
+/**
+ * Decimal places for `cover_aspect` (height/width ratio). Three places
+ * ≈ 0.1% resolution, sufficient for aspect classification. Matches the
+ * `NUMERIC(5,3)` column precision in book_catalog.
+ */
+const COVER_ASPECT_PRECISION = 3;
+
+/**
+ * Decimal places for `cover_bytes_per_pixel`. Five places needed for
+ * sub-0.001 compressed densities (e.g. 0.11843 bytes/px for a 1500×2250
+ * JPEG at 400 KB). Matches the `NUMERIC(7,5)` column precision in
+ * book_catalog.
+ */
+const COVER_BPP_PRECISION = 5;
+
+/**
+ * Bytes-per-pixel below this threshold flags a Sentry warning. Real
+ * covers have full-bleed art and compress to roughly 0.1–0.4 bytes/px
+ * at JPEG quality 80. Interior pages dominated by whitespace compress
+ * harder (~0.02–0.08 bpp). Threshold intentionally generous to keep
+ * Sentry noise low while still catching the obvious whitespace-template
+ * class. Tune based on production `cover_bytes_per_pixel` distribution
+ * once weeks of history exist.
+ */
+const COVER_LOW_BPP_THRESHOLD = 0.05;
+
+/**
+ * Compute the five `book_catalog` audit fields from the captured GB
+ * volume snapshot and the winning cover (or null when no source won).
+ * Centralises the precision quantisation so `resolveIsbn` and
+ * `resolveTitleAuthor` share one implementation.
+ */
+function computeAuditFields(
+  gbVolume: GoogleBooksItem | null,
+  cover: CoverResolution | null,
+): ResolveAuditFields {
+  const gbAudit = gbAuditFromVolume(gbVolume);
+  if (!cover) {
+    return {
+      ...gbAudit,
+      cover_aspect: null,
+      cover_bytes_per_pixel: null,
+    };
+  }
+  return {
+    ...gbAudit,
+    cover_aspect: Number(
+      (cover.height / cover.width).toFixed(COVER_ASPECT_PRECISION),
+    ),
+    cover_bytes_per_pixel: Number(
+      (cover.byteCount / (cover.width * cover.height)).toFixed(
+        COVER_BPP_PRECISION,
+      ),
+    ),
+  };
+}
+
 interface CoverResolution {
   bytes: Uint8Array;
   mime: string;
   source: CoverSource;
   width: number;
+  height: number;
+  byteCount: number;
   /** Volume / cover identifiers to record alongside source (where available). */
   googleVolumeId?: string;
   openLibraryCoverId?: number;
+}
+
+/**
+ * Emit a Sentry warning when an accepted GoogleBooks cover has
+ * bytes-per-pixel below COVER_LOW_BPP_THRESHOLD — the false-negative
+ * signal for the pdf.isAvailable filter (Task 8). Caller passes the
+ * identifying extras (e.g. `{ isbn }` or `{ normalizedTitleAuthor }`)
+ * so the same payload shape works from either resolver entry point.
+ *
+ * Awaits Sentry.flush(2000) because the surrounding `runInBackground`
+ * (Vercel waitUntil) only flushes on the .catch path; without an
+ * explicit flush here, success-path warnings would be dropped at
+ * function suspension. See memory note vercel-waituntil-flush-async-
+ * transports.
+ *
+ * No-op when the SDK is not initialised (self-hoster path).
+ */
+async function reportSuspectLowBpp(
+  cover: CoverResolution | null,
+  audit: ResolveAuditFields,
+  identifier: Record<string, string | undefined>,
+): Promise<void> {
+  if (
+    !cover ||
+    cover.source !== "google_books" ||
+    audit.cover_bytes_per_pixel === null ||
+    audit.cover_bytes_per_pixel >= COVER_LOW_BPP_THRESHOLD
+  ) {
+    return;
+  }
+  Sentry.captureMessage("catalog_cover_suspect_low_bpp", {
+    level: "warning",
+    tags: { catalog_audit: "suspect_cover" },
+    extra: {
+      ...identifier,
+      volumeId: cover.googleVolumeId,
+      width: cover.width,
+      height: cover.height,
+      byteCount: cover.byteCount,
+      cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
+      cover_aspect: audit.cover_aspect,
+      viewability: audit.gb_viewability,
+    },
+  });
+  await Sentry.flush(2000);
+}
+
+/**
+ * Shared tail for the OL / iTunes `try*` chain helpers: fetch bytes
+ * via a caller-supplied thunk, decode dimensions, build a
+ * `CoverResolution`. Each helper supplies its upstream-specific
+ * prelude (rate-limit gating, lookup, etc.) and hands
+ * `decodeCoverBytes` the actual byte-fetch thunk.
+ *
+ * Returns null on any failure path — upstream throw, undersized bytes
+ * (the inner fetcher returns null), dimension decode miss. Caller
+ * treats null as "no cover from this tier" and falls through to the
+ * next chain entry.
+ *
+ * Centralises `CoverResolution` construction so future shape changes
+ * edit one place rather than three.
+ *
+ * `tryGoogleBooksExtraLarge` intentionally does NOT use this helper:
+ * the GB placeholder-sha check (issue #207) sits between bytes-fetch
+ * and dimension-decode and does not generalise to non-GB sources.
+ */
+async function decodeCoverBytes(
+  source: CoverSource,
+  fetcher: () => Promise<{ bytes: Uint8Array; mime: string } | null>,
+  extras: Pick<CoverResolution, "googleVolumeId" | "openLibraryCoverId"> = {},
+): Promise<CoverResolution | null> {
+  let bytes: { bytes: Uint8Array; mime: string } | null;
+  try {
+    bytes = await fetcher();
+  } catch {
+    return null;
+  }
+  if (!bytes) return null;
+  const dims = decodeImageDimensions(bytes.bytes);
+  if (!dims) return null;
+  return {
+    bytes: bytes.bytes,
+    mime: bytes.mime,
+    source,
+    width: dims.width,
+    height: dims.height,
+    byteCount: bytes.bytes.length,
+    ...extras,
+  };
 }
 
 interface CoverChainContext {
@@ -265,6 +465,37 @@ async function tryGoogleBooksExtraLarge(
 ): Promise<CoverResolution | null> {
   const gb = await ctx.fetchGbVolume();
   if (!gb?.volumeInfo?.imageLinks) return null;
+
+  // Discriminator: GB serves real cover bytes when the volume has a
+  // backing PDF in their system (first-page scan or publisher-supplied
+  // cover). Without one, the imageLinks bytes are publisher InDesign
+  // template / interior-page artifacts cached during catalog ingestion.
+  // See issue #209 (revised mechanism) + 2026-05-18 n=9 study.
+  //
+  // Empirically splits the bad cohort (Apple in China, Annie Bot, others
+  // in PR #208 backfill) from the good cohort 9/9. Validation runs in
+  // production via the gb_pdf_available audit column (Task 9).
+  //
+  // Trade-off accepted: some legitimate older / public-domain / out-of-
+  // print books may have pdf.isAvailable=false AND real covers. They'll
+  // fall through to OL ISBN-direct (Task 6) or iTunes. Sentry warning on
+  // suspect accepted covers (Task 10) flags the inverse — anything that
+  // passes the filter but still looks wrong.
+  const pdfAvailable = gb.accessInfo?.pdf?.isAvailable === true;
+  if (!pdfAvailable) {
+    logger().warn(
+      {
+        event: "catalog_gb_rejected_no_pdf",
+        isbn: ctx.isbn,
+        volumeId: gb.id,
+        viewability: gb.accessInfo?.viewability,
+        imageLinkTiers: Object.keys(gb.volumeInfo.imageLinks),
+      },
+      "catalog_gb_rejected_no_pdf",
+    );
+    return null;
+  }
+
   const link = selectBestGoogleImageLink(gb.volumeInfo.imageLinks);
   if (!link) return null;
   let bytes: { bytes: Uint8Array; mime: string } | null;
@@ -305,6 +536,8 @@ async function tryGoogleBooksExtraLarge(
     mime: bytes.mime,
     source: "google_books",
     width: dims.width,
+    height: dims.height,
+    byteCount: bytes.bytes.length,
     googleVolumeId: gb.id,
   };
 }
@@ -323,25 +556,14 @@ async function tryItunes(
   } catch {
     return null;
   }
-  if (!lookup?.artworkUrl100) return null;
-  let bytes: { bytes: Uint8Array; mime: string } | null;
-  try {
-    bytes = await fetchItunesCoverBytes(lookup.artworkUrl100, {
+  const artworkUrl = lookup?.artworkUrl100;
+  if (!artworkUrl) return null;
+  return decodeCoverBytes("itunes", () =>
+    fetchItunesCoverBytes(artworkUrl, {
       fetchFn: deps.fetchFn,
       minWidth,
-    });
-  } catch {
-    return null;
-  }
-  if (!bytes) return null;
-  const dims = decodeImageDimensions(bytes.bytes);
-  if (!dims) return null;
-  return {
-    bytes: bytes.bytes,
-    mime: bytes.mime,
-    source: "itunes",
-    width: dims.width,
-  };
+    }),
+  );
 }
 
 async function tryOpenLibrary(
@@ -350,53 +572,83 @@ async function tryOpenLibrary(
   minWidth: number,
 ): Promise<CoverResolution | null> {
   if (!ctx.openLibraryCoverId) return null;
-  let bytes: { bytes: Uint8Array; mime: string } | null;
-  try {
-    bytes = await fetchOpenLibraryCoverBytes(ctx.openLibraryCoverId, {
-      fetchFn: deps.fetchFn,
-      minWidth,
-    });
-  } catch {
-    return null;
-  }
-  if (!bytes) return null;
-  const dims = decodeImageDimensions(bytes.bytes);
-  if (!dims) return null;
-  return {
-    bytes: bytes.bytes,
-    mime: bytes.mime,
-    source: ctx.isbn ? "openlibrary_isbn" : "openlibrary_search_title",
-    width: dims.width,
-    openLibraryCoverId: ctx.openLibraryCoverId,
-  };
+  return decodeCoverBytes(
+    ctx.isbn ? "openlibrary_isbn" : "openlibrary_search_title",
+    () =>
+      fetchOpenLibraryCoverBytes(ctx.openLibraryCoverId!, {
+        fetchFn: deps.fetchFn,
+        minWidth,
+      }),
+    { openLibraryCoverId: ctx.openLibraryCoverId },
+  );
 }
 
-/** Walk sources in priority order; each source has the same `minWidth` floor
- *  applied. First source whose decoded width meets `minWidth` wins. Null
- *  when all sources fail. */
+async function tryOpenLibraryDirectIsbn(
+  deps: ResolveDeps,
+  ctx: CoverChainContext,
+  minWidth: number,
+): Promise<CoverResolution | null> {
+  // Title/author flow has no ISBN — this tier auto-skips there.
+  if (!ctx.isbn) return null;
+  return decodeCoverBytes("openlibrary_isbn_direct", () =>
+    fetchOpenLibraryCoverBytesByIsbn(ctx.isbn!, {
+      fetchFn: deps.fetchFn,
+      minWidth,
+    }),
+  );
+}
+
+/** Walk sources in precision-first priority order; each source has the same
+ *  `minWidth` floor applied. First source whose decoded width meets `minWidth`
+ *  wins. Null when all sources fail.
+ *
+ *  Order (issue #211, plan 2026-05-18):
+ *    1. OL direct-ISBN (covers/b/isbn/{isbn}-L): ISBN-locked, OL-resolved
+ *       across editions of the Work.
+ *    2. OL cover_id (covers/b/id/{cover_id}-L): requires explicit cover_id
+ *       discovery via /api/books or /search.json.
+ *    3. GoogleBooks extraLarge: resolution-rich but prone to wrong-bytes
+ *       failure mode (limited-preview volumes serve InDesign interior
+ *       pages). Filtered by accessInfo.pdf.isAvailable in Task 8.
+ *    4. iTunes: ISBN-keyed, generally precise but lower resolution.
+ *
+ *  Trade-off: prefers precision over resolution. Some books where OL has
+ *  only basic-tier coverage but GB has premium will now stop at OL basic.
+ *  Second-pass (basic floor) preserves the same ordering. */
 async function resolveCoverChain(
   deps: ResolveDeps,
   ctx: CoverChainContext,
   minWidth: number,
 ): Promise<CoverResolution | null> {
   return (
+    (await tryOpenLibraryDirectIsbn(deps, ctx, minWidth)) ??
+    (await tryOpenLibrary(deps, ctx, minWidth)) ??
     (await tryGoogleBooksExtraLarge(deps, ctx, minWidth)) ??
-    (await tryItunes(deps, ctx, minWidth)) ??
-    (await tryOpenLibrary(deps, ctx, minWidth))
+    (await tryItunes(deps, ctx, minWidth))
   );
 }
 
 /** Two-pass: try premium floor (1200), fall back to basic floor (300).
  *
- * Worst-case budget consumption per ISBN is 6 upstream attempts (3 sources ×
- * 2 passes). `tryAcquire` consumes a per-source rate-limit token on each pass
- * regardless of whether the cover fetch succeeds, so an all-miss ISBN burns
- * 2× the per-source budget vs a single-pass chain. Acceptable trade-off
- * because: (a) most popular books succeed at the premium pass first try
- * (one attempt per source), (b) the alternative of a single liberal floor
- * would store low-res sources that fail the `xlarge` variant requirement,
- * (c) per-source limiters fail-OPEN — exhaustion doesn't lock callers out.
- * See issue #199 design notes for full tier rationale. */
+ * Worst-case budget consumption per ISBN is 8 upstream cover attempts
+ * (4 chain tiers × 2 passes). Rate-limit tokens are NOT consumed per
+ * attempt — they have different memoization patterns:
+ *   - OL: 1 token total. Acquired once in resolveIsbn/resolveTitleAuthor
+ *     before the chain enters; shared by both OL tiers (direct-ISBN +
+ *     cover-id) on both passes.
+ *   - GB: 1 token total. Memoized by memoizeGoogleBooksVolume; only the
+ *     first call to fetchGbVolume consumes a token, regardless of how
+ *     many chain tiers or the description path call it.
+ *   - iTunes: up to 2 tokens. tryAcquire runs inside tryItunes per
+ *     invocation, and tryItunes can be called twice (premium + basic
+ *     passes).
+ * Worst-case: 1 + 1 + 2 = 4 tokens per ISBN.
+ * Acceptable trade-off because: (a) most popular books succeed at the
+ * premium pass first try (one attempt per source), (b) the alternative
+ * of a single liberal floor would store low-res sources that fail the
+ * `xlarge` variant requirement, (c) per-source limiters fail-OPEN —
+ * exhaustion doesn't lock callers out. See issue #199 design notes for
+ * full tier rationale. */
 async function resolveCoverWithTiering(
   deps: ResolveDeps,
   ctx: CoverChainContext,
@@ -624,22 +876,22 @@ export async function resolveIsbn(
     // (issue #203). Caches only on successful fetch — a rate-limit denial
     // or upstream error leaves the slot open for a retry from the next
     // consumer (e.g. cover chain denied, description still wants to try).
-    const fetchGbVolume = memoizeGoogleBooksVolume(deps, () =>
+    const gbMemo = memoizeGoogleBooksVolume(deps, () =>
       fetchGoogleBooksByIsbn(isbn, {
         fetchFn: deps.fetchFn,
         apiKey: deps.googleBooksApiKey,
       }),
     );
 
-    // 3. Resolve cover via chain (GB extraLarge → iTunes → OL)
+    // 3. Resolve cover via chain (OL direct → OL cover_id → GB → iTunes)
     const cover = await resolveCoverWithTiering(deps, {
       isbn,
       openLibraryCoverId: openLibraryCoverId ?? undefined,
-      fetchGbVolume,
+      fetchGbVolume: gbMemo.fetch,
     });
 
     // 4. Description fallback via GB (cover is decoupled from description now)
-    await enrichDescriptionWithGoogleBooks(metadata, fetchGbVolume, {
+    await enrichDescriptionWithGoogleBooks(metadata, gbMemo.fetch, {
       do_not_refetch_description: existing?.do_not_refetch_description ?? false,
       logCtx: { isbn },
     });
@@ -650,6 +902,14 @@ export async function resolveIsbn(
       cover ? { bytes: cover.bytes, mime: cover.mime } : null,
       upload,
     );
+
+    // Audit fields (plan 2026-05-18 Task 9). GB metadata is captured
+    // unconditionally whenever a GB volume was fetched during this
+    // resolve — even if GB was filtered out as the cover source — so
+    // production SQL can validate the pdf.isAvailable filter against the
+    // chosen source without log scraping. `snapshot()` reads the memo
+    // synchronously, never burning a fresh GB token.
+    const audit = computeAuditFields(gbMemo.snapshot(), cover);
 
     // 6. Build upsert payload + write
     const upsertRow = {
@@ -682,6 +942,11 @@ export async function resolveIsbn(
         : (existing?.fetched_at ?? now.toISOString()),
       last_attempted_at: now.toISOString(),
       attempt_count: (existing?.attempt_count ?? 0) + 1,
+      gb_pdf_available: audit.gb_pdf_available,
+      gb_viewability: audit.gb_viewability,
+      gb_image_link_tiers: audit.gb_image_link_tiers,
+      cover_aspect: audit.cover_aspect,
+      cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
     };
 
     // Partial unique index requires `INSERT ... ON CONFLICT (col) WHERE pred`.
@@ -690,6 +955,12 @@ export async function resolveIsbn(
       p_row: upsertRow,
     });
     if (error) throw new Error(`book_catalog upsert: ${error.message}`);
+
+    // Sentry warning: GB cover passed the pdf.isAvailable filter (Task 8)
+    // but bytes-per-pixel is below threshold — likely whitespace-template
+    // false negative. See Task 10 / plan 2026-05-18. Outlier-only signal;
+    // tune threshold from production audit data once weeks of history.
+    await reportSuspectLowBpp(cover, audit, { isbn });
 
     return { cached: false, rateLimited: false, row: upsertRow };
   } finally {
@@ -778,7 +1049,7 @@ export async function resolveTitleAuthor(
       metadata.author = search.author_name.join(", ");
 
     // Memoized GB volume fetcher (issue #203) — see resolveIsbn for design.
-    const fetchGbVolume = memoizeGoogleBooksVolume(deps, () =>
+    const gbMemo = memoizeGoogleBooksVolume(deps, () =>
       fetchGoogleBooksByTitleAuthor(title, author, {
         fetchFn: deps.fetchFn,
         apiKey: deps.googleBooksApiKey,
@@ -791,11 +1062,11 @@ export async function resolveTitleAuthor(
       title,
       author,
       openLibraryCoverId: search?.cover_i ?? undefined,
-      fetchGbVolume,
+      fetchGbVolume: gbMemo.fetch,
     });
 
     // 3. Description fallback via GB
-    await enrichDescriptionWithGoogleBooks(metadata, fetchGbVolume, {
+    await enrichDescriptionWithGoogleBooks(metadata, gbMemo.fetch, {
       do_not_refetch_description: existing?.do_not_refetch_description ?? false,
       logCtx: { title, author },
     });
@@ -806,6 +1077,9 @@ export async function resolveTitleAuthor(
       cover ? { bytes: cover.bytes, mime: cover.mime } : null,
       upload,
     );
+
+    // Audit fields (plan 2026-05-18 Task 9) — same shape as resolveIsbn.
+    const audit = computeAuditFields(gbMemo.snapshot(), cover);
 
     // 5. Build upsert payload + write
     const upsertRow = {
@@ -827,6 +1101,11 @@ export async function resolveTitleAuthor(
         : (existing?.fetched_at ?? now.toISOString()),
       last_attempted_at: now.toISOString(),
       attempt_count: (existing?.attempt_count ?? 0) + 1,
+      gb_pdf_available: audit.gb_pdf_available,
+      gb_viewability: audit.gb_viewability,
+      gb_image_link_tiers: audit.gb_image_link_tiers,
+      cover_aspect: audit.cover_aspect,
+      cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
     };
 
     // Same partial-index reason as resolveIsbn — route via RPC.
@@ -835,6 +1114,9 @@ export async function resolveTitleAuthor(
       { p_row: upsertRow },
     );
     if (upErr) throw new Error(`book_catalog upsert: ${upErr.message}`);
+
+    // Sentry warning: see resolveIsbn for rationale (Task 10).
+    await reportSuspectLowBpp(cover, audit, { normalizedTitleAuthor: key });
 
     return { cached: false, rateLimited: false, row: upsertRow };
   } finally {

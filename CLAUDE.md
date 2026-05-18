@@ -592,6 +592,25 @@ Self-hosters: leave `COVER_STORAGE_BACKEND` unset (defaults to `supabase`).
 The cron is opt-in (`CATALOG_WARMUP_ENABLED=false`); without it, the
 catalog populates entirely lazily as users open books.
 
+### Audit columns (plan 2026-05-18)
+
+`book_catalog` carries five audit columns populated on every resolve to
+let production SQL validate the GoogleBooks `pdf.isAvailable` filter
+(Task 8, issue #209 revised mechanism) without log scraping:
+
+- `gb_pdf_available`, `gb_viewability`, `gb_image_link_tiers` — captured
+  whenever a GoogleBooks volume is fetched during the resolve, regardless
+  of which source ends up winning. NULL when GB was not fetched.
+- `cover_aspect`, `cover_bytes_per_pixel` — computed at acceptance.
+  NULL for negative-cache rows.
+
+Query patterns + post-deploy operator runbook live in
+`scripts/data/README.md` ("Catalog cover audit").
+
+Sentry warning `catalog_cover_suspect_low_bpp` fires when an accepted
+GB cover has `cover_bytes_per_pixel < 0.05` — the false-negative signal
+for the pdf.isAvailable filter. Outlier-only; expected single-digits/day.
+
 ## Cron handlers
 
 Cron paths are declared in `vercel.ts` (`crons[]`) and live under `src/routes/api/cron/*/+server.ts`. Two invariants every cron handler must hold:

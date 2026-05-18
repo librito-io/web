@@ -90,3 +90,35 @@ export async function fetchOpenLibraryCoverBytes(
     },
   );
 }
+
+/**
+ * Direct-ISBN cover lookup against OpenLibrary's cover CDN. Distinct from
+ * `fetchOpenLibraryCoverBytes(coverId)` because OL's CDN resolves the ISBN
+ * endpoint against ANY edition of the underlying Work that has cover
+ * bytes — not just the queried edition's `cover.large_id`. Substitutes
+ * for explicit `/works/{id}/editions.json` iteration with one HTTP call.
+ *
+ * `?default=false` makes OL return 404 instead of silently downgrading
+ * to a smaller size when -L is unavailable. Same posture as
+ * `fetchOpenLibraryCoverBytes`.
+ *
+ * Returns null on any non-2xx, undersized bytes, or dimension floor miss.
+ * Caller (resolver chain) treats null as "no cover from this tier" and
+ * falls through.
+ */
+export async function fetchOpenLibraryCoverBytesByIsbn(
+  isbn: string,
+  deps: OpenLibraryDeps & { minWidth?: number } = {},
+): Promise<{ bytes: Uint8Array; mime: string } | null> {
+  return downloadCover(
+    `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg?default=false`,
+    {
+      fetchFn: deps.fetchFn,
+      minBytes: COVER_MIN_BYTES,
+      maxBytes: COVER_MAX_BYTES,
+      minWidth: deps.minWidth,
+      source: "openlibrary",
+      allowedHosts: ["covers.openlibrary.org"],
+    },
+  );
+}

@@ -43,6 +43,11 @@ function makePositive(): PositiveBookCatalogRow {
     attempt_count: 1,
     do_not_refetch_description: false,
     cover_max_width: null,
+    gb_pdf_available: null,
+    gb_viewability: null,
+    gb_image_link_tiers: null,
+    cover_aspect: null,
+    cover_bytes_per_pixel: null,
   } satisfies PositiveBookCatalogRow;
 }
 
@@ -76,6 +81,11 @@ function makeNegative(): NegativeBookCatalogRow {
     attempt_count: 1,
     do_not_refetch_description: false,
     cover_max_width: null,
+    gb_pdf_available: null,
+    gb_viewability: null,
+    gb_image_link_tiers: null,
+    cover_aspect: null,
+    cover_bytes_per_pixel: null,
   } satisfies NegativeBookCatalogRow;
 }
 

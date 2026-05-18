@@ -4,6 +4,7 @@ import {
   searchOpenLibraryByIsbn,
   fetchOpenLibraryWork,
   fetchOpenLibraryCoverBytes,
+  fetchOpenLibraryCoverBytesByIsbn,
 } from "../../../src/lib/server/catalog/openlibrary";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -161,5 +162,88 @@ describe("fetchOpenLibraryCoverBytes", () => {
     const r = await fetchOpenLibraryCoverBytes(12345, { fetchFn });
     expect(r).not.toBeNull();
     expect(r?.bytes.byteLength).toBe(200 * 1024);
+  });
+});
+
+describe("fetchOpenLibraryCoverBytesByIsbn", () => {
+  // PNG signature + IHDR with width 600 (0x0258), height 900 (0x0384), padded
+  // above the 1024-byte placeholder floor so byteSize check passes; decoder
+  // reads dimensions from offset 16-23 (IHDR), trailing zeros are ignored.
+  function pngBytes(
+    widthBE: number[],
+    heightBE: number[],
+  ): Uint8Array<ArrayBuffer> {
+    const header = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      0x00,
+      0x00,
+      0x00,
+      0x0d,
+      0x49,
+      0x48,
+      0x44,
+      0x52,
+      ...widthBE,
+      ...heightBE,
+    ]);
+    const padded = new Uint8Array(2048);
+    padded.set(header, 0);
+    return padded;
+  }
+
+  it("calls covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false", async () => {
+    const png = pngBytes(
+      [0x00, 0x00, 0x02, 0x58], // width 600
+      [0x00, 0x00, 0x03, 0x84], // height 900
+    );
+    const seen: string[] = [];
+    const fetchFn = vi.fn(async (u: URL | RequestInfo) => {
+      seen.push(typeof u === "string" ? u : u.toString());
+      return new Response(png, {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      });
+    });
+    const result = await fetchOpenLibraryCoverBytesByIsbn("9780000000001", {
+      fetchFn,
+    });
+    expect(result).not.toBeNull();
+    expect(seen[0]).toBe(
+      "https://covers.openlibrary.org/b/isbn/9780000000001-L.jpg?default=false",
+    );
+  });
+
+  it("returns null on 404", async () => {
+    const fetchFn = vi.fn(async () => new Response(null, { status: 404 }));
+    const result = await fetchOpenLibraryCoverBytesByIsbn("9780000000001", {
+      fetchFn,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("rejects when decoded width < minWidth floor", async () => {
+    const png = pngBytes(
+      [0x00, 0x00, 0x00, 0x64], // width 100
+      [0x00, 0x00, 0x00, 0x96], // height 150
+    );
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(png, {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        }),
+    );
+    const result = await fetchOpenLibraryCoverBytesByIsbn("9780000000001", {
+      fetchFn,
+      minWidth: 300,
+    });
+    expect(result).toBeNull();
   });
 });

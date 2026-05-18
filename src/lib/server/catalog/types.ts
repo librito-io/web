@@ -56,6 +56,27 @@ export interface GoogleBooksItem {
     };
     industryIdentifiers?: { type: string; identifier: string }[];
   };
+  /**
+   * Volume access metadata. Sits at the GoogleBooks API response root,
+   * NOT inside `volumeInfo` — easy to misnest. Used by the resolver chain
+   * to discriminate "real cover scan exists" (pdf.isAvailable=true) from
+   * "metadata-only volume; imageLinks bytes are publisher InDesign
+   * template artifacts" (pdf.isAvailable=false). See issue #209 revised
+   * mechanism + 2026-05-18 n=9 empirical study.
+   *
+   * Only fields with current consumers are declared. Add more (embeddable,
+   * publicDomain, epub.isAvailable, pdf.acsTokenLink, webReaderLink) only
+   * when an actual reader appears — the GB API returns more than this.
+   */
+  accessInfo?: {
+    viewability?:
+      | "NO_PAGES"
+      | "PARTIAL"
+      | "ALL_PAGES"
+      | "ALL_PAGES_AVAILABLE"
+      | string;
+    pdf?: { isAvailable?: boolean };
+  };
 }
 
 export type CoverStorageBackend = "cloudflare-images" | "supabase";
@@ -68,7 +89,15 @@ export type DescriptionProvider = "openlibrary" | "google_books" | "manual";
 // production may still carry "openlibrary_search_isbn"; the DB column is
 // `text` (not enum), so legacy rows remain valid. Do not add this literal
 // back to the union — there's no code path producing it.
+//
+// "openlibrary_isbn_direct" (issue #211, plan 2026-05-18) sources bytes
+// from covers.openlibrary.org/b/isbn/{isbn}-L.jpg, which resolves against
+// any edition of the underlying Work with cover bytes. Distinct from
+// "openlibrary_isbn" (covers/b/id/{coverId}-L.jpg, requires explicit
+// coverId discovery via /api/books or /search.json). Direct tier sits
+// first in the chain — precision-first ordering.
 export type CoverSource =
+  | "openlibrary_isbn_direct"
   | "openlibrary_isbn"
   | "openlibrary_search_title"
   | "google_books"

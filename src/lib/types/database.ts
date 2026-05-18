@@ -38,6 +38,8 @@ export type Database = {
         Row: {
           attempt_count: number
           author: string | null
+          cover_aspect: number | null
+          cover_bytes_per_pixel: number | null
           cover_max_width: number | null
           cover_source: string | null
           cover_storage_backend: string | null
@@ -46,6 +48,9 @@ export type Database = {
           description_raw: string | null
           do_not_refetch_description: boolean
           fetched_at: string
+          gb_image_link_tiers: string[] | null
+          gb_pdf_available: boolean | null
+          gb_viewability: string | null
           google_volume_id: string | null
           id: string
           image_sha256: string | null
@@ -68,6 +73,8 @@ export type Database = {
         Insert: {
           attempt_count?: number
           author?: string | null
+          cover_aspect?: number | null
+          cover_bytes_per_pixel?: number | null
           cover_max_width?: number | null
           cover_source?: string | null
           cover_storage_backend?: string | null
@@ -76,6 +83,9 @@ export type Database = {
           description_raw?: string | null
           do_not_refetch_description?: boolean
           fetched_at?: string
+          gb_image_link_tiers?: string[] | null
+          gb_pdf_available?: boolean | null
+          gb_viewability?: string | null
           google_volume_id?: string | null
           id?: string
           image_sha256?: string | null
@@ -98,6 +108,8 @@ export type Database = {
         Update: {
           attempt_count?: number
           author?: string | null
+          cover_aspect?: number | null
+          cover_bytes_per_pixel?: number | null
           cover_max_width?: number | null
           cover_source?: string | null
           cover_storage_backend?: string | null
@@ -106,6 +118,9 @@ export type Database = {
           description_raw?: string | null
           do_not_refetch_description?: boolean
           fetched_at?: string
+          gb_image_link_tiers?: string[] | null
+          gb_pdf_available?: boolean | null
+          gb_viewability?: string | null
           google_volume_id?: string | null
           id?: string
           image_sha256?: string | null

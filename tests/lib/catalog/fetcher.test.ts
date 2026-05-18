@@ -91,10 +91,18 @@ function staleNegativeRow(extra: Record<string, unknown> = {}) {
   };
 }
 
-/** Build a GB volumes JSON response with the given imageLinks. */
+/** Build a GB volumes JSON response with the given imageLinks.
+ *
+ * `extra` is spread INTO `volumeInfo` (alongside title, imageLinks).
+ * `accessInfo` is a sibling of `volumeInfo` at the item root — passed
+ * separately so tests can opt into the Task 8 pdf.isAvailable filter.
+ * Tests that pass `accessInfo: { pdf: { isAvailable: true } }` are
+ * asserting GB-wins behavior; absent `accessInfo` triggers the filter
+ * and the chain falls through. See Task 8 / issue #209. */
 function gbVolumesResponse(
   imageLinks: Record<string, string> = {},
   extra: Record<string, unknown> = {},
+  accessInfo?: Record<string, unknown>,
 ) {
   return JSON.stringify({
     kind: "books#volumes",
@@ -107,6 +115,7 @@ function gbVolumesResponse(
           imageLinks: Object.keys(imageLinks).length ? imageLinks : undefined,
           ...extra,
         },
+        ...(accessInfo ? { accessInfo } : {}),
       },
     ],
   });
@@ -314,10 +323,17 @@ describe("resolveIsbn – resolver chain cover", () => {
         });
       }
       if (url.includes("googleapis.com/books")) {
-        return new Response(gbVolumesResponse({ extraLarge: GB_URL }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: GB_URL },
+            {},
+            { pdf: { isAvailable: true } },
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       // GB cover image — serve 1500×2250 fixture
       if (url.includes("books.google.com")) {
@@ -719,12 +735,17 @@ describe("resolveIsbn – resolver chain cover", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      // GB metadata — present but should never reach cover-byte fetch.
+      // GB metadata — present and filter-passing so the test demonstrates
+      // ordering (OL beats GB on priority), not GB being filtered out.
       if (url.includes("googleapis.com/books")) {
         return new Response(
-          gbVolumesResponse({
-            extraLarge: "https://books.google.com/should-not-be-fetched.jpg",
-          }),
+          gbVolumesResponse(
+            {
+              extraLarge: "https://books.google.com/should-not-be-fetched.jpg",
+            },
+            {},
+            { pdf: { isAvailable: true } },
+          ),
           {
             status: 200,
             headers: { "content-type": "application/json" },
@@ -794,14 +815,21 @@ describe("resolveIsbn – resolver chain cover", () => {
           headers: { "content-type": "image/jpeg" },
         });
       }
-      // GB also offers a premium cover with valid bytes — pre-reorder this
-      // would win (GB checked before tryOpenLibrary); post-reorder it loses
-      // to OL cover_id because tryOpenLibrary runs first.
+      // GB also offers a premium cover with valid bytes and a filter-passing
+      // accessInfo — pre-reorder this would win (GB checked before
+      // tryOpenLibrary); post-reorder it loses to OL cover_id because
+      // tryOpenLibrary runs first. accessInfo.pdf.isAvailable=true ensures
+      // the Task 8 filter does NOT reject GB — the test must demonstrate
+      // ordering, not filter behavior.
       if (url.includes("googleapis.com/books")) {
         return new Response(
-          gbVolumesResponse({
-            extraLarge: "https://books.google.com/gb-premium-cover.jpg",
-          }),
+          gbVolumesResponse(
+            {
+              extraLarge: "https://books.google.com/gb-premium-cover.jpg",
+            },
+            {},
+            { pdf: { isAvailable: true } },
+          ),
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
@@ -826,6 +854,169 @@ describe("resolveIsbn – resolver chain cover", () => {
     const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
       .p_row;
     expect(p_row.cover_source).toBe("openlibrary_isbn");
+  });
+
+  it("rejects GB cover when accessInfo.pdf.isAvailable=false; chain advances to iTunes", async () => {
+    // Apple-in-China-style fixture: GB has full imageLinks tier (extraLarge
+    // present) BUT pdf.isAvailable=false → discriminator says no real cover
+    // scan exists → reject. Chain falls through to iTunes (which we mock
+    // to win) so we can verify GB was not the source.
+    const supabase = coldMissSupabase();
+    const ITUNES_URL =
+      "https://is1-ssl.mzstatic.com/image/thumb/Music/foo/100x100bb.jpg";
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://covers.openlibrary.org/b/")) {
+        return new Response(null, { status: 404 });
+      }
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        // GB has full imageLinks (extraLarge present) but accessInfo.pdf.isAvailable=false.
+        return new Response(
+          JSON.stringify({
+            kind: "books#volumes",
+            totalItems: 1,
+            items: [
+              {
+                id: "gbid1",
+                volumeInfo: {
+                  title: "X",
+                  imageLinks: {
+                    extraLarge: "https://books.google.com/extra.jpg",
+                  },
+                },
+                accessInfo: {
+                  pdf: { isAvailable: false },
+                  viewability: "PARTIAL",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.startsWith("https://books.google.com/")) {
+        throw new Error(
+          "GB cover URL must not be fetched when pdf.isAvailable=false",
+        );
+      }
+      if (url.includes("itunes.apple.com/lookup")) {
+        return new Response(itunesResponse(ITUNES_URL), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("mzstatic.com")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    expect(upsertCall).toBeDefined();
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    // GB was rejected; chain fell through to iTunes.
+    expect(p_row.cover_source).toBe("itunes");
+  });
+
+  it("accepts GB cover when accessInfo.pdf.isAvailable=true", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://covers.openlibrary.org/b/")) {
+        return new Response(null, { status: 404 });
+      }
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          JSON.stringify({
+            kind: "books#volumes",
+            totalItems: 1,
+            items: [
+              {
+                id: "gbid1",
+                volumeInfo: {
+                  title: "X",
+                  imageLinks: {
+                    extraLarge: "https://books.google.com/extra.jpg",
+                  },
+                },
+                accessInfo: {
+                  pdf: { isAvailable: true },
+                  viewability: "PARTIAL",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.startsWith("https://books.google.com/")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    expect(upsertCall).toBeDefined();
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.cover_source).toBe("google_books");
   });
 });
 
@@ -1140,6 +1331,7 @@ describe("resolveIsbn – do_not_refetch_description", () => {
           gbVolumesResponse(
             { extraLarge: GB_URL },
             { description: "Marketing blurb to be ignored." },
+            { pdf: { isAvailable: true } },
           ),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -1213,10 +1405,17 @@ describe("resolveIsbn – do_not_refetch_description", () => {
         });
       }
       if (url.includes("googleapis.com/books")) {
-        return new Response(gbVolumesResponse({ extraLarge: GB_COVER_URL }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: GB_COVER_URL },
+            {},
+            { pdf: { isAvailable: true } },
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       if (url.includes("itunes.apple.com/lookup")) {
         return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
@@ -1340,6 +1539,7 @@ describe("resolveTitleAuthor – do_not_refetch_description", () => {
           gbVolumesResponse(
             { extraLarge: GB_COVER_URL },
             { description: "Marketing blurb to be ignored." },
+            { pdf: { isAvailable: true } },
           ),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -1416,10 +1616,17 @@ describe("resolveIsbn – selectBySha dedup", () => {
         });
       }
       if (url.includes("googleapis.com/books")) {
-        return new Response(gbVolumesResponse({ extraLarge: GB_COVER_URL }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: GB_COVER_URL },
+            {},
+            { pdf: { isAvailable: true } },
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       if (url.includes("itunes.apple.com/lookup")) {
         return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
@@ -1490,6 +1697,7 @@ describe("resolveIsbn – GB volume reuse (#203)", () => {
           gbVolumesResponse(
             { extraLarge: GB_URL },
             { description: "A scientist wakes up alone on a spaceship." },
+            { pdf: { isAvailable: true } },
           ),
           { status: 200, headers: { "content-type": "application/json" } },
         );

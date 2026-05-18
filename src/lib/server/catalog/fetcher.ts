@@ -266,6 +266,37 @@ async function tryGoogleBooksExtraLarge(
 ): Promise<CoverResolution | null> {
   const gb = await ctx.fetchGbVolume();
   if (!gb?.volumeInfo?.imageLinks) return null;
+
+  // Discriminator: GB serves real cover bytes when the volume has a
+  // backing PDF in their system (first-page scan or publisher-supplied
+  // cover). Without one, the imageLinks bytes are publisher InDesign
+  // template / interior-page artifacts cached during catalog ingestion.
+  // See issue #209 (revised mechanism) + 2026-05-18 n=9 study.
+  //
+  // Empirically splits the bad cohort (Apple in China, Annie Bot, others
+  // in PR #208 backfill) from the good cohort 9/9. Validation runs in
+  // production via the gb_pdf_available audit column (Task 9).
+  //
+  // Trade-off accepted: some legitimate older / public-domain / out-of-
+  // print books may have pdf.isAvailable=false AND real covers. They'll
+  // fall through to OL ISBN-direct (Task 6) or iTunes. Sentry warning on
+  // suspect accepted covers (Task 10) flags the inverse — anything that
+  // passes the filter but still looks wrong.
+  const pdfAvailable = gb.accessInfo?.pdf?.isAvailable === true;
+  if (!pdfAvailable) {
+    logger().info(
+      {
+        event: "catalog_gb_rejected_no_pdf",
+        isbn: ctx.isbn,
+        volumeId: gb.id,
+        viewability: gb.accessInfo?.viewability,
+        imageLinkTiers: Object.keys(gb.volumeInfo.imageLinks),
+      },
+      "catalog_gb_rejected_no_pdf",
+    );
+    return null;
+  }
+
   const link = selectBestGoogleImageLink(gb.volumeInfo.imageLinks);
   if (!link) return null;
   let bytes: { bytes: Uint8Array; mime: string } | null;

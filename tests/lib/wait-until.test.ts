@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { runInBackground } from "../../src/lib/server/wait-until";
 import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
+
+const captureException = vi.fn();
+vi.mock("@sentry/sveltekit", () => ({
+  captureException,
+}));
+
+// Import AFTER mock so the SDK's captureException is the mocked one.
+const { runInBackground } = await import("../../src/lib/server/wait-until");
 
 describe("runInBackground", () => {
   let logWrites: Record<string, unknown>[];
@@ -8,6 +15,7 @@ describe("runInBackground", () => {
   beforeEach(() => {
     logWrites = [];
     __setTestDestination((line) => logWrites.push(JSON.parse(line)));
+    captureException.mockClear();
   });
 
   afterEach(() => __resetTestDestination());
@@ -39,5 +47,27 @@ describe("runInBackground", () => {
         error: "boom",
       }),
     );
+  });
+
+  it("captures unhandled rejection to Sentry with wait_until tag", async () => {
+    const err = new Error("captured");
+    runInBackground({} as never, async () => {
+      throw err;
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(captureException).toHaveBeenCalledWith(err, {
+      tags: { wait_until: true },
+    });
+  });
+
+  it("both logs and captures on the same throw (additive paths)", async () => {
+    runInBackground({} as never, async () => {
+      throw new Error("dual");
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({ event: "wait_until_failed", error: "dual" }),
+    );
+    expect(captureException).toHaveBeenCalledTimes(1);
   });
 });

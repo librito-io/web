@@ -1,4 +1,5 @@
 import type { RequestEvent } from "@sveltejs/kit";
+import * as Sentry from "@sentry/sveltekit";
 import { logger } from "$lib/server/log";
 
 interface WaitUntilHost {
@@ -17,6 +18,7 @@ export function runInBackground(
       },
       "wait_until_failed",
     );
+    Sentry.captureException(err, { tags: { wait_until: true } });
   });
   const wu = (event as WaitUntilHost).platform?.context?.waitUntil;
   if (typeof wu === "function") {

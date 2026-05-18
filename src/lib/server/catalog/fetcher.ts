@@ -831,7 +831,16 @@ export async function resolveIsbn(
   const mutex = deps.mutex ?? noopMutex;
 
   const existing = await selectByIsbn(supabase, isbn);
-  if (existing && (existing.storage_path || isFreshNegative(existing, now))) {
+  // pending_storage=TRUE means a prior round wrote the metadata row but
+  // never finalized the storage fields (upload throw or finalize UPDATE
+  // throw). Treat as miss so this round retries the upload + finalize.
+  // Feed-driven re-resolve is the retry trigger; see spec
+  // 2026-05-18-catalog-cover-upload-ordering-design.
+  if (
+    existing &&
+    !existing.pending_storage &&
+    (existing.storage_path || isFreshNegative(existing, now))
+  ) {
     return { cached: true, rateLimited: false, row: existing };
   }
 
@@ -995,7 +1004,16 @@ export async function resolveTitleAuthor(
   if (selErr) throw new Error(`book_catalog select: ${selErr.message}`);
 
   const existing = existingRaw as Partial<BookCatalogRowFields> | null;
-  if (existing && (existing.storage_path || isFreshNegative(existing, now))) {
+  // pending_storage=TRUE means a prior round wrote the metadata row but
+  // never finalized the storage fields (upload throw or finalize UPDATE
+  // throw). Treat as miss so this round retries the upload + finalize.
+  // Feed-driven re-resolve is the retry trigger; see spec
+  // 2026-05-18-catalog-cover-upload-ordering-design.
+  if (
+    existing &&
+    !existing.pending_storage &&
+    (existing.storage_path || isFreshNegative(existing, now))
+  ) {
     return { cached: true, rateLimited: false, row: existing };
   }
 

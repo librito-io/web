@@ -41,6 +41,7 @@ import {
   resolveIsbn,
   resolveTitleAuthor,
 } from "../../../src/lib/server/catalog/fetcher";
+import { noopMutex } from "../../../src/lib/server/catalog/mutex";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 // Real JPEG files so decodeImageDimensions can parse width/height.
@@ -92,6 +93,22 @@ function denyAll() {
     googleBooks: { limit: vi.fn(async () => ({ success: false }) as never) },
     itunes: { limit: vi.fn(async () => ({ success: false }) as never) },
   };
+}
+
+/**
+ * Returns a ResolveDeps where every upstream call fails harmlessly so
+ * tests can assert on the cache-hit guard without running a real resolve.
+ * Rate limiters deny → the resolver bails with rateLimited:true after the
+ * cache-hit check passes, which is fine: assertions only test `cached`.
+ */
+function makeDepsWithAllUpstreamFailing() {
+  return deps({
+    fetchFn: vi.fn(
+      async () => new Response(null, { status: 404 }),
+    ) as unknown as typeof fetch,
+    rateLimiters: denyAll(),
+    mutex: noopMutex,
+  });
 }
 
 /** Stale row: past the 30-day negative-cache TTL. */
@@ -259,6 +276,50 @@ describe("resolveIsbn", () => {
       /InvalidIsbn/,
     );
   });
+
+  it("treats pending_storage=TRUE row as a miss and proceeds to resolve", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: "9780000000019",
+          storage_path: null,
+          pending_storage: true,
+          last_attempted_at: new Date().toISOString(),
+          attempt_count: 1,
+        },
+      ],
+      error: null,
+    });
+
+    const d = makeDepsWithAllUpstreamFailing();
+
+    const result = await resolveIsbn(supabase as never, "9780000000019", d);
+
+    expect(result.cached).toBe(false);
+  });
+
+  it("still short-circuits on non-pending fresh-negative row", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: "9780000000026",
+          storage_path: null,
+          pending_storage: false,
+          last_attempted_at: new Date().toISOString(),
+          attempt_count: 1,
+        },
+      ],
+      error: null,
+    });
+
+    const d = makeDepsWithAllUpstreamFailing();
+
+    const result = await resolveIsbn(supabase as never, "9780000000026", d);
+
+    expect(result.cached).toBe(true);
+  });
 });
 
 describe("resolveTitleAuthor", () => {
@@ -290,6 +351,62 @@ describe("resolveTitleAuthor", () => {
     );
     expect(r.cached).toBe(true);
     expect(d.fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("treats pending_storage=TRUE row as a miss and proceeds to resolve", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: null,
+          normalized_title_author: "synth title|synth author",
+          storage_path: null,
+          pending_storage: true,
+          last_attempted_at: new Date().toISOString(),
+          attempt_count: 1,
+        },
+      ],
+      error: null,
+    });
+
+    const d = makeDepsWithAllUpstreamFailing();
+
+    const result = await resolveTitleAuthor(
+      supabase as never,
+      "Synth Title",
+      "Synth Author",
+      d,
+    );
+
+    expect(result.cached).toBe(false);
+  });
+
+  it("still short-circuits on non-pending fresh-negative title/author row", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: null,
+          normalized_title_author: "synth title|synth author",
+          storage_path: null,
+          pending_storage: false,
+          last_attempted_at: new Date().toISOString(),
+          attempt_count: 1,
+        },
+      ],
+      error: null,
+    });
+
+    const d = makeDepsWithAllUpstreamFailing();
+
+    const result = await resolveTitleAuthor(
+      supabase as never,
+      "Synth Title",
+      "Synth Author",
+      d,
+    );
+
+    expect(result.cached).toBe(true);
   });
 });
 

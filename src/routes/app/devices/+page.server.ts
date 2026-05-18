@@ -42,7 +42,7 @@ export const actions: Actions = {
     // radius on its own. PGRST116 = "no rows" from .single(), which here
     // means the device id doesn't exist OR belongs to another user; we
     // collapse both into a 404 to avoid leaking existence.
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("devices")
       .update({ name })
       .eq("id", deviceId)
@@ -74,7 +74,7 @@ export const actions: Actions = {
     // "revoke an already-revoked row" code path doesn't refresh
     // revoked_at (also enforced at the DB layer by trigger
     // devices_prevent_unrevoke, but cheap to fast-path here).
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("devices")
       .update({ revoked_at: new Date().toISOString() })
       .eq("id", deviceId)

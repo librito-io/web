@@ -158,7 +158,7 @@ describe("GET /api/book-catalog/[isbn]", () => {
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
   });
 
-  it("hit response includes all 12 metadata fields", async () => {
+  it("hit response includes all expected metadata fields", async () => {
     supabase._results.set("book_catalog.select", {
       data: [
         {
@@ -202,7 +202,7 @@ describe("GET /api/book-catalog/[isbn]", () => {
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
   });
 
-  it("cold-miss response includes all 12 metadata fields (negative-cache row)", async () => {
+  it("cold-miss response includes all expected metadata fields (negative-cache row)", async () => {
     // Negative-cache row: exists in DB but has no cover stored yet.
     // All metadata fields present; cover_url is null because storage_path is null.
     supabase._results.set("book_catalog.select", {

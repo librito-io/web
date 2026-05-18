@@ -19,6 +19,7 @@ export interface ScrubableEvent {
   };
   contexts?: Record<string, unknown>;
   extra?: Record<string, unknown>;
+  tags?: Record<string, unknown>;
   [k: string]: unknown;
 }
 
@@ -40,6 +41,12 @@ export const REDACTED_FIELDS = [
 const REDACTED_SET = new Set<string>(REDACTED_FIELDS);
 const REDACTED = "[REDACTED]";
 
+/**
+ * Recursively replaces values of REDACTED_FIELDS keys with [REDACTED].
+ * Assumes acyclic, bounded-depth input (Sentry SDK builds these from
+ * serialized error data). No cycle guard or depth cap; if a future
+ * caller passes adversarial graphs, add one then.
+ */
 function redactDeep(value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value !== "object") return value;
@@ -59,7 +66,11 @@ function redactDeep(value: unknown): unknown {
  * `beforeSend` hook for Sentry.init. Single point that decides what
  * leaves the process boundary. Drops authorization + cookie headers
  * entirely; recursively replaces sensitive field values in request.data,
- * contexts, and extra.
+ * request.query_string, contexts, extra, and tags.
+ *
+ * Mutates `event` in place by replacing scrubbed fields and returns the
+ * same reference. Sentry calls beforeSend once per event and discards the
+ * input, so in-place mutation is safe.
  *
  * Always returns the event (never null) — we want every captured error
  * to reach Sentry, just scrubbed.
@@ -70,6 +81,9 @@ export function scrubEvent(
 ): ScrubableEvent | null {
   if (event.request?.headers) {
     const headers = { ...event.request.headers };
+    // Sentry SDK lowercases headers before populating request.headers, so
+    // the lowercase delete is sufficient. If that ever changes, add a
+    // case-insensitive sweep here.
     delete headers.authorization;
     delete headers.cookie;
     event.request.headers = headers;
@@ -79,6 +93,10 @@ export function scrubEvent(
     event.request.data = redactDeep(event.request.data);
   }
 
+  if (event.request?.query_string !== undefined) {
+    event.request.query_string = redactDeep(event.request.query_string);
+  }
+
   if (event.contexts) {
     event.contexts = redactDeep(event.contexts) as Record<string, unknown>;
   }
@@ -86,6 +104,15 @@ export function scrubEvent(
   if (event.extra) {
     event.extra = redactDeep(event.extra) as Record<string, unknown>;
   }
+
+  if (event.tags) {
+    event.tags = redactDeep(event.tags) as Record<string, unknown>;
+  }
+
+  // event.message is intentionally not pattern-scrubbed here. The
+  // canonical defense is "do not put secrets in error messages" — see
+  // docs/operations/sentry-runbook.md if a future incident forces a
+  // pattern-scrub addition.
 
   return event;
 }

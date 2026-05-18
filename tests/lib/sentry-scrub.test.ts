@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   scrubEvent,
   REDACTED_FIELDS,
@@ -23,6 +24,7 @@ describe("scrubEvent", () => {
     expect(REDACTED_FIELDS).toContain("email");
     expect(REDACTED_FIELDS).toContain("privateKey");
     expect(REDACTED_FIELDS).toContain("jwk");
+    expect(REDACTED_FIELDS).toHaveLength(6);
   });
 
   it("strips authorization and cookie headers entirely", () => {
@@ -139,5 +141,51 @@ describe("scrubEvent", () => {
   it("returns the event (never null) so Sentry always sends after scrub", () => {
     const event = makeEvent({});
     expect(scrubEvent(event)).not.toBeNull();
+  });
+
+  it("redacts request.query_string when present", () => {
+    const event = makeEvent({
+      request: { query_string: { token: "qs-token", page: "1" } },
+    });
+    const out = scrubEvent(event)!;
+    const qs = out.request?.query_string as Record<string, unknown>;
+    expect(qs.token).toBe("[REDACTED]");
+    expect(qs.page).toBe("1");
+  });
+
+  it("redacts event.tags when present", () => {
+    const event = makeEvent({
+      tags: { email: "u@x.com", route: "/api/sync", wait_until: true },
+    });
+    const out = scrubEvent(event)!;
+    const tags = out.tags as Record<string, unknown>;
+    expect(tags.email).toBe("[REDACTED]");
+    expect(tags.route).toBe("/api/sync");
+    expect(tags.wait_until).toBe(true);
+  });
+
+  it("query_string handles primitive values (string)", () => {
+    const event = makeEvent({
+      request: { query_string: "raw=string" },
+    });
+    expect(() => scrubEvent(event)).not.toThrow();
+  });
+
+  it("every REDACTED_FIELDS entry appears in pino's redact list (sync guard)", () => {
+    const logSrc = readFileSync(
+      new URL("../../src/lib/server/log.ts", import.meta.url),
+      "utf8",
+    );
+    for (const field of REDACTED_FIELDS) {
+      // Pino lists redact paths as either `"field"` or `"*.field"`. Either
+      // form satisfies the sync requirement. If a future contributor adds
+      // a field to REDACTED_FIELDS without adding it to pino, this fails.
+      const hasTopLevel = logSrc.includes(`"${field}"`);
+      const hasNested = logSrc.includes(`"*.${field}"`);
+      expect(
+        hasTopLevel || hasNested,
+        `${field} missing from pino redact paths in log.ts`,
+      ).toBe(true);
+    }
   });
 });

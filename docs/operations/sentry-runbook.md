@@ -19,7 +19,7 @@ Body includes:
 
 - Error message
 - Stack trace (first frame + a few more)
-- Tags: `environment` (production / preview), `release` (commit SHA), and `wait_until: true` if it originated inside a `runInBackground` callback, or `smoke: true` for self-test events.
+- Tags: `environment` (production / preview), `release` (commit SHA), and `wait_until: true` if it originated inside a `runInBackground` callback. Self-test events have an error message matching `sentry-smoke-test-*`.
 - Direct link to the issue in the Sentry dashboard.
 
 ## How to triage
@@ -30,7 +30,7 @@ Body includes:
 4. **Read the stack trace.** With source maps uploaded (production builds only), frames show TypeScript file + line.
 5. **Tag interpretation:**
    - `wait_until: true` → originated inside `runInBackground` (`src/lib/server/wait-until.ts`). Background work failure — user request returned 200, the background job silently failed. This is the class of issue #214 / issue #219.
-   - `smoke: true` → operator-triggered self-test (`/api/debug/sentry-smoke`). Not a real failure; ignore or use to verify the alert pipeline still works.
+   - Error message matching `sentry-smoke-test-*` → operator-triggered self-test (`/api/debug/sentry-smoke`). Not a real failure; ignore or use to verify the alert pipeline still works.
    - Neither tag → unhandled error from a page load, server action, API route, or other server entry point. Captured by SvelteKit's `handleError` hook wrapped with `Sentry.handleErrorWithSentry()`.
 
 ## How to acknowledge
@@ -50,17 +50,19 @@ curl -X POST https://librito.io/api/debug/sentry-smoke \
 
 Expected response: `202 {"scheduled": true, "id": "<8-char-id>"}`.
 
-Within ~30 seconds: a Sentry issue appears with error message `sentry-smoke-test-<id>` and tags `wait_until: true`, `smoke: true`.
+Within ~30 seconds: a Sentry issue appears with error message `sentry-smoke-test-<id>` and tag `wait_until: true`.
 
 Within ~1 minute: the alert email arrives in the operator inbox (only the first event in a smoke-test group triggers email; subsequent runs increment the count without emailing, unless you "Resolve" the issue in between).
 
 ## Reducing smoke-event noise (one-time setup)
 
-In Sentry → Project Settings → Alerts, create a per-issue rule:
+In Sentry → Project Settings → Inbound Filters (or Alerts → per-issue rule, whichever the SDK version offers), create a rule that ignores events whose error message starts with `sentry-smoke-test-`:
 
-> When an event's tags include `smoke = true` → set issue state to Ignored / suppress notifications.
+> When an event's `message` contains `sentry-smoke-test-` → set issue state to Ignored / suppress notifications.
 
 Without this rule, every health-check curl would re-trigger an email. The default "new issue" rule fires only on the first event in a group, but if you "Resolve" smoke issues to keep the dashboard clean, the next smoke run looks like a "regression" and re-pages.
+
+(The smoke events all share the same error message prefix `sentry-smoke-test-<id>`. Sentry's issue grouping by message + stack signature buckets them under one issue, so the rule operates per-bucket, not per-curl. The 8-char unique `<id>` suffix lets the operator correlate each curl invocation with the exact event Sentry stored, even though Sentry groups them.)
 
 ## Rotating the Sentry DSN
 

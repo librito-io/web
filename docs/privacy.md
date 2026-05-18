@@ -25,7 +25,7 @@ Before any event is sent, the following fields are stripped or redacted in code:
 
 - HTTP `Authorization` and `Cookie` headers are removed entirely.
 - Field values named `token`, `api_token_hash`, `password`, `email`, `privateKey`, or `jwk` (at any nesting depth) are replaced with `[REDACTED]`.
-- No user IP address, no email, and no default-PII enrichment is attached. Only a Supabase user ID is associated with events when a logged-in user's request triggers an error.
+- No user IP address, no email, and no default-PII enrichment is attached. No user identifier is associated with events.
 
 End-user browser-side errors are NOT captured. The browser-side Sentry SDK is not installed. Only server-side errors leave the application.
 

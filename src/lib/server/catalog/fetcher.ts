@@ -8,6 +8,7 @@ import {
   searchOpenLibraryByTitleAuthor,
   fetchOpenLibraryWork,
   fetchOpenLibraryCoverBytes,
+  fetchOpenLibraryCoverBytesByIsbn,
 } from "./openlibrary";
 import {
   fetchGoogleBooksByIsbn,
@@ -371,6 +372,33 @@ async function tryOpenLibrary(
   };
 }
 
+async function tryOpenLibraryDirectIsbn(
+  deps: ResolveDeps,
+  ctx: CoverChainContext,
+  minWidth: number,
+): Promise<CoverResolution | null> {
+  // Title/author flow has no ISBN — this tier auto-skips there.
+  if (!ctx.isbn) return null;
+  let bytes: { bytes: Uint8Array; mime: string } | null;
+  try {
+    bytes = await fetchOpenLibraryCoverBytesByIsbn(ctx.isbn, {
+      fetchFn: deps.fetchFn,
+      minWidth,
+    });
+  } catch {
+    return null;
+  }
+  if (!bytes) return null;
+  const dims = decodeImageDimensions(bytes.bytes);
+  if (!dims) return null;
+  return {
+    bytes: bytes.bytes,
+    mime: bytes.mime,
+    source: "openlibrary_isbn_direct",
+    width: dims.width,
+  };
+}
+
 /** Walk sources in priority order; each source has the same `minWidth` floor
  *  applied. First source whose decoded width meets `minWidth` wins. Null
  *  when all sources fail. */
@@ -380,6 +408,7 @@ async function resolveCoverChain(
   minWidth: number,
 ): Promise<CoverResolution | null> {
   return (
+    (await tryOpenLibraryDirectIsbn(deps, ctx, minWidth)) ??
     (await tryGoogleBooksExtraLarge(deps, ctx, minWidth)) ??
     (await tryItunes(deps, ctx, minWidth)) ??
     (await tryOpenLibrary(deps, ctx, minWidth))
@@ -388,15 +417,16 @@ async function resolveCoverChain(
 
 /** Two-pass: try premium floor (1200), fall back to basic floor (300).
  *
- * Worst-case budget consumption per ISBN is 6 upstream attempts (3 sources ×
- * 2 passes). `tryAcquire` consumes a per-source rate-limit token on each pass
- * regardless of whether the cover fetch succeeds, so an all-miss ISBN burns
- * 2× the per-source budget vs a single-pass chain. Acceptable trade-off
- * because: (a) most popular books succeed at the premium pass first try
- * (one attempt per source), (b) the alternative of a single liberal floor
- * would store low-res sources that fail the `xlarge` variant requirement,
- * (c) per-source limiters fail-OPEN — exhaustion doesn't lock callers out.
- * See issue #199 design notes for full tier rationale. */
+ * Worst-case budget consumption per ISBN is 8 upstream cover attempts
+ * (4 chain tiers × 2 passes). The OL rate-limit token is acquired ONCE
+ * before entering the chain and covers both OL tiers (direct-ISBN and
+ * cover-id), so per-pass token cost is 3 (OL, GB, iTunes); 2 passes
+ * consume 6 tokens worst-case. Acceptable trade-off because: (a) most
+ * popular books succeed at the premium pass first try (one attempt per
+ * source), (b) the alternative of a single liberal floor would store
+ * low-res sources that fail the `xlarge` variant requirement,
+ * (c) per-source limiters fail-OPEN — exhaustion doesn't lock callers
+ * out. See issue #199 design notes for full tier rationale. */
 async function resolveCoverWithTiering(
   deps: ResolveDeps,
   ctx: CoverChainContext,

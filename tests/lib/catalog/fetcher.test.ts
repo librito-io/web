@@ -422,6 +422,11 @@ describe("resolveIsbn – resolver chain cover", () => {
     const supabase = coldMissSupabase();
     const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
       const url = typeof input === "string" ? input : input.toString();
+      // OL direct-ISBN tier (Task 6) probes first — return 404 so this test
+      // continues to assert the openlibrary_isbn (by cover_id) path.
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(null, { status: 404 });
+      }
       if (url.includes("openlibrary.org/api/books")) {
         return new Response(olWithCoverResponse("12345"), {
           status: 200,
@@ -485,6 +490,9 @@ describe("resolveIsbn – resolver chain cover", () => {
     });
     const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(null, { status: 404 });
+      }
       if (url.includes("openlibrary.org/api/books")) {
         return new Response(olWithCoverResponse("77777"), {
           status: 200,
@@ -616,6 +624,11 @@ describe("resolveIsbn – resolver chain cover", () => {
     const supabase = coldMissSupabase();
     const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
       const url = typeof input === "string" ? input : input.toString();
+      // OL direct-ISBN tier (Task 6) probes first — return 404 so this test
+      // continues to assert the openlibrary_isbn (by cover_id) path.
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(null, { status: 404 });
+      }
       if (url.includes("openlibrary.org/api/books")) {
         return new Response(olWithCoverResponse("12345"), {
           status: 200,
@@ -668,6 +681,78 @@ describe("resolveIsbn – resolver chain cover", () => {
     expect(p_row.description).not.toBeNull();
     // Cover came from OL (GB had no imageLinks)
     expect(p_row.cover_source).toBe("openlibrary_isbn");
+  });
+
+  it("OL direct-ISBN returns bytes → tier 1 wins; GB never called", async () => {
+    // Cold-miss for an ISBN where OL's covers/b/isbn/ endpoint returns a real
+    // cover. New tier (Task 6) puts this first. GB JSON may or may not be
+    // fetched (the OL chain context discovery still runs); the assertion is
+    // that the GB COVER BYTES are not fetched, and the winning cover_source
+    // is openlibrary_isbn_direct.
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      // OL direct ISBN endpoint — returns a real 1500x2250 cover.
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      // OL data document — no cover info, just title metadata.
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // OL search — no results.
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // GB metadata — present but should never reach cover-byte fetch.
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse({
+            extraLarge: "https://books.google.com/should-not-be-fetched.jpg",
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      if (url.startsWith("https://books.google.com/")) {
+        throw new Error("GB cover URL must not be fetched when OL direct wins");
+      }
+      if (url.includes("itunes.apple.com")) {
+        throw new Error("iTunes must not be called when OL direct wins");
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    expect(upsertCall).toBeDefined();
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.cover_source).toBe("openlibrary_isbn_direct");
+    expect(p_row.cover_max_width).toBeGreaterThanOrEqual(1200);
   });
 });
 

@@ -128,7 +128,17 @@ async function uploadCloudflare(
   });
   if (!res.ok) {
     if (res.status === 409) {
-      // Already uploaded by sha — id is the same.
+      // Already uploaded by sha — CF Images keys objects on the `id`
+      // form-field; identical bytes produce identical sha → 409.
+      //
+      // LOAD-BEARING for resolver recovery: when the prior resolve's
+      // finalize UPDATE threw, the next resolve re-runs the full flow,
+      // persistCover's selectBySha misses (the pending row has
+      // image_sha256=NULL), this upload runs, and CF responds 409.
+      // Returning the existing path here lets the retry's finalize
+      // UPDATE land without a duplicate CF object. See
+      // docs/superpowers/specs/2026-05-18-catalog-cover-upload-ordering-design.md
+      // and issue #218.
       return {
         storage_path: sha,
         backend: "cloudflare-images",

@@ -4,8 +4,8 @@ import type { PageServerLoad } from "./$types";
 export const load: PageServerLoad = async ({
   locals: { safeGetSession, supabase },
 }) => {
-  const { session } = await safeGetSession();
-  if (!session) redirect(303, "/auth/login");
+  const { user } = await safeGetSession();
+  if (!user) redirect(303, "/auth/login");
 
   // .limit(100) bounds initial SSR payload — mirrors /api/transfer/list's
   // cap so the post-action refresh path agrees with the page-load path.
@@ -14,7 +14,7 @@ export const load: PageServerLoad = async ({
     .select(
       "id, filename, file_size, status, uploaded_at, downloaded_at, attempt_count, last_error, last_attempt_at",
     )
-    .eq("user_id", session.user.id)
+    .eq("user_id", user.id)
     .is("scrubbed_at", null)
     .order("uploaded_at", { ascending: false })
     .limit(100);

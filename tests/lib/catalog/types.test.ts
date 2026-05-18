@@ -48,6 +48,7 @@ function makePositive(): PositiveBookCatalogRow {
     gb_image_link_tiers: null,
     cover_aspect: null,
     cover_bytes_per_pixel: null,
+    pending_storage: false,
   } satisfies PositiveBookCatalogRow;
 }
 
@@ -86,6 +87,7 @@ function makeNegative(): NegativeBookCatalogRow {
     gb_image_link_tiers: null,
     cover_aspect: null,
     cover_bytes_per_pixel: null,
+    pending_storage: false,
   } satisfies NegativeBookCatalogRow;
 }
 

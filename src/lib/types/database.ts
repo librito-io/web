@@ -61,6 +61,7 @@ export type Database = {
           normalized_title_author: string | null
           openlibrary_cover_id: number | null
           page_count: number | null
+          pending_storage: boolean
           published_date: string | null
           publisher: string | null
           series_name: string | null
@@ -96,6 +97,7 @@ export type Database = {
           normalized_title_author?: string | null
           openlibrary_cover_id?: number | null
           page_count?: number | null
+          pending_storage?: boolean
           published_date?: string | null
           publisher?: string | null
           series_name?: string | null
@@ -131,6 +133,7 @@ export type Database = {
           normalized_title_author?: string | null
           openlibrary_cover_id?: number | null
           page_count?: number | null
+          pending_storage?: boolean
           published_date?: string | null
           publisher?: string | null
           series_name?: string | null

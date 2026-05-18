@@ -17,11 +17,16 @@ const { load, actions } =
 const USER_ID = "u-1";
 
 function buildLoadEvent(user: { id: string } | null = { id: USER_ID }) {
+  const url = new URL("https://example.com/app/devices");
   return {
     locals: {
       supabase,
       safeGetSession: async () => ({ user }),
     },
+    url,
+    // Required by @sentry/sveltekit's wrapServerLoadWithSentry, which reads
+    // event.request.method to populate the http.method span attribute.
+    request: new Request(url),
   } as unknown as Parameters<typeof load>[0];
 }
 

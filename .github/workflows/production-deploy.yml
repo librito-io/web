@@ -78,6 +78,14 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          # Sentry build-time vars. `vercel pull` redacts Sensitive vars to
+          # empty strings, so inject directly from GH secrets here — these
+          # override the pulled .env.production.local values. The Vite
+          # sentrySvelteKit plugin no-ops gracefully if any are absent
+          # (preserves the self-hoster / fork path).
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
         run: npx vercel build --prod --token="$VERCEL_TOKEN"
       - id: deploy
         name: Deploy prebuilt to Vercel
@@ -169,3 +177,30 @@ jobs:
             fi
           done < <(printf '%s' "$PATHS_JSON" | python3 -c "import json,sys; [print(p) for p in json.load(sys.stdin)]")
           exit $fail
+      - name: Probe Sentry smoke endpoint on production
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BASE: ${{ needs.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ] || [ -z "${BASE:-}" ]; then
+            echo "::error::CRON_SECRET or deploy URL missing for Sentry probe"
+            exit 1
+          fi
+          # With valid bearer → 200 (?probe=1 short-circuits after auth).
+          status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 \
+            -X POST "$BASE/api/debug/sentry-smoke?probe=1" \
+            -H "Authorization: Bearer $CRON_SECRET" || true)
+          if [ "$status" != "200" ]; then
+            echo "::error::Sentry smoke ?probe=1 returned $status with valid bearer (expected 200)"
+            exit 1
+          fi
+          echo "✓ /api/debug/sentry-smoke?probe=1 → 200 (with auth)"
+          # Without bearer → 401.
+          status=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 \
+            -X POST "$BASE/api/debug/sentry-smoke?probe=1" || true)
+          if [ "$status" != "401" ]; then
+            echo "::error::Sentry smoke returned $status with no auth (expected 401)"
+            exit 1
+          fi
+          echo "✓ /api/debug/sentry-smoke?probe=1 → 401 (no auth)"

@@ -15,7 +15,21 @@ Librito stores the minimum data required to synchronise your highlights, notes, 
 
 - **Book contents.** We do not store the body of your books after they have been delivered to your device. See the Transfer section below for the short delivery window.
 - **Reading progress.** No per-book progress, no session telemetry.
-- **Analytics or third-party tracking.**
+- **Analytics or third-party tracking.** No user analytics, no behavioural telemetry. The librito.io deploy uses Sentry strictly for server-side error reporting to its operator — see the "Operator error tracking" section below.
+
+## Operator error tracking
+
+`librito.io`'s deploy sends server-side error events (unhandled exceptions, including failures inside background jobs) to Sentry, a third-party error-tracking processor. These events power operator alerting — the goal is for a librito.io operator to find out about a server bug in minutes instead of weeks.
+
+Before any event is sent, the following fields are stripped or redacted in code:
+
+- HTTP `Authorization` and `Cookie` headers are removed entirely.
+- Field values named `token`, `api_token_hash`, `password`, `email`, `privateKey`, or `jwk` (at any nesting depth) are replaced with `[REDACTED]`.
+- No user IP address, no email, and no default-PII enrichment is attached. No user identifier is associated with events.
+
+End-user browser-side errors are NOT captured. The browser-side Sentry SDK is not installed. Only server-side errors leave the application.
+
+Self-hosted Librito deployments do not send any events to Sentry unless the operator explicitly opts in by setting the `SENTRY_DSN` environment variable.
 
 ## Book transfer retention
 

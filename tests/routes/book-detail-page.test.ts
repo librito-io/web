@@ -86,6 +86,7 @@ beforeEach(() => {
 });
 
 function buildEvent() {
+  const url = new URL(`https://example.com/app/book/${BOOK_HASH}`);
   return {
     params: { bookHash: BOOK_HASH },
     cookies: { get: (_: string) => undefined },
@@ -94,7 +95,10 @@ function buildEvent() {
       safeGetSession: async () => ({ user: { id: USER_ID } }),
     },
     platform: { context: { waitUntil: vi.fn() } },
-    url: new URL(`https://example.com/app/book/${BOOK_HASH}`),
+    url,
+    // Required by @sentry/sveltekit's wrapServerLoadWithSentry, which reads
+    // event.request.method to populate the http.method span attribute.
+    request: new Request(url),
   } as unknown as Parameters<typeof load>[0];
 }
 

@@ -7,6 +7,10 @@ import {
   type CoverVariant,
 } from "./types";
 
+// Placeholder cover URL substituted when a row has no stored cover
+// (storage_path null) or no row exists at all. Public asset under /static.
+export const PLACEHOLDER_COVER_URL = "/cover-placeholder.svg";
+
 // Columns the browser-facing surfaces project from book_catalog.
 // Pick<BookCatalogRow, K> distributes across the discriminated union
 // (Pick<A | B, K> ≡ Pick<A, K> | Pick<B, K>), so the storage discriminant
@@ -61,6 +65,66 @@ export type BookDetailCatalog = Pick<
 > & {
   cover_url: string;
 };
+
+/**
+ * JSON response shape returned by `GET /api/book-catalog/[isbn]`.
+ *
+ * Deriving from CatalogView via Pick keeps the API surface in lockstep
+ * with the underlying view: adding a column to CatalogView surfaces as
+ * a typecheck failure on `toCatalogResponse` and on any consumer that
+ * destructures this type (audit #18).
+ */
+export type CatalogResponse = Pick<
+  CatalogView,
+  | "isbn"
+  | "title"
+  | "author"
+  | "description"
+  | "description_provider"
+  | "publisher"
+  | "page_count"
+  | "subjects"
+  | "published_date"
+  | "language"
+  | "series_name"
+  | "series_position"
+> & {
+  cover_url: string;
+  cold_miss: boolean;
+};
+
+/**
+ * Project a CatalogView (or null, when no row exists) into the API
+ * response shape. Collapses the hit-vs-cold-miss field duplication that
+ * lived in the route handler: both branches share the same metadata
+ * projection and only differ on `cover_url` / `cold_miss`.
+ *
+ * Cold miss is defined as "no row, or row exists but storage_path is
+ * null" — both surface to the client as placeholder URL + cold_miss=true
+ * so the route can schedule background resolve work uniformly.
+ */
+export function toCatalogResponse(
+  view: CatalogView | null,
+  isbn: string,
+): CatalogResponse {
+  const coldMiss = !view || view.cover_url === null;
+  return {
+    isbn,
+    title: view?.title ?? null,
+    author: view?.author ?? null,
+    description: view?.description ?? null,
+    description_provider: view?.description_provider ?? null,
+    publisher: view?.publisher ?? null,
+    page_count: view?.page_count ?? null,
+    subjects: view?.subjects ?? null,
+    published_date: view?.published_date ?? null,
+    language: view?.language ?? null,
+    series_name: view?.series_name ?? null,
+    series_position: view?.series_position ?? null,
+    cover_url: coldMiss ? PLACEHOLDER_COVER_URL : (view!.cover_url as string),
+    cold_miss: coldMiss,
+  };
+}
 
 const CATALOG_SELECT =
   "isbn, title, author, description, description_provider, publisher, " +

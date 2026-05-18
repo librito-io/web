@@ -97,7 +97,7 @@ export const POST: RequestHandler = async ({
   }
 
   const transferId = crypto.randomUUID();
-  const storagePath = buildStoragePath(user.id, transferId, safeFilename);
+  const storagePath = buildStoragePath(user.id, transferId);
 
   const { error: insertError } = await supabase.from("book_transfers").insert({
     id: transferId,

@@ -94,7 +94,14 @@ export async function recordConfirmFailure(
 }
 
 export function sanitizeFilename(filename: string): string {
-  return basename(filename);
+  // NFC canonical form for book_transfers.filename: macOS APFS stores
+  // filenames as NFD, Linux/Windows typically NFC. Without normalization
+  // the same title from different OSes produces unequal strings, breaking
+  // any future filename-based comparison or cross-client display.
+  // NFC alone does NOT satisfy Supabase Storage's key validator
+  // (\w = [A-Za-z0-9_]); the storage path bug is fixed separately by
+  // using a UUID-only key. See #216.
+  return basename(filename).normalize("NFC");
 }
 
 export type ValidationResult = { ok: true } | { ok: false; error: string };
@@ -115,10 +122,13 @@ export function validateTransferSize(size: number): ValidationResult {
   return { ok: true };
 }
 
-export function buildStoragePath(
-  userId: string,
-  transferId: string,
-  filename: string,
-): string {
-  return `${userId}/${transferId}/${filename}`;
+// Storage path is internal addressing only — must be ASCII-safe so that
+// Supabase Storage's `isValidKey` regex (which rejects all non-ASCII via
+// JS `\w` = `[A-Za-z0-9_]`) accepts it at `createSignedUrl` time. The
+// user-facing filename lives in `book_transfers.filename` and is served
+// via `Content-Disposition` on the signed download URL — it never enters
+// the key. The first segment must remain the user's UUID to satisfy the
+// RLS policy on `storage.objects` (foldername[1] = auth.uid()). Issue #216.
+export function buildStoragePath(userId: string, transferId: string): string {
+  return `${userId}/${transferId}.epub`;
 }

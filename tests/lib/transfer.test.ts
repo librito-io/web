@@ -65,6 +65,20 @@ describe("sanitizeFilename", () => {
   it("strips directory traversal attempts", () => {
     expect(sanitizeFilename("../../../etc/passwd.epub")).toBe("passwd.epub");
   });
+
+  it("normalizes NFD-decomposed combining accents to NFC", () => {
+    // "América" = NFD ('e' + U+0301 COMBINING ACUTE ACCENT).
+    // "América" = NFC (single U+00E9 LATIN SMALL LETTER E WITH ACUTE).
+    const nfd = "América.epub";
+    const nfc = "América.epub";
+    expect(nfd).not.toBe(nfc);
+    expect(sanitizeFilename(nfd)).toBe(nfc);
+  });
+
+  it("leaves already-NFC filenames unchanged", () => {
+    const nfc = "Nicolás.epub";
+    expect(sanitizeFilename(nfc)).toBe(nfc);
+  });
 });
 
 describe("validateTransferSize", () => {
@@ -106,15 +120,28 @@ describe("validateTransferSize", () => {
 });
 
 describe("buildStoragePath", () => {
-  it("returns {userId}/{transferId}/{filename}", () => {
-    expect(buildStoragePath("user-123", "transfer-456", "book.epub")).toBe(
-      "user-123/transfer-456/book.epub",
+  it("returns {userId}/{transferId}.epub — ASCII-only", () => {
+    expect(
+      buildStoragePath(
+        "fbb5b2c8-1d1f-4c1f-a3e7-9c1c43e2c0e3",
+        "9c2c7c1c-1f1f-4c1f-b3e7-fbb5b2c81d1f",
+      ),
+    ).toBe(
+      "fbb5b2c8-1d1f-4c1f-a3e7-9c1c43e2c0e3/9c2c7c1c-1f1f-4c1f-b3e7-fbb5b2c81d1f.epub",
     );
   });
 
-  it("works with arbitrary string segments", () => {
-    expect(buildStoragePath("abc", "def", "my-file.epub")).toBe(
-      "abc/def/my-file.epub",
-    );
+  it("output contains no non-ASCII bytes (Storage key regex safety)", () => {
+    // Regression for #216: Supabase Storage `isValidKey` regex rejects any
+    // byte outside [A-Za-z0-9_] plus a small ASCII punctuation set.
+    // UUID-based path is regex-clean by construction.
+    const path = buildStoragePath(crypto.randomUUID(), crypto.randomUUID());
+    expect(path).toMatch(/^[A-Za-z0-9_./-]+$/);
+  });
+
+  it("first folder segment is the userId so RLS foldername[1] holds", () => {
+    const userId = "0e0e0e0e-0000-0000-0000-000000000000";
+    const path = buildStoragePath(userId, crypto.randomUUID());
+    expect(path.split("/")[0]).toBe(userId);
   });
 });

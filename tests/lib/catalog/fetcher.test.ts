@@ -1635,6 +1635,89 @@ describe("resolveIsbn – resolver chain cover", () => {
     // UPDATE was NOT called — finalize never ran because upload threw.
     expect(supabase._updateCalls).toHaveLength(0);
   });
+
+  it("throws book_catalog storage finalize when UPDATE fails after upload", async () => {
+    // Cold-miss resolve where the finalize UPDATE step returns a DB error.
+    // Verifies that: (1) the error message is distinguishable ("book_catalog
+    // storage finalize"), (2) the RPC was called with pending_storage=TRUE
+    // (initial upsert succeeded), and (3) the UPDATE was attempted exactly
+    // once. The pending row stays in the DB for the next feed render's
+    // recovery path (cache-hit bypass → re-resolve → upload → finalize retry).
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null }, // selectByIsbn miss
+      { data: null, error: null }, // selectBySha miss
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", {
+      data: null,
+      error: { message: "synthetic db update failure" },
+    });
+
+    const GB_URL =
+      "https://books.google.com/books/content?id=abc&printsec=frontcover&img=1&zoom=0";
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: GB_URL },
+            {},
+            { pdf: { isAvailable: true } },
+          ),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("books.google.com")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    const d = deps({ fetchFn });
+
+    await expect(
+      resolveIsbn(supabase as never, "9780000000033", d),
+    ).rejects.toThrow(/book_catalog storage finalize/);
+
+    // RPC was called with pending_storage=true (initial upsert succeeded).
+    const rpcCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    expect(rpcCall).toBeDefined();
+    const p_row = (rpcCall!.args as { p_row: Record<string, unknown> }).p_row;
+    expect(p_row.pending_storage).toBe(true);
+
+    // UPDATE was attempted exactly once (upload succeeded, finalize threw).
+    expect(supabase._updateCalls).toHaveLength(1);
+  });
 });
 
 describe("resolveTitleAuthor – resolver chain", () => {

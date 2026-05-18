@@ -69,6 +69,30 @@ describe("load /app/devices", () => {
     expect(result).toEqual({
       devices: [{ id: "d-1", name: "Reader", user_id: USER_ID }],
     });
+    // Predicate assertions: the load query must scope by user_id, hide
+    // revoked rows, and order by paired_at desc. A silent drop of any of
+    // these would leak other users' devices, surface revoked entries to
+    // the UI, or scramble the displayed order — none of which would
+    // otherwise fail this suite.
+    const selectChain = supabase._chainCalls.filter(
+      (c) => c.table === "devices" && c.operation === "select",
+    );
+    expect(selectChain).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          method: "eq",
+          args: ["user_id", USER_ID],
+        }),
+        expect.objectContaining({
+          method: "is",
+          args: ["revoked_at", null],
+        }),
+        expect.objectContaining({
+          method: "order",
+          args: ["paired_at", { ascending: false }],
+        }),
+      ]),
+    );
   });
 });
 
@@ -135,8 +159,27 @@ describe("action rename /app/devices", () => {
     );
     expect(res).toEqual({ success: true });
     expect(supabase._updateCalls).toEqual([
-      expect.objectContaining({ table: "devices" }),
+      { table: "devices", payload: { name: "Reader" } },
     ]);
+    // Predicate assertions: the UPDATE must scope by id AND user_id.
+    // The .eq("user_id", user.id) clause is documented as
+    // defense-in-depth against a future RLS regression — silent removal
+    // would widen the blast radius without failing this suite otherwise.
+    const updateChain = supabase._chainCalls.filter(
+      (c) => c.table === "devices" && c.operation === "update",
+    );
+    expect(updateChain).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          method: "eq",
+          args: ["id", "d-1"],
+        }),
+        expect.objectContaining({
+          method: "eq",
+          args: ["user_id", USER_ID],
+        }),
+      ]),
+    );
   });
 
   it("returns 500 on non-PGRST116 update error", async () => {
@@ -180,9 +223,38 @@ describe("action revoke /app/devices", () => {
     });
     const res = await actions.revoke(buildActionEvent({ deviceId: "d-1" }));
     expect(res).toEqual({ success: true });
-    expect(supabase._updateCalls).toEqual([
-      expect.objectContaining({ table: "devices" }),
-    ]);
+    // Payload must carry an ISO-formatted revoked_at timestamp. A bug
+    // that wrote the wrong shape (e.g. `null`, a Date object, an empty
+    // string) would still satisfy a table-only assertion.
+    expect(supabase._updateCalls).toHaveLength(1);
+    const [call] = supabase._updateCalls;
+    expect(call.table).toBe("devices");
+    const payload = call.payload as { revoked_at: string };
+    expect(typeof payload.revoked_at).toBe("string");
+    expect(payload.revoked_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    // Predicate assertions: id + user_id scoping, plus the
+    // .is("revoked_at", null) guard that makes revoke idempotent
+    // (already-revoked rows hit no candidates → PGRST116 → 404, rather
+    // than refreshing the timestamp).
+    const updateChain = supabase._chainCalls.filter(
+      (c) => c.table === "devices" && c.operation === "update",
+    );
+    expect(updateChain).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          method: "eq",
+          args: ["id", "d-1"],
+        }),
+        expect.objectContaining({
+          method: "eq",
+          args: ["user_id", USER_ID],
+        }),
+        expect.objectContaining({
+          method: "is",
+          args: ["revoked_at", null],
+        }),
+      ]),
+    );
   });
 
   it("returns 500 on non-PGRST116 update error", async () => {

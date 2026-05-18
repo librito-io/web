@@ -76,6 +76,8 @@ describe("POST /api/device/unpair", () => {
     supabase._results.set("devices.update", { data: null, error: null });
     const res = await POST(buildEvent());
     expect(res.status).toBe(200);
-    expect(supabase._updateCalls).toEqual([{ table: "devices" }]);
+    expect(supabase._updateCalls).toEqual([
+      expect.objectContaining({ table: "devices" }),
+    ]);
   });
 });

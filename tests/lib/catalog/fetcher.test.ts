@@ -425,6 +425,12 @@ describe("resolveIsbn – resolver chain cover", () => {
       data: null,
       error: null,
     });
+    // After Task 3 reorder: finalize step is a plain UPDATE on book_catalog
+    // keyed on isbn. Mock returns success so the cover branch completes.
+    supabase._results.set("book_catalog.update", {
+      data: null,
+      error: null,
+    });
     return supabase;
   }
 
@@ -480,7 +486,11 @@ describe("resolveIsbn – resolver chain cover", () => {
       });
     }) as unknown as typeof fetch;
 
-    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+    const result = await resolveIsbn(
+      supabase as never,
+      "9780743273565",
+      deps({ fetchFn }),
+    );
 
     const upsertCall = supabase._rpcCalls.find(
       (c) => c.name === "upsert_book_catalog_by_isbn",
@@ -489,8 +499,11 @@ describe("resolveIsbn – resolver chain cover", () => {
     const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
       .p_row;
     expect(p_row.cover_source).toBe("google_books");
-    expect(p_row.cover_max_width).toBeGreaterThanOrEqual(1200);
-    expect(p_row.storage_path).not.toBeNull();
+    // After Task 3 reorder: initial RPC row has storage_path=NULL;
+    // finalize UPDATE writes the storage fields. Assert on result.row.
+    expect(p_row.storage_path).toBeNull();
+    expect(result.row.cover_max_width).toBeGreaterThanOrEqual(1200);
+    expect(result.row.storage_path).not.toBeNull();
 
     // iTunes should not have been called
     const itunesCalls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -552,7 +565,11 @@ describe("resolveIsbn – resolver chain cover", () => {
       });
     }) as unknown as typeof fetch;
 
-    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+    const result = await resolveIsbn(
+      supabase as never,
+      "9780743273565",
+      deps({ fetchFn }),
+    );
 
     const upsertCall = supabase._rpcCalls.find(
       (c) => c.name === "upsert_book_catalog_by_isbn",
@@ -560,8 +577,11 @@ describe("resolveIsbn – resolver chain cover", () => {
     const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
       .p_row;
     expect(p_row.cover_source).toBe("itunes");
-    expect(p_row.cover_max_width).toBeGreaterThanOrEqual(1200);
-    expect(p_row.storage_path).not.toBeNull();
+    // After Task 3 reorder: initial RPC row has storage_path=NULL;
+    // finalize UPDATE writes the storage fields. Assert on result.row.
+    expect(p_row.storage_path).toBeNull();
+    expect(result.row.cover_max_width).toBeGreaterThanOrEqual(1200);
+    expect(result.row.storage_path).not.toBeNull();
   });
 
   it("GB + iTunes both miss premium; falls back to OL at basic floor", async () => {
@@ -614,7 +634,11 @@ describe("resolveIsbn – resolver chain cover", () => {
       });
     }) as unknown as typeof fetch;
 
-    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+    const result = await resolveIsbn(
+      supabase as never,
+      "9780743273565",
+      deps({ fetchFn }),
+    );
 
     const upsertCall = supabase._rpcCalls.find(
       (c) => c.name === "upsert_book_catalog_by_isbn",
@@ -622,9 +646,13 @@ describe("resolveIsbn – resolver chain cover", () => {
     const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
       .p_row;
     expect(p_row.cover_source).toBe("openlibrary_isbn");
-    // 600×900 fixture — width should be 600
-    expect(p_row.cover_max_width).toBe(600);
-    expect(p_row.storage_path).not.toBeNull();
+    // After Task 3 reorder: initial RPC row has storage_path=NULL and
+    // cover_max_width=NULL; finalize UPDATE writes the storage fields.
+    expect(p_row.storage_path).toBeNull();
+    expect(p_row.cover_max_width).toBeNull();
+    // 600×900 fixture — width should be 600; assert on result.row.
+    expect(result.row.cover_max_width).toBe(600);
+    expect(result.row.storage_path).not.toBeNull();
   });
 
   it("all sources fail → negative cache (storage_path null, cover_source null)", async () => {
@@ -750,7 +778,7 @@ describe("resolveIsbn – resolver chain cover", () => {
       },
     });
 
-    await resolveIsbn(supabase as never, "9780743273565", d);
+    const result = await resolveIsbn(supabase as never, "9780743273565", d);
 
     // GB JSON should not have been fetched (limiter denied)
     const gbCalls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -764,7 +792,10 @@ describe("resolveIsbn – resolver chain cover", () => {
     const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
       .p_row;
     expect(p_row.cover_source).toBe("itunes");
-    expect(p_row.cover_max_width).toBeGreaterThanOrEqual(1200);
+    // After Task 3 reorder: cover_max_width is null in the initial RPC row;
+    // finalize UPDATE writes it. Assert on result.row.
+    expect(p_row.cover_max_width).toBeNull();
+    expect(result.row.cover_max_width).toBeGreaterThanOrEqual(1200);
   });
 
   it("description fallback fires when OL description absent and GB has one", async () => {
@@ -896,7 +927,11 @@ describe("resolveIsbn – resolver chain cover", () => {
       });
     }) as unknown as typeof fetch;
 
-    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+    const result = await resolveIsbn(
+      supabase as never,
+      "9780743273565",
+      deps({ fetchFn }),
+    );
 
     const upsertCall = supabase._rpcCalls.find(
       (c) => c.name === "upsert_book_catalog_by_isbn",
@@ -905,7 +940,9 @@ describe("resolveIsbn – resolver chain cover", () => {
     const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
       .p_row;
     expect(p_row.cover_source).toBe("openlibrary_isbn_direct");
-    expect(p_row.cover_max_width).toBeGreaterThanOrEqual(1200);
+    // After Task 3 reorder: cover_max_width null in initial RPC row.
+    expect(p_row.cover_max_width).toBeNull();
+    expect(result.row.cover_max_width).toBeGreaterThanOrEqual(1200);
   });
 
   it("OL by cover_id wins over GB when both have valid bytes at the same floor", async () => {
@@ -1283,6 +1320,162 @@ describe("resolveIsbn – resolver chain cover", () => {
     expect(p_row.gb_pdf_available).toBe(false);
     expect(p_row.gb_image_link_tiers).toEqual(["extraLarge"]);
   });
+
+  // ── Task 3 reorder invariant tests ─────────────────────────────────────────
+
+  it("writes pending_storage=true on initial upsert, then finalizes with pending_storage=false", async () => {
+    // Verifies the two-step write contract: RPC upsert carries pending_storage=TRUE
+    // with storage fields null; finalize UPDATE carries pending_storage=FALSE with
+    // storage fields populated. See spec 2026-05-18-catalog-cover-upload-ordering-design.
+    const supabase = coldMissSupabase();
+    const GB_URL =
+      "https://books.google.com/books/content?id=abc&printsec=frontcover&img=1&zoom=0";
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: GB_URL },
+            {},
+            { pdf: { isAvailable: true } },
+          ),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("books.google.com")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await resolveIsbn(
+      supabase as never,
+      "9780000000019",
+      deps({ fetchFn }),
+    );
+
+    // The initial RPC call must carry pending_storage=true and storage_path=null.
+    const rpcCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    expect(rpcCall).toBeDefined();
+    const p_row = (rpcCall!.args as { p_row: Record<string, unknown> }).p_row;
+    expect(p_row.pending_storage).toBe(true);
+    expect(p_row.storage_path).toBeNull();
+    expect(p_row.cover_max_width).toBeNull();
+
+    // The finalize UPDATE must carry pending_storage=false with storage fields.
+    expect(supabase._updateCalls).toHaveLength(1);
+    expect(supabase._updateCalls[0].table).toBe("book_catalog");
+    const updatePayload = supabase._updateCalls[0].payload as Record<
+      string,
+      unknown
+    >;
+    expect(updatePayload.pending_storage).toBe(false);
+    expect(updatePayload.storage_path).not.toBeNull();
+
+    // Result row reflects the finalized state.
+    expect(result.row.pending_storage).toBe(false);
+    expect(result.row.storage_path).not.toBeNull();
+  });
+
+  it("leaves pending row and skips finalize when upload throws", async () => {
+    // Verifies that a failed upload leaves the row pending (RPC was called)
+    // but does NOT call the finalize UPDATE. The pending row stays in place
+    // for the next feed render to retry.
+    const supabase = coldMissSupabase();
+    const GB_URL =
+      "https://books.google.com/books/content?id=abc&printsec=frontcover&img=1&zoom=0";
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: GB_URL },
+            {},
+            { pdf: { isAvailable: true } },
+          ),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("books.google.com")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    const d = deps({
+      fetchFn,
+      coverStorage: {
+        uploadCover: vi.fn(async () => {
+          throw new Error("synthetic upload failure");
+        }),
+      },
+    });
+
+    await expect(
+      resolveIsbn(supabase as never, "9780000000026", d),
+    ).rejects.toThrow(/synthetic upload failure/);
+
+    // RPC was called (pending row written with pending_storage=true).
+    const rpcCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    expect(rpcCall).toBeDefined();
+    const p_row = (rpcCall!.args as { p_row: Record<string, unknown> }).p_row;
+    expect(p_row.pending_storage).toBe(true);
+
+    // UPDATE was NOT called — finalize never ran because upload threw.
+    expect(supabase._updateCalls).toHaveLength(0);
+  });
 });
 
 describe("resolveTitleAuthor – resolver chain", () => {
@@ -1569,6 +1762,8 @@ describe("resolveIsbn – do_not_refetch_description", () => {
       data: null,
       error: null,
     });
+    // Task 3 reorder: finalize UPDATE needed when a cover is found.
+    supabase._results.set("book_catalog.update", { data: null, error: null });
 
     const GB_URL = "https://books.google.com/books/content?id=xyz&img=1&zoom=0";
     const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
@@ -1620,7 +1815,11 @@ describe("resolveIsbn – do_not_refetch_description", () => {
       });
     }) as unknown as typeof fetch;
 
-    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+    const result = await resolveIsbn(
+      supabase as never,
+      "9780743273565",
+      deps({ fetchFn }),
+    );
 
     const upsertCall = supabase._rpcCalls.find(
       (c) => c.name === "upsert_book_catalog_by_isbn",
@@ -1630,9 +1829,11 @@ describe("resolveIsbn – do_not_refetch_description", () => {
       .p_row;
     // Flag respected: description still null
     expect(p_row.description).toBeNull();
-    // Cover came from GB
-    expect(p_row.storage_path).not.toBeNull();
+    // Cover came from GB; after Task 3 reorder storage_path is null in
+    // the initial RPC row — assert on result.row for the post-finalize state.
+    expect(p_row.storage_path).toBeNull();
     expect(p_row.cover_source).toBe("google_books");
+    expect(result.row.storage_path).not.toBeNull();
   });
 
   it("flag set + GB wins → OL cover URL not fetched", async () => {
@@ -1647,6 +1848,8 @@ describe("resolveIsbn – do_not_refetch_description", () => {
       data: null,
       error: null,
     });
+    // Task 3 reorder: finalize UPDATE needed when a cover is found.
+    supabase._results.set("book_catalog.update", { data: null, error: null });
 
     const GB_COVER_URL =
       "https://books.google.com/books/content?id=abc&img=1&zoom=0";

@@ -135,7 +135,9 @@ describe("action rename /app/devices", () => {
       buildActionEvent({ deviceId: "d-1", name: "Reader" }),
     );
     expect(res).toEqual({ success: true });
-    expect(supabase._updateCalls).toEqual([{ table: "devices" }]);
+    expect(supabase._updateCalls).toEqual([
+      expect.objectContaining({ table: "devices" }),
+    ]);
   });
 
   it("returns 500 on non-PGRST116 update error", async () => {
@@ -179,7 +181,9 @@ describe("action revoke /app/devices", () => {
     });
     const res = await actions.revoke(buildActionEvent({ deviceId: "d-1" }));
     expect(res).toEqual({ success: true });
-    expect(supabase._updateCalls).toEqual([{ table: "devices" }]);
+    expect(supabase._updateCalls).toEqual([
+      expect.objectContaining({ table: "devices" }),
+    ]);
   });
 
   it("returns 500 on non-PGRST116 update error", async () => {

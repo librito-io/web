@@ -181,9 +181,11 @@ export function createMockSupabase() {
     return results.get(key) ?? { data: null, error: null };
   }
 
-  // Records every `.from(table).update(...)` call so tests can assert that a
-  // refactor genuinely eliminated a per-row update loop in favour of an RPC.
-  const updateCalls: Array<{ table: string }> = [];
+  // Records every `.from(table).update(payload)` call so tests can assert that
+  // a refactor genuinely eliminated a per-row update loop in favour of an RPC,
+  // and so the new pending-row finalize step (Task 3 reorder) can be verified
+  // against the exact payload written to storage fields.
+  const updateCalls: Array<{ table: string; payload: unknown }> = [];
 
   const client = {
     from: (table: string) => ({
@@ -194,8 +196,8 @@ export function createMockSupabase() {
         }
         return selectChain(table, args);
       },
-      update: (..._args: unknown[]) => {
-        updateCalls.push({ table });
+      update: (...args: unknown[]) => {
+        updateCalls.push({ table, payload: args[0] });
         return makeChain(table, "update");
       },
       upsert: (...args: unknown[]) => {
@@ -223,7 +225,7 @@ export function createMockSupabase() {
     _storageSpy: typeof storageSpy;
     _upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }>;
     _rpcCalls: Array<{ name: string; args: unknown }>;
-    _updateCalls: Array<{ table: string }>;
+    _updateCalls: Array<{ table: string; payload: unknown }>;
     _chainCalls: Array<{
       table: string;
       operation: string;

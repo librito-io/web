@@ -228,7 +228,7 @@ describe("enrichFeedRowsWithCovers", () => {
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
   });
 
-  it("falls soft to coverUrl=null when book_catalog lookup throws", async () => {
+  it("does NOT cascade into N resolveIsbn schedules when book_catalog lookup throws (issue #110)", async () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", {
       data: null,
@@ -237,12 +237,91 @@ describe("enrichFeedRowsWithCovers", () => {
 
     const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
       row({ book_isbn: ISBN_A }),
+      row({ book_isbn: ISBN_B }),
     ]);
 
-    expect(items).toHaveLength(1);
+    expect(items).toHaveLength(2);
     expect(items[0].coverUrl).toBeNull();
-    // Empty cover map → every uniqueCanon is "missing" → limiter is asked.
-    expect(userLimitMock).toHaveBeenCalled();
+    expect(items[1].coverUrl).toBeNull();
+    // DB-blip on the ISBN lookup must not trigger cold-miss fan-out for
+    // every ISBN on the page. Treat as "unknown state, do nothing this
+    // request" — warmup cron backfills on next pass.
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+    expect(userLimitMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT schedule resolveIsbn for negative-cached ISBNs (issue #110)", async () => {
+    const supabase = createMockSupabase();
+    // Catalog row exists with storage_path null — negative-cache. The view
+    // helper returns this ISBN in negativeIsbns; enrichment must skip the
+    // cold-miss schedule (warmup cron is the retry path).
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: ISBN_A,
+          storage_path: null,
+          cover_storage_backend: null,
+          cover_max_width: null,
+        },
+      ],
+      error: null,
+    });
+
+    const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+      row({ book_isbn: ISBN_A }),
+    ]);
+
+    expect(items[0].coverUrl).toBeNull();
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+    // Single ISBN, fully negative-cached → no work to schedule, so no
+    // limiter call either.
+    expect(userLimitMock).not.toHaveBeenCalled();
+  });
+
+  it("caps fan-out at per-user budget — denies after N successes short-circuit remainder (issue #110)", async () => {
+    // Bulk-fan-out shape: 50 cold-miss ISBNs from one user. Per-user
+    // limiter is 10/min — expect at most 10 scheduled resolves, with the
+    // 11th limiter call denying and the loop bailing.
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", { data: [], error: null });
+
+    // First 10 calls succeed, 11th denies (sliding-window over budget).
+    userLimitMock.mockReset();
+    for (let i = 0; i < 10; i++) {
+      userLimitMock.mockResolvedValueOnce({
+        success: true,
+        reset: Date.now() + 60_000,
+        limit: 10,
+        remaining: 9 - i,
+      });
+    }
+    userLimitMock.mockResolvedValue({
+      success: false,
+      reset: Date.now() + 60_000,
+      limit: 10,
+      remaining: 0,
+    });
+
+    const rows: FeedRow[] = [];
+    for (let i = 0; i < 50; i++) {
+      // Generate 50 distinct canonical ISBN-13s. EAN body 978 + 9 unique
+      // digits + checksum placeholder (any digit is fine for canon since
+      // canonicalizeIsbn validates but tests fabricated values here).
+      const body = `97804${String(i).padStart(7, "0")}`;
+      // Compute ISBN-13 checksum so canonicalizeIsbn accepts.
+      let sum = 0;
+      for (let d = 0; d < 12; d++) {
+        const digit = Number(body[d]);
+        sum += d % 2 === 0 ? digit : digit * 3;
+      }
+      const check = (10 - (sum % 10)) % 10;
+      rows.push(row({ book_isbn: body + String(check) }));
+    }
+
+    await enrichFeedRowsWithCovers(event, supabase, USER_ID, rows);
+
+    expect(runInBackgroundSpy).toHaveBeenCalledTimes(10);
+    expect(userLimitMock).toHaveBeenCalledTimes(11);
   });
 
   it("dedupes ISBNs across rows before calling the cover lookup or scheduling resolves", async () => {
@@ -350,7 +429,7 @@ describe("enrichFeedRowsWithCovers", () => {
       expect(userLimitMock).not.toHaveBeenCalled();
     });
 
-    it("schedules a single combined limiter check for mixed ISBN + (title, author) cold misses", async () => {
+    it("consumes one limiter token per scheduled resolve across mixed ISBN + (title, author) cohort (issue #110)", async () => {
       const supabase = createMockSupabase();
       supabase._results.set("book_catalog.select", { data: [], error: null });
 
@@ -363,8 +442,9 @@ describe("enrichFeedRowsWithCovers", () => {
         }),
       ]);
 
-      // Single combined limiter check (one budget unit for the whole cohort).
-      expect(userLimitMock).toHaveBeenCalledTimes(1);
+      // Per-resolve token consumption: one limiter check per scheduled
+      // resolve so the user budget tracks actual fan-out, not requests.
+      expect(userLimitMock).toHaveBeenCalledTimes(2);
       // Two scheduled background jobs — one resolveIsbn + one resolveTitleAuthor.
       expect(runInBackgroundSpy).toHaveBeenCalledTimes(2);
       for (const call of runInBackgroundSpy.mock.calls) {
@@ -375,7 +455,7 @@ describe("enrichFeedRowsWithCovers", () => {
       expect(resolveTitleAuthorSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("falls soft to coverUrl=null when title/author cover lookup throws", async () => {
+    it("does NOT cascade into resolveTitleAuthor schedules when title/author lookup throws (issue #110)", async () => {
       const supabase = createMockSupabase();
       supabase._results.set("book_catalog.select", {
         data: null,
@@ -388,12 +468,47 @@ describe("enrichFeedRowsWithCovers", () => {
           book_title: "Some Book",
           book_author: "Some Author",
         }),
+        row({
+          book_isbn: null,
+          book_title: "Another Book",
+          book_author: "Another Author",
+        }),
       ]);
 
-      expect(items).toHaveLength(1);
+      expect(items).toHaveLength(2);
       expect(items[0].coverUrl).toBeNull();
-      // Lookup failed → entry is "missing" → limiter is asked.
-      expect(userLimitMock).toHaveBeenCalled();
+      expect(items[1].coverUrl).toBeNull();
+      // DB-blip on the TA lookup must not trigger cold-miss fan-out for
+      // every (title, author) pair on the page.
+      expect(runInBackgroundSpy).not.toHaveBeenCalled();
+      expect(userLimitMock).not.toHaveBeenCalled();
+    });
+
+    it("does NOT schedule resolveTitleAuthor for negative-cached (title, author) pairs (issue #110)", async () => {
+      const supabase = createMockSupabase();
+      supabase._results.set("book_catalog.select", {
+        data: [
+          {
+            normalized_title_author: "some book|some author",
+            storage_path: null,
+            cover_storage_backend: null,
+            cover_max_width: null,
+          },
+        ],
+        error: null,
+      });
+
+      const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+        row({
+          book_isbn: null,
+          book_title: "Some Book",
+          book_author: "Some Author",
+        }),
+      ]);
+
+      expect(items[0].coverUrl).toBeNull();
+      expect(runInBackgroundSpy).not.toHaveBeenCalled();
+      expect(userLimitMock).not.toHaveBeenCalled();
     });
   });
 });

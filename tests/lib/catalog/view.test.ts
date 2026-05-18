@@ -211,10 +211,11 @@ describe("getCoverUrlsByIsbns", () => {
 
     const result = await getCoverUrlsByIsbns(supabase, []);
 
-    expect(result.size).toBe(0);
+    expect(result.covers.size).toBe(0);
+    expect(result.negativeIsbns.size).toBe(0);
   });
 
-  it("returns Map entries only for ISBNs with a positive (cover-bearing) row", async () => {
+  it("returns positive-row covers in the Map and negative-cache ISBNs in negativeIsbns set", async () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", {
       data: [
@@ -232,7 +233,7 @@ describe("getCoverUrlsByIsbns", () => {
           cover_storage_backend: "supabase",
           cover_max_width: 1500,
         },
-        // negative-cache row — must be omitted from the Map
+        // negative-cache row — covers map omits, negativeIsbns set includes
         {
           isbn: ISBN_C,
           storage_path: null,
@@ -249,10 +250,46 @@ describe("getCoverUrlsByIsbns", () => {
       ISBN_C,
     ]);
 
-    expect(result.size).toBe(2);
-    expect(result.get(ISBN_A)).toContain("ab/a.jpg");
-    expect(result.get(ISBN_B)).toContain("cd/b.jpg");
-    expect(result.has(ISBN_C)).toBe(false);
+    expect(result.covers.size).toBe(2);
+    expect(result.covers.get(ISBN_A)).toContain("ab/a.jpg");
+    expect(result.covers.get(ISBN_B)).toContain("cd/b.jpg");
+    expect(result.covers.has(ISBN_C)).toBe(false);
+    // Negative-cache row surfaces in negativeIsbns so feed-enrichment can
+    // distinguish "tried, found nothing" from "never tried" and skip the
+    // cold-miss schedule. Issue #110.
+    expect(result.negativeIsbns.has(ISBN_C)).toBe(true);
+    expect(result.negativeIsbns.has(ISBN_A)).toBe(false);
+    expect(result.negativeIsbns.has(ISBN_B)).toBe(false);
+  });
+
+  it("returns ISBNs with no catalog row in neither covers nor negativeIsbns (cold-miss)", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: ISBN_A,
+          storage_path: "ab/a.jpg",
+          cover_storage_backend: "supabase",
+          cover_max_width: 1500,
+        },
+      ],
+      error: null,
+    });
+
+    const result = await getCoverUrlsByIsbns(supabase, [
+      ISBN_A,
+      ISBN_B,
+      ISBN_C,
+    ]);
+
+    // ISBN_A is positive; ISBN_B and ISBN_C have no row at all — they must
+    // appear in neither map so the caller schedules a cold-miss resolve.
+    expect(result.covers.has(ISBN_A)).toBe(true);
+    expect(result.negativeIsbns.has(ISBN_A)).toBe(false);
+    expect(result.covers.has(ISBN_B)).toBe(false);
+    expect(result.negativeIsbns.has(ISBN_B)).toBe(false);
+    expect(result.covers.has(ISBN_C)).toBe(false);
+    expect(result.negativeIsbns.has(ISBN_C)).toBe(false);
   });
 
   it("handles duplicate input ISBNs without producing duplicated entries", async () => {
@@ -287,35 +324,9 @@ describe("getCoverUrlsByIsbns", () => {
       ISBN_A,
     ]);
 
-    expect(result.size).toBe(2);
-    expect(result.get(ISBN_A)).toContain("ab/a.jpg");
-    expect(result.get(ISBN_B)).toContain("cd/b.jpg");
-  });
-
-  it("returns no entry for ISBNs with no catalog row at all (cold-miss)", async () => {
-    const supabase = createMockSupabase();
-    supabase._results.set("book_catalog.select", {
-      data: [
-        {
-          isbn: ISBN_A,
-          storage_path: "ab/a.jpg",
-          cover_storage_backend: "supabase",
-          cover_max_width: 1500,
-        },
-      ],
-      error: null,
-    });
-
-    const result = await getCoverUrlsByIsbns(supabase, [
-      ISBN_A,
-      ISBN_B,
-      ISBN_C,
-    ]);
-
-    expect(result.size).toBe(1);
-    expect(result.has(ISBN_A)).toBe(true);
-    expect(result.has(ISBN_B)).toBe(false);
-    expect(result.has(ISBN_C)).toBe(false);
+    expect(result.covers.size).toBe(2);
+    expect(result.covers.get(ISBN_A)).toContain("ab/a.jpg");
+    expect(result.covers.get(ISBN_B)).toContain("cd/b.jpg");
   });
 
   it("threads the variant param through to coverUrl()", async () => {
@@ -336,7 +347,7 @@ describe("getCoverUrlsByIsbns", () => {
     // resolve to a URL containing the storage path. (Supabase backend
     // ignores the variant; the assertion is that the URL still resolves.)
     const thumb = await getCoverUrlsByIsbns(supabase, [ISBN_A]);
-    expect(thumb.get(ISBN_A)).toContain("ab/cd.jpg");
+    expect(thumb.covers.get(ISBN_A)).toContain("ab/cd.jpg");
 
     const supabase2 = createMockSupabase();
     supabase2._results.set("book_catalog.select", {
@@ -351,7 +362,7 @@ describe("getCoverUrlsByIsbns", () => {
       error: null,
     });
     const large = await getCoverUrlsByIsbns(supabase2, [ISBN_A], "large");
-    expect(large.get(ISBN_A)).toContain("ab/cd.jpg");
+    expect(large.covers.get(ISBN_A)).toContain("ab/cd.jpg");
   });
 
   it("throws when the Supabase query returns an error", async () => {
@@ -489,7 +500,8 @@ describe("getCoverUrlsByTitleAuthor", () => {
     });
 
     const result = await getCoverUrlsByTitleAuthor(supabase, []);
-    expect(result.size).toBe(0);
+    expect(result.covers.size).toBe(0);
+    expect(result.negativeKeys.size).toBe(0);
   });
 
   it("skips pairs whose normalisation yields null; still queries if any survive", async () => {
@@ -511,8 +523,8 @@ describe("getCoverUrlsByTitleAuthor", () => {
       { title: "The Great Gatsby", author: "F. Scott Fitzgerald" },
     ]);
 
-    expect(result.size).toBe(1);
-    expect(result.get("the great gatsby|f scott fitzgerald")).toContain(
+    expect(result.covers.size).toBe(1);
+    expect(result.covers.get("the great gatsby|f scott fitzgerald")).toContain(
       "ab/cd.jpg",
     );
   });
@@ -533,10 +545,11 @@ describe("getCoverUrlsByTitleAuthor", () => {
       { title: "", author: "" },
       { title: "only title", author: "" },
     ]);
-    expect(result.size).toBe(0);
+    expect(result.covers.size).toBe(0);
+    expect(result.negativeKeys.size).toBe(0);
   });
 
-  it("omits negative-cache rows from the returned Map", async () => {
+  it("returns negative-cache rows in negativeKeys set; covers map omits", async () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", {
       data: [
@@ -554,7 +567,10 @@ describe("getCoverUrlsByTitleAuthor", () => {
       { title: "The Great Gatsby", author: "F. Scott Fitzgerald" },
     ]);
 
-    expect(result.size).toBe(0);
+    expect(result.covers.size).toBe(0);
+    expect(result.negativeKeys.has("the great gatsby|f scott fitzgerald")).toBe(
+      true,
+    );
   });
 
   it("throws when the Supabase query errors", async () => {

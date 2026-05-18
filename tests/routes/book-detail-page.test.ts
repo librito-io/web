@@ -285,3 +285,67 @@ describe("load /app/book/[bookHash] — title/author fallback (no ISBN)", () => 
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("load /app/book/[bookHash] — feed-card cover enrichment (issue #111)", () => {
+  it("populates coverUrl on each highlight card via enrichFeedRowsWithCovers", async () => {
+    // Book-detail page must render per-card thumbnails matching the home
+    // feed / pagination handler. Prior to issue #111 the loader hard-coded
+    // coverUrl: null, diverging from the pagination handler (which calls
+    // enrichFeedRowsWithCovers). Cards 1-50 (loader) showed placeholder
+    // while cards 51+ (pagination) showed thumbnails — and a sort change
+    // re-fetched everything through pagination, flipping all cards. Fix:
+    // loader calls enrichFeedRowsWithCovers too so all cards stay enriched.
+    supabase._results.set("books.select", { data: [bookRow], error: null });
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: ISBN,
+          title: "Gatsby",
+          author: "Fitzgerald",
+          description: "...",
+          description_provider: "openlibrary",
+          publisher: null,
+          page_count: null,
+          subjects: null,
+          published_date: null,
+          language: null,
+          series_name: null,
+          series_position: null,
+          storage_path: "ab/cd.jpg",
+          cover_storage_backend: "supabase",
+          cover_max_width: 1500,
+        },
+      ],
+      error: null,
+    });
+    supabase._results.set("rpc.get_highlight_feed", {
+      data: [
+        {
+          highlight_id: "h-1",
+          book_hash: BOOK_HASH,
+          book_title: "Gatsby",
+          book_author: "Fitzgerald",
+          book_isbn: ISBN,
+          book_highlight_count: 1,
+          chapter_index: 0,
+          chapter_title: null,
+          start_word: 0,
+          end_word: 1,
+          text: "t",
+          styles: null,
+          paragraph_breaks: null,
+          note_text: null,
+          note_updated_at: null,
+          updated_at: "2026-01-01T00:00:00Z",
+          next_cursor: null,
+        },
+      ],
+      error: null,
+    });
+
+    const result = await loadResult(buildEvent());
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].coverUrl).toContain("ab/cd.jpg");
+  });
+});

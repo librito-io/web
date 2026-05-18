@@ -1125,34 +1125,36 @@ export async function resolveTitleAuthor(
       logCtx: { title, author },
     });
 
-    // 4. Persist cover bytes (with byte-level dedup)
-    const storage = await persistCover(
-      supabase,
-      cover ? { bytes: cover.bytes, mime: cover.mime } : null,
-      upload,
-    );
-
-    // Audit fields (plan 2026-05-18 Task 9) — same shape as resolveIsbn.
+    // 5. Compute audit fields BEFORE any storage I/O so the pending-row
+    //    upsert carries the full audit shape even if upload later fails.
+    //    GB metadata is captured unconditionally whenever a GB volume was
+    //    fetched during this resolve — even if GB was filtered out as the
+    //    cover source — so production SQL can validate the pdf.isAvailable
+    //    filter without log scraping. `snapshot()` reads the memo
+    //    synchronously, never burning a fresh GB token.
     const audit = computeAuditFields(gbMemo.snapshot(), cover);
 
-    // 5. Build upsert payload + write
-    const upsertRow = {
+    // 6. Initial upsert: metadata + audit; storage fields NULL;
+    //    pending_storage=TRUE iff we have cover bytes to upload.
+    //    See spec 2026-05-18-catalog-cover-upload-ordering-design and
+    //    issue #218 — the orphan-prevention contract.
+    const pending = cover !== null;
+
+    const pendingRow = {
       isbn: null as string | null,
       normalized_title_author: key,
-      storage_path: storage?.storage_path ?? null,
-      cover_storage_backend: storage?.backend ?? null,
-      image_sha256: storage?.image_sha256 ?? null,
+      storage_path: null,
+      cover_storage_backend: null,
+      image_sha256: null,
       cover_source: cover?.source ?? null,
-      cover_max_width: cover?.width ?? null,
+      cover_max_width: null,
       title: metadata.title ?? null,
       author: metadata.author ?? null,
       description: metadata.description ?? null,
       description_raw: metadata.description_raw ?? null,
       description_provider: metadata.description_provider ?? null,
       google_volume_id: metadata.google_volume_id ?? null,
-      fetched_at: storage
-        ? now.toISOString()
-        : (existing?.fetched_at ?? now.toISOString()),
+      fetched_at: now.toISOString(),
       last_attempted_at: now.toISOString(),
       attempt_count: (existing?.attempt_count ?? 0) + 1,
       gb_pdf_available: audit.gb_pdf_available,
@@ -1160,19 +1162,64 @@ export async function resolveTitleAuthor(
       gb_image_link_tiers: audit.gb_image_link_tiers,
       cover_aspect: audit.cover_aspect,
       cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
+      pending_storage: pending,
     };
 
-    // Same partial-index reason as resolveIsbn — route via RPC.
-    const { error: upErr } = await supabase.rpc(
+    // Partial unique index requires `INSERT ... ON CONFLICT (col) WHERE pred`.
+    // supabase-js .upsert() does not pass the WHERE through; route via RPC.
+    const { error: pendingErr } = await supabase.rpc(
       "upsert_book_catalog_by_title_author",
-      { p_row: upsertRow },
+      { p_row: pendingRow },
     );
-    if (upErr) throw new Error(`book_catalog upsert: ${upErr.message}`);
+    if (pendingErr)
+      throw new Error(`book_catalog initial upsert: ${pendingErr.message}`);
 
-    // Sentry warning: see resolveIsbn for rationale (Task 10).
+    // 7. Upload bytes (with byte-level dedup). On throw we leave the
+    //    pending row behind for the next resolve to retry.
+    let storage: Awaited<ReturnType<typeof persistCover>> = null;
+    if (cover) {
+      storage = await persistCover(
+        supabase,
+        { bytes: cover.bytes, mime: cover.mime },
+        upload,
+      );
+
+      // 8. Finalize: plain UPDATE writes storage fields and clears pending.
+      //    No RPC needed — row provably exists post-step-6, predicate
+      //    unambiguous (.is('isbn', null) scopes to the partial unique
+      //    index's ISBN-null partition). On throw the row stays pending;
+      //    next feed render retries: persistCover sha lookup misses
+      //    (image_sha256=NULL), upload re-runs idempotently, finalize retries.
+      const { error: finalErr } = await supabase
+        .from("book_catalog")
+        .update({
+          storage_path: storage?.storage_path ?? null,
+          cover_storage_backend: storage?.backend ?? null,
+          image_sha256: storage?.image_sha256 ?? null,
+          cover_max_width: cover.width,
+          pending_storage: false,
+        })
+        .is("isbn", null)
+        .eq("normalized_title_author", key);
+      if (finalErr)
+        throw new Error(`book_catalog storage finalize: ${finalErr.message}`);
+    }
+
+    // Sentry warning: GB cover passed the pdf.isAvailable filter (Task 8)
+    // but bytes-per-pixel is below threshold — likely whitespace-template
+    // false negative. See Task 10 / plan 2026-05-18. Outlier-only signal;
+    // tune threshold from production audit data once weeks of history.
     await reportSuspectLowBpp(cover, audit, { normalizedTitleAuthor: key });
 
-    return { cached: false, rateLimited: false, row: upsertRow };
+    const resultRow = {
+      ...pendingRow,
+      storage_path: storage?.storage_path ?? null,
+      cover_storage_backend: storage?.backend ?? null,
+      image_sha256: storage?.image_sha256 ?? null,
+      cover_max_width: cover?.width ?? null,
+      pending_storage: false,
+    };
+    return { cached: false, rateLimited: false, row: resultRow };
   } finally {
     await mutex.release(lockKey);
   }

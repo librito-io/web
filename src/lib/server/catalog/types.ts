@@ -89,7 +89,15 @@ export type DescriptionProvider = "openlibrary" | "google_books" | "manual";
 // production may still carry "openlibrary_search_isbn"; the DB column is
 // `text` (not enum), so legacy rows remain valid. Do not add this literal
 // back to the union — there's no code path producing it.
+//
+// "openlibrary_isbn_direct" (issue #211, plan 2026-05-18) sources bytes
+// from covers.openlibrary.org/b/isbn/{isbn}-L.jpg, which resolves against
+// any edition of the underlying Work with cover bytes. Distinct from
+// "openlibrary_isbn" (covers/b/id/{coverId}-L.jpg, requires explicit
+// coverId discovery via /api/books or /search.json). Direct tier sits
+// first in the chain — precision-first ordering.
 export type CoverSource =
+  | "openlibrary_isbn_direct"
   | "openlibrary_isbn"
   | "openlibrary_search_title"
   | "google_books"

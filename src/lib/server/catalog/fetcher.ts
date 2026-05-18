@@ -399,9 +399,23 @@ async function tryOpenLibraryDirectIsbn(
   };
 }
 
-/** Walk sources in priority order; each source has the same `minWidth` floor
- *  applied. First source whose decoded width meets `minWidth` wins. Null
- *  when all sources fail. */
+/** Walk sources in precision-first priority order; each source has the same
+ *  `minWidth` floor applied. First source whose decoded width meets `minWidth`
+ *  wins. Null when all sources fail.
+ *
+ *  Order (issue #211, plan 2026-05-18):
+ *    1. OL direct-ISBN (covers/b/isbn/{isbn}-L): ISBN-locked, OL-resolved
+ *       across editions of the Work.
+ *    2. OL cover_id (covers/b/id/{cover_id}-L): requires explicit cover_id
+ *       discovery via /api/books or /search.json.
+ *    3. GoogleBooks extraLarge: resolution-rich but prone to wrong-bytes
+ *       failure mode (limited-preview volumes serve InDesign interior
+ *       pages). Filtered by accessInfo.pdf.isAvailable in Task 8.
+ *    4. iTunes: ISBN-keyed, generally precise but lower resolution.
+ *
+ *  Trade-off: prefers precision over resolution. Some books where OL has
+ *  only basic-tier coverage but GB has premium will now stop at OL basic.
+ *  Second-pass (basic floor) preserves the same ordering. */
 async function resolveCoverChain(
   deps: ResolveDeps,
   ctx: CoverChainContext,
@@ -409,9 +423,9 @@ async function resolveCoverChain(
 ): Promise<CoverResolution | null> {
   return (
     (await tryOpenLibraryDirectIsbn(deps, ctx, minWidth)) ??
+    (await tryOpenLibrary(deps, ctx, minWidth)) ??
     (await tryGoogleBooksExtraLarge(deps, ctx, minWidth)) ??
-    (await tryItunes(deps, ctx, minWidth)) ??
-    (await tryOpenLibrary(deps, ctx, minWidth))
+    (await tryItunes(deps, ctx, minWidth))
   );
 }
 
@@ -661,7 +675,7 @@ export async function resolveIsbn(
       }),
     );
 
-    // 3. Resolve cover via chain (GB extraLarge → iTunes → OL)
+    // 3. Resolve cover via chain (OL direct → OL cover_id → GB → iTunes)
     const cover = await resolveCoverWithTiering(deps, {
       isbn,
       openLibraryCoverId: openLibraryCoverId ?? undefined,

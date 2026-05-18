@@ -22,6 +22,7 @@ import {
   type BookDetailCatalog,
   type CatalogView,
 } from "$lib/server/catalog/view";
+import { enrichFeedRowsWithCovers } from "$lib/server/catalog/feed-enrichment";
 import { getCatalogMutex } from "$lib/server/catalog/mutex";
 import { logger } from "$lib/server/log";
 // GOOGLE_BOOKS_API_KEY is Sensitive in Vercel; static-imported sensitive
@@ -215,10 +216,19 @@ export const load: PageServerLoad = async (event) => {
   const rows = parseFeedRows(feedRes.data);
   const last = rows.at(-1);
   const nextCursor = last?.next_cursor ? encodeCursor(last.next_cursor) : null;
-  // Book detail does not batch-resolve per-card covers — the book's cover is
-  // already rendered at the top of the page and cards below it are
-  // book-grouped, so a per-card thumbnail would be redundant.
-  const items: FeedItem[] = rows.map((r) => ({ ...r, coverUrl: null }));
+  // Match the home-feed loader and pagination handler: every card gets a
+  // resolved coverUrl thumbnail. Issue #111: the prior `coverUrl: null` map
+  // here diverged from `/app/feed/+server.ts`, so cards 1-50 rendered
+  // placeholder while paginated cards 51+ rendered thumbnails, and a sort
+  // change (which re-fetches everything through pagination) flipped all
+  // cards to enriched. All three feed surfaces now go through the same
+  // enrichment pipeline.
+  const items: FeedItem[] = await enrichFeedRowsWithCovers(
+    event,
+    supabase,
+    user.id,
+    rows,
+  );
   return {
     book: bookRow,
     catalog,

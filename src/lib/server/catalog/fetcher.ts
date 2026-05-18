@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import * as Sentry from "@sentry/sveltekit";
 import type { LimitResult, RateLimiter } from "$lib/server/ratelimit";
 import { canonicalizeIsbn } from "./isbn";
 import { stripMarketingCruft } from "./cleanup";
@@ -298,6 +299,17 @@ const COVER_ASPECT_PRECISION = 3;
  * book_catalog.
  */
 const COVER_BPP_PRECISION = 5;
+
+/**
+ * Bytes-per-pixel below this threshold flags a Sentry warning. Real
+ * covers have full-bleed art and compress to roughly 0.1–0.4 bytes/px
+ * at JPEG quality 80. Interior pages dominated by whitespace compress
+ * harder (~0.02–0.08 bpp). Threshold intentionally generous to keep
+ * Sentry noise low while still catching the obvious whitespace-template
+ * class. Tune based on production `cover_bytes_per_pixel` distribution
+ * once weeks of history exist.
+ */
+const COVER_LOW_BPP_THRESHOLD = 0.05;
 
 /**
  * Compute the five `book_catalog` audit fields from the captured GB
@@ -885,6 +897,40 @@ export async function resolveIsbn(
     });
     if (error) throw new Error(`book_catalog upsert: ${error.message}`);
 
+    // Sentry warning: GB cover passed the pdf.isAvailable filter (Task 8)
+    // but bytes-per-pixel is below threshold — likely whitespace-template
+    // false negative. See Task 10 / plan 2026-05-18. Outlier-only signal;
+    // tune threshold from production audit data once weeks of history.
+    if (
+      cover &&
+      cover.source === "google_books" &&
+      audit.cover_bytes_per_pixel !== null &&
+      audit.cover_bytes_per_pixel < COVER_LOW_BPP_THRESHOLD
+    ) {
+      Sentry.captureMessage("catalog_cover_suspect_low_bpp", {
+        level: "warning",
+        tags: { catalog_audit: "suspect_cover" },
+        extra: {
+          isbn,
+          volumeId: cover.googleVolumeId,
+          width: cover.width,
+          height: cover.height,
+          byteCount: cover.byteCount,
+          cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
+          cover_aspect: audit.cover_aspect,
+          viewability: audit.gb_viewability,
+        },
+      });
+      // Vercel suspends the waitUntil-wrapped function once the work
+      // promise resolves. Without an explicit flush, Sentry's async
+      // transport may not finish transmitting before suspension and the
+      // event is lost. `runInBackground` only flushes from its `.catch`
+      // handler — the success path (this branch) has to flush itself.
+      // 2s is enough headroom for the ingest round-trip; no-op when SDK
+      // not initialized (self-hoster path).
+      await Sentry.flush(2000);
+    }
+
     return { cached: false, rateLimited: false, row: upsertRow };
   } finally {
     await mutex.release(lockKey);
@@ -1037,6 +1083,31 @@ export async function resolveTitleAuthor(
       { p_row: upsertRow },
     );
     if (upErr) throw new Error(`book_catalog upsert: ${upErr.message}`);
+
+    // Sentry warning: see resolveIsbn for rationale (Task 10).
+    if (
+      cover &&
+      cover.source === "google_books" &&
+      audit.cover_bytes_per_pixel !== null &&
+      audit.cover_bytes_per_pixel < COVER_LOW_BPP_THRESHOLD
+    ) {
+      Sentry.captureMessage("catalog_cover_suspect_low_bpp", {
+        level: "warning",
+        tags: { catalog_audit: "suspect_cover" },
+        extra: {
+          normalizedTitleAuthor: key,
+          volumeId: cover.googleVolumeId,
+          width: cover.width,
+          height: cover.height,
+          byteCount: cover.byteCount,
+          cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
+          cover_aspect: audit.cover_aspect,
+          viewability: audit.gb_viewability,
+        },
+      });
+      // Flush before returning — see resolveIsbn for rationale.
+      await Sentry.flush(2000);
+    }
 
     return { cached: false, rateLimited: false, row: upsertRow };
   } finally {

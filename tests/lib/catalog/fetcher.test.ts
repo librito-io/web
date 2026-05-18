@@ -22,6 +22,21 @@ vi.mock("$env/dynamic/public", () => ({
   env: { PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc" },
 }));
 
+// Sentry SDK is invoked from `resolveIsbn` / `resolveTitleAuthor` for the
+// suspect-cover signal (Task 10). Stub the module so tests can assert
+// against the captureMessage spy without booting the real client. The
+// spy is created via `vi.hoisted` so it's available inside the hoisted
+// `vi.mock` factory (top-level variables aren't, since the factory
+// executes before module top-level code).
+const { sentryCaptureMessage } = vi.hoisted(() => ({
+  sentryCaptureMessage: vi.fn(() => "fake-event-id"),
+}));
+vi.mock("@sentry/sveltekit", () => ({
+  captureMessage: sentryCaptureMessage,
+  captureException: vi.fn(),
+  flush: vi.fn(async () => true),
+}));
+
 import {
   resolveIsbn,
   resolveTitleAuthor,
@@ -2234,5 +2249,276 @@ describe("enrichDescriptionWithGoogleBooks – skip-point logs (#206)", () => {
     expect(skipLog).toBeDefined();
     expect(skipLog?.level).toBe("info");
     expect(skipLog?.google_volume_id).toBe("gbid1");
+  });
+});
+
+describe("resolveIsbn – Sentry suspect-cover warning (Task 10)", () => {
+  function coldMissSupabase() {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+    return supabase;
+  }
+
+  beforeEach(() => sentryCaptureMessage.mockClear());
+
+  it("captures Sentry warning when accepted GB cover has cover_bytes_per_pixel < threshold", async () => {
+    // FIXTURE_1500x2250 is ~20102 bytes / (1500*2250 = 3 375 000 px) ≈ 0.006
+    // bpp — well below the 0.05 threshold. GB wins the chain (OL direct + OL
+    // cover_id miss via 404 / no cover_id) so the suspect-cover check fires.
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://covers.openlibrary.org/b/")) {
+        return new Response(null, { status: 404 });
+      }
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: "https://books.google.com/extra.jpg" },
+            {},
+            { pdf: { isAvailable: true }, viewability: "PARTIAL" },
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      if (url.startsWith("https://books.google.com/")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    expect(sentryCaptureMessage).toHaveBeenCalledWith(
+      "catalog_cover_suspect_low_bpp",
+      expect.objectContaining({
+        level: "warning",
+        tags: expect.objectContaining({ catalog_audit: "suspect_cover" }),
+      }),
+    );
+  });
+
+  it("does NOT capture Sentry warning when cover source is not google_books", async () => {
+    // OL direct-ISBN tier wins with FIXTURE_1500x2250. Even though that
+    // fixture's bpp is below threshold, the suspect-cover check fires only
+    // for `cover.source === "google_books"`.
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: "https://books.google.com/extra.jpg" },
+            {},
+            { pdf: { isAvailable: true } },
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    expect(sentryCaptureMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveTitleAuthor – Sentry suspect-cover warning (Task 10)", () => {
+  function coldMissSupabase() {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null }, // initial select - no row
+      { data: null, error: null }, // selectBySha - no dedup
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+    return supabase;
+  }
+
+  beforeEach(() => sentryCaptureMessage.mockClear());
+
+  it("captures Sentry warning when accepted GB cover (title/author path) has low bpp", async () => {
+    // FIXTURE_1500x2250 is ~20KB / 3.375M px ≈ 0.006 bpp — below 0.05 threshold.
+    // title/author flow has no ISBN, so OL direct + cover_id tiers can't fire;
+    // GB wins the chain and the suspect-cover check runs.
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: "https://books.google.com/extra.jpg" },
+            {},
+            { pdf: { isAvailable: true }, viewability: "PARTIAL" },
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      if (url.startsWith("https://books.google.com/")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveTitleAuthor(
+      supabase as never,
+      "The Great Gatsby",
+      "F. Scott Fitzgerald",
+      deps({ fetchFn }),
+    );
+
+    expect(sentryCaptureMessage).toHaveBeenCalledWith(
+      "catalog_cover_suspect_low_bpp",
+      expect.objectContaining({
+        level: "warning",
+        tags: expect.objectContaining({ catalog_audit: "suspect_cover" }),
+        extra: expect.objectContaining({
+          normalizedTitleAuthor: expect.any(String),
+        }),
+      }),
+    );
+  });
+
+  it("does NOT capture Sentry warning when cover source is not google_books (title/author path)", async () => {
+    // OL search returns a cover_i so OL cover_id wins.
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(
+          JSON.stringify({ numFound: 1, docs: [{ cover_i: 99999 }] }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("covers.openlibrary.org/b/id/99999")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: "https://books.google.com/extra.jpg" },
+            {},
+            { pdf: { isAvailable: true } },
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveTitleAuthor(
+      supabase as never,
+      "The Great Gatsby",
+      "F. Scott Fitzgerald",
+      deps({ fetchFn }),
+    );
+
+    expect(sentryCaptureMessage).not.toHaveBeenCalled();
   });
 });

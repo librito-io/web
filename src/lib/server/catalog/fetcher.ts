@@ -1125,7 +1125,7 @@ export async function resolveTitleAuthor(
       logCtx: { title, author },
     });
 
-    // 5. Compute audit fields BEFORE any storage I/O so the pending-row
+    // 4. Compute audit fields BEFORE any storage I/O so the pending-row
     //    upsert carries the full audit shape even if upload later fails.
     //    GB metadata is captured unconditionally whenever a GB volume was
     //    fetched during this resolve — even if GB was filtered out as the
@@ -1134,7 +1134,7 @@ export async function resolveTitleAuthor(
     //    synchronously, never burning a fresh GB token.
     const audit = computeAuditFields(gbMemo.snapshot(), cover);
 
-    // 6. Initial upsert: metadata + audit; storage fields NULL;
+    // 5. Initial upsert: metadata + audit; storage fields NULL;
     //    pending_storage=TRUE iff we have cover bytes to upload.
     //    See spec 2026-05-18-catalog-cover-upload-ordering-design and
     //    issue #218 — the orphan-prevention contract.
@@ -1174,7 +1174,7 @@ export async function resolveTitleAuthor(
     if (pendingErr)
       throw new Error(`book_catalog initial upsert: ${pendingErr.message}`);
 
-    // 7. Upload bytes (with byte-level dedup). On throw we leave the
+    // 6. Upload bytes (with byte-level dedup). On throw we leave the
     //    pending row behind for the next resolve to retry.
     let storage: Awaited<ReturnType<typeof persistCover>> = null;
     if (cover) {
@@ -1184,8 +1184,8 @@ export async function resolveTitleAuthor(
         upload,
       );
 
-      // 8. Finalize: plain UPDATE writes storage fields and clears pending.
-      //    No RPC needed — row provably exists post-step-6, predicate
+      // 7. Finalize: plain UPDATE writes storage fields and clears pending.
+      //    No RPC needed — row provably exists post-step-5, predicate
       //    unambiguous (.is('isbn', null) scopes to the partial unique
       //    index's ISBN-null partition). On throw the row stays pending;
       //    next feed render retries: persistCover sha lookup misses

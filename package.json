@@ -32,6 +32,7 @@
     "@fontsource/bitter": "^5.2.10",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/noto-sans": "^5.2.10",
+    "@sentry/sveltekit": "^10.53.1",
     "@supabase/ssr": "^0.6.0",
     "@supabase/supabase-js": "^2.49.0",
     "@upstash/ratelimit": "^2.0.0",

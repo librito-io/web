@@ -1018,6 +1018,139 @@ describe("resolveIsbn – resolver chain cover", () => {
       .p_row;
     expect(p_row.cover_source).toBe("google_books");
   });
+
+  it("populates audit fields on accepted GB cover", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://covers.openlibrary.org/b/")) {
+        return new Response(null, { status: 404 });
+      }
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            {
+              extraLarge: "https://books.google.com/extra.jpg",
+              large: "https://books.google.com/large.jpg",
+            },
+            {},
+            { pdf: { isAvailable: true }, viewability: "PARTIAL" },
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      if (url.startsWith("https://books.google.com/")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    expect(upsertCall).toBeDefined();
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.cover_source).toBe("google_books");
+    expect(p_row.gb_pdf_available).toBe(true);
+    expect(p_row.gb_viewability).toBe("PARTIAL");
+    expect(p_row.gb_image_link_tiers).toEqual(["extraLarge", "large"]);
+    expect(p_row.cover_aspect).toBeCloseTo(2250 / 1500, 3);
+    expect(typeof p_row.cover_bytes_per_pixel).toBe("number");
+    expect(p_row.cover_bytes_per_pixel).toBeGreaterThan(0);
+  });
+
+  it("populates GB audit fields even when GB is filtered (rejected_no_pdf, OL direct wins)", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        // GB volume fetched (by description-enrichment path), but pdf.isAvailable=false.
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: "https://books.google.com/extra.jpg" },
+            {},
+            { pdf: { isAvailable: false }, viewability: "PARTIAL" },
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    expect(upsertCall).toBeDefined();
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    // OL direct wins because GB is filtered out.
+    expect(p_row.cover_source).toBe("openlibrary_isbn_direct");
+    // GB metadata still captured.
+    expect(p_row.gb_pdf_available).toBe(false);
+    expect(p_row.gb_image_link_tiers).toEqual(["extraLarge"]);
+  });
 });
 
 describe("resolveTitleAuthor – resolver chain", () => {

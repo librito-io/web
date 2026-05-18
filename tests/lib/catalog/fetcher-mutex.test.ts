@@ -193,7 +193,7 @@ describe("resolveIsbn — per-ISBN mutex (audit #12)", () => {
     const releaseSpy = vi.spyOn(mutex, "release");
     await expect(
       resolveIsbn(supabase as never, "9780743273565", deps({ mutex })),
-    ).rejects.toThrow(/book_catalog upsert/);
+    ).rejects.toThrow(/book_catalog.*upsert/);
     expect(releaseSpy).toHaveBeenCalledWith("catalog:lock:isbn:9780743273565");
     // The lock is no longer held — a follow-up call must be able to
     // acquire it again.

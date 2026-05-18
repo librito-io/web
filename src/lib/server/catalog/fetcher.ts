@@ -394,7 +394,7 @@ async function tryGoogleBooksExtraLarge(
   // passes the filter but still looks wrong.
   const pdfAvailable = gb.accessInfo?.pdf?.isAvailable === true;
   if (!pdfAvailable) {
-    logger().info(
+    logger().warn(
       {
         event: "catalog_gb_rejected_no_pdf",
         isbn: ctx.isbn,
@@ -581,15 +581,24 @@ async function resolveCoverChain(
 /** Two-pass: try premium floor (1200), fall back to basic floor (300).
  *
  * Worst-case budget consumption per ISBN is 8 upstream cover attempts
- * (4 chain tiers × 2 passes). The OL rate-limit token is acquired ONCE
- * before entering the chain and covers both OL tiers (direct-ISBN and
- * cover-id), so per-pass token cost is 3 (OL, GB, iTunes); 2 passes
- * consume 6 tokens worst-case. Acceptable trade-off because: (a) most
- * popular books succeed at the premium pass first try (one attempt per
- * source), (b) the alternative of a single liberal floor would store
- * low-res sources that fail the `xlarge` variant requirement,
- * (c) per-source limiters fail-OPEN — exhaustion doesn't lock callers
- * out. See issue #199 design notes for full tier rationale. */
+ * (4 chain tiers × 2 passes). Rate-limit tokens are NOT consumed per
+ * attempt — they have different memoization patterns:
+ *   - OL: 1 token total. Acquired once in resolveIsbn/resolveTitleAuthor
+ *     before the chain enters; shared by both OL tiers (direct-ISBN +
+ *     cover-id) on both passes.
+ *   - GB: 1 token total. Memoized by memoizeGoogleBooksVolume; only the
+ *     first call to fetchGbVolume consumes a token, regardless of how
+ *     many chain tiers or the description path call it.
+ *   - iTunes: up to 2 tokens. tryAcquire runs inside tryItunes per
+ *     invocation, and tryItunes can be called twice (premium + basic
+ *     passes).
+ * Worst-case: 1 + 1 + 2 = 4 tokens per ISBN.
+ * Acceptable trade-off because: (a) most popular books succeed at the
+ * premium pass first try (one attempt per source), (b) the alternative
+ * of a single liberal floor would store low-res sources that fail the
+ * `xlarge` variant requirement, (c) per-source limiters fail-OPEN —
+ * exhaustion doesn't lock callers out. See issue #199 design notes for
+ * full tier rationale. */
 async function resolveCoverWithTiering(
   deps: ResolveDeps,
   ctx: CoverChainContext,

@@ -690,6 +690,15 @@ blockquote {
   transform: translateY(0);
   pointer-events: auto;
 }
+/* Container takes programmatic focus to anchor Tab/Escape, but it is a
+   decorative wrapper, not an interactive control — suppress the
+   :focus-visible ring that the browser paints on first post-load focus
+   before pointer interaction flips the heuristic. Menuitem buttons keep
+   their default ring when a keyboard user Tabs into them. */
+.ctx-menu:focus,
+.ctx-menu:focus-visible {
+  outline: none;
+}
 .ctx-menu button {
   display: block;
   width: calc(100% - 12px);

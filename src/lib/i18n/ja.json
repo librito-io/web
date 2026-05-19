@@ -28,5 +28,6 @@
   "menuPrivacy": "プライバシー",
   "menuDonate": "寄付",
   "subtitle": "{count}冊 · {highlights}件のハイライト",
-  "highlightCount": "{count}件のハイライト"
+  "highlightCount": "{count}件のハイライト",
+  "pageCount": "{count}ページ"
 }

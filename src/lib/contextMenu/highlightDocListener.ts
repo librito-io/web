@@ -54,14 +54,22 @@ export function installHighlightContextMenuListener(
 ): () => void {
   function onContextMenu(e: MouseEvent): void {
     // User has selected text — let the native menu through (copy/translate).
-    if (hasTextSelection()) return;
+    // Dismiss our custom menu first so the two don't stack visually.
+    if (hasTextSelection()) {
+      opts.onHide();
+      return;
+    }
 
     const target = e.target as Element | null;
     if (!target) return;
 
     // Don't steal the native menu from form controls: users want
     // spellcheck/dictionary suggestions inside the note editor textarea.
-    if (target.closest("input, textarea, [contenteditable='true']")) return;
+    // Same dismissal rule as the selection bypass.
+    if (target.closest("input, textarea, [contenteditable='true']")) {
+      opts.onHide();
+      return;
+    }
 
     let blockquote: HTMLElement | null =
       target.closest<HTMLElement>("blockquote[data-highlight-id]") ?? null;

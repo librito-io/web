@@ -28,5 +28,6 @@
   "menuPrivacy": "隐私",
   "menuDonate": "捐赠",
   "subtitle": "{count} 本书 · {highlights} 条高亮",
-  "highlightCount": "{count} 条高亮"
+  "highlightCount": "{count} 条高亮",
+  "pageCount": "{count} 页"
 }

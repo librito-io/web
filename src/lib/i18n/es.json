@@ -28,5 +28,6 @@
   "menuPrivacy": "Privacidad",
   "menuDonate": "Donar",
   "subtitle": "{count, plural, one {# libro} other {# libros}} · {highlights, plural, one {# destacado} other {# destacados}}",
-  "highlightCount": "{count, plural, one {# destacado} other {# destacados}}"
+  "highlightCount": "{count, plural, one {# destacado} other {# destacados}}",
+  "pageCount": "{count, plural, one {# página} other {# páginas}}"
 }

@@ -178,7 +178,9 @@
           {#if data.catalog.published_date}
             · {data.catalog.published_date}{/if}
           {#if data.catalog.page_count}
-            · {data.catalog.page_count} pages{/if}
+            · {$_("pageCount", {
+              values: { count: data.catalog.page_count },
+            })}{/if}
         </p>
       {/if}
       {#if data.catalog.description}

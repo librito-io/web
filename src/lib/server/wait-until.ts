@@ -1,15 +1,28 @@
-import type { RequestEvent } from "@sveltejs/kit";
+import { waitUntil } from "@vercel/functions";
 import * as Sentry from "@sentry/sveltekit";
 import { logger } from "$lib/server/log";
 
-interface WaitUntilHost {
-  platform?: { context?: { waitUntil?: (p: Promise<unknown>) => void } };
-}
-
-export function runInBackground(
-  event: RequestEvent | WaitUntilHost,
-  work: () => Promise<unknown>,
-): void {
+/**
+ * Register `work` to run on the Vercel function instance with Vercel's
+ * lifetime guarantee, so the runtime keeps the function alive until the
+ * promise settles instead of suspending after the response is sent.
+ *
+ * Uses `@vercel/functions` `waitUntil()` rather than
+ * `event.platform.context.waitUntil` because `@sveltejs/adapter-vercel`'s
+ * **serverless** runtime does NOT populate `platform.context` — only the
+ * edge runtime does (compare `node_modules/@sveltejs/adapter-vercel/files/
+ * serverless.js` vs `edge.js`). svelte.config.js pins `nodejs24.x`
+ * (Fluid Compute / serverless), so the prior `platform?.context?.waitUntil`
+ * lookup was always undefined in production, silently dropping every
+ * scheduled background task (issue #226).
+ *
+ * `@vercel/functions` waitUntil reads from `globalThis[Symbol.for(
+ * "@vercel/request-context")]` which Vercel's Node.js runtime populates
+ * per-invocation. Off-Vercel (local dev, vitest) the symbol is absent and
+ * waitUntil is a no-op — the promise still runs to completion via the
+ * normal Node.js microtask queue.
+ */
+export function runInBackground(work: () => Promise<unknown>): void {
   const promise = work().catch(async (err) => {
     logger().error(
       {
@@ -26,11 +39,5 @@ export function runInBackground(
     // No-op when SDK is not initialized (self-hoster path).
     await Sentry.flush(2000);
   });
-  const wu = (event as WaitUntilHost).platform?.context?.waitUntil;
-  if (typeof wu === "function") {
-    wu(promise);
-    return;
-  }
-  // Local dev / non-Vercel runtime: ignore — promise is already running and
-  // its rejection is captured by the .catch above.
+  waitUntil(promise);
 }

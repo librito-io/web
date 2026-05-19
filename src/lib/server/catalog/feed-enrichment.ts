@@ -1,4 +1,3 @@
-import type { RequestEvent } from "@sveltejs/kit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FeedItem, FeedRow } from "$lib/feed/types";
 import { canonicalizeIsbn } from "./isbn";
@@ -40,7 +39,6 @@ import { env as privateEnv } from "$env/dynamic/private";
  * per-user rate-limit policy documented at `catalogUserLimiter`.
  */
 export async function enrichFeedRowsWithCovers(
-  event: RequestEvent,
   supabase: SupabaseClient,
   userId: string,
   rows: FeedRow[],
@@ -171,7 +169,7 @@ export async function enrichFeedRowsWithCovers(
       if (outcome.kind !== "ok" || !outcome.result.success) break;
       if (item.kind === "isbn") {
         const isbn = item.isbn;
-        runInBackground(event, async () => {
+        runInBackground(async () => {
           const mutex = await mutexPromise;
           await resolveIsbn(admin, isbn, {
             rateLimiters,
@@ -181,7 +179,7 @@ export async function enrichFeedRowsWithCovers(
         });
       } else {
         const { pair } = item;
-        runInBackground(event, async () => {
+        runInBackground(async () => {
           const mutex = await mutexPromise;
           await resolveTitleAuthor(admin, pair.title, pair.author, {
             rateLimiters,

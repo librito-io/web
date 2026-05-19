@@ -46,11 +46,7 @@
   }
 
   $effect(() => {
-    if (!visible) {
-      clampedX = x;
-      clampedY = y;
-      return;
-    }
+    if (!visible) return;
     // Start at requested coords, then clamp after measuring.
     clampedX = x;
     clampedY = y;

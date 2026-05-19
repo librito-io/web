@@ -9,6 +9,7 @@
   import { installHighlightContextMenuListener } from "$lib/contextMenu/highlightDocListener";
   import { FEED_SORT_OPTIONS, writeSortCookie } from "$lib/feed/sort";
   import type { FeedItem, Sort } from "$lib/feed/types";
+  import { copyText } from "$lib/clipboard";
 
   let { data } = $props();
 
@@ -58,24 +59,9 @@
     toastVisible = true;
   }
 
-  async function copyText(text: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    }
-  }
-
-  function onCopy(): void {
-    copyText(ctxTargetText);
-    showToast($_("toastCopied"));
+  async function onCopy(): Promise<void> {
+    const ok = await copyText(ctxTargetText);
+    showToast($_(ok ? "toastCopied" : "toastCopyFailed"));
   }
 
   async function onShare(): Promise<void> {
@@ -86,8 +72,8 @@
         // user cancelled
       }
     } else {
-      await copyText(ctxTargetText);
-      showToast($_("toastCopied"));
+      const ok = await copyText(ctxTargetText);
+      showToast($_(ok ? "toastCopied" : "toastCopyFailed"));
     }
   }
 

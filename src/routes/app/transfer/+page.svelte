@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { hashFileSha256 } from "$lib/sha256";
+  import { formatDate } from "$lib/time/formatDate";
 
   interface Transfer {
     id: string;
@@ -273,17 +274,6 @@
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  function formatDate(dateStr: string | null): string {
-    if (!dateStr) return "—";
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
   const statusBadge: Record<
     Transfer["status"],
     { label: string; color: string; bg: string }
@@ -402,7 +392,7 @@
               </span>
             </div>
             <div class="transfer-meta">
-              <span>Added: {formatDate(transfer.uploadedAt)}</span>
+              <span>Added: {formatDate(transfer.uploadedAt, "—")}</span>
               {#if transfer.status === "pending"}
                 {@const hrs = hoursRemaining(transfer.uploadedAt)}
                 <span
@@ -414,7 +404,8 @@
                 </span>
               {/if}
               {#if transfer.downloadedAt}
-                <span>Downloaded: {formatDate(transfer.downloadedAt)}</span>
+                <span>Downloaded: {formatDate(transfer.downloadedAt, "—")}</span
+                >
               {/if}
             </div>
             {#if transfer.status === "pending"}

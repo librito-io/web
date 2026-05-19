@@ -1,6 +1,8 @@
 <script lang="ts">
   import { enhance } from "$app/forms";
   import { invalidateAll } from "$app/navigation";
+  import { _ } from "$lib/i18n";
+  import { formatDate } from "$lib/time/formatDate";
 
   let { data } = $props();
 
@@ -46,17 +48,6 @@
     } finally {
       claimLoading = false;
     }
-  }
-
-  function formatDate(dateStr: string | null): string {
-    if (!dateStr) return "Never";
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
   }
 </script>
 
@@ -127,9 +118,17 @@
             </form>
           {:else}
             <strong>{device.name}</strong>
-            <span>Last synced: {formatDate(device.last_synced_at)}</span>
             <span
-              >Paired: {formatDate(device.paired_at ?? device.created_at)}</span
+              >Last synced: {formatDate(
+                device.last_synced_at,
+                $_("never"),
+              )}</span
+            >
+            <span
+              >Paired: {formatDate(
+                device.paired_at ?? device.created_at,
+                $_("never"),
+              )}</span
             >
             <button onclick={() => (renamingId = device.id)}>Rename</button>
             <form

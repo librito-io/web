@@ -29,5 +29,6 @@
   "menuDonate": "후원",
   "subtitle": "{count}권 · {highlights}개의 하이라이트",
   "highlightCount": "{count}개의 하이라이트",
-  "pageCount": "{count}페이지"
+  "pageCount": "{count}페이지",
+  "never": "없음"
 }

@@ -53,5 +53,6 @@
   "sortAuthor": "Author",
   "sortReading": "Reading order",
   "backToFeed": "Back to highlights",
-  "retry": "Retry"
+  "retry": "Retry",
+  "never": "Never"
 }

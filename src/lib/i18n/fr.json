@@ -29,5 +29,6 @@
   "menuDonate": "Faire un don",
   "subtitle": "{count, plural, one {# livre} other {# livres}} · {highlights, plural, one {# surlignage} other {# surlignages}}",
   "highlightCount": "{count, plural, one {# surlignage} other {# surlignages}}",
-  "pageCount": "{count, plural, one {# page} other {# pages}}"
+  "pageCount": "{count, plural, one {# page} other {# pages}}",
+  "never": "Jamais"
 }

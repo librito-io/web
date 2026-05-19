@@ -105,10 +105,6 @@ function row(overrides: Partial<FeedRow> = {}): FeedRow {
   };
 }
 
-const event = { platform: undefined } as unknown as Parameters<
-  typeof enrichFeedRowsWithCovers
->[0];
-
 beforeEach(() => {
   runInBackgroundSpy.mockClear();
   resolveIsbnSpy.mockClear();
@@ -126,7 +122,7 @@ beforeEach(() => {
 describe("enrichFeedRowsWithCovers", () => {
   it("returns empty list when given no rows; does not query or schedule", async () => {
     const supabase = createMockSupabase();
-    const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, []);
+    const items = await enrichFeedRowsWithCovers(supabase, USER_ID, []);
     expect(items).toEqual([]);
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
     expect(userLimitMock).not.toHaveBeenCalled();
@@ -140,12 +136,7 @@ describe("enrichFeedRowsWithCovers", () => {
       row({ book_isbn: null, book_title: null, book_author: null }),
       row({ book_isbn: null, book_title: "only title", book_author: null }),
     ];
-    const items = await enrichFeedRowsWithCovers(
-      event,
-      supabase,
-      USER_ID,
-      rows,
-    );
+    const items = await enrichFeedRowsWithCovers(supabase, USER_ID, rows);
 
     expect(items.map((i) => i.coverUrl)).toEqual([null, null]);
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
@@ -165,7 +156,7 @@ describe("enrichFeedRowsWithCovers", () => {
       error: null,
     });
 
-    const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+    const items = await enrichFeedRowsWithCovers(supabase, USER_ID, [
       row({ book_isbn: ISBN_A }),
     ]);
 
@@ -178,7 +169,7 @@ describe("enrichFeedRowsWithCovers", () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", { data: [], error: null });
 
-    const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+    const items = await enrichFeedRowsWithCovers(supabase, USER_ID, [
       row({ book_isbn: ISBN_A }),
       row({ book_isbn: ISBN_B }),
     ]);
@@ -189,7 +180,7 @@ describe("enrichFeedRowsWithCovers", () => {
     // Each background work, when invoked, calls resolveIsbn with the mutex
     // we mocked. Drain by invoking each scheduled callback.
     for (const call of runInBackgroundSpy.mock.calls) {
-      const work = call[1] as () => Promise<unknown>;
+      const work = call[0] as () => Promise<unknown>;
       await work();
     }
     expect(resolveIsbnSpy).toHaveBeenCalledTimes(2);
@@ -209,7 +200,7 @@ describe("enrichFeedRowsWithCovers", () => {
       remaining: 0,
     });
 
-    await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+    await enrichFeedRowsWithCovers(supabase, USER_ID, [
       row({ book_isbn: ISBN_A }),
     ]);
 
@@ -221,7 +212,7 @@ describe("enrichFeedRowsWithCovers", () => {
     supabase._results.set("book_catalog.select", { data: [], error: null });
     userLimitMock.mockRejectedValue(new Error("upstash boom"));
 
-    await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+    await enrichFeedRowsWithCovers(supabase, USER_ID, [
       row({ book_isbn: ISBN_A }),
     ]);
 
@@ -235,7 +226,7 @@ describe("enrichFeedRowsWithCovers", () => {
       error: { message: "boom" },
     });
 
-    const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+    const items = await enrichFeedRowsWithCovers(supabase, USER_ID, [
       row({ book_isbn: ISBN_A }),
       row({ book_isbn: ISBN_B }),
     ]);
@@ -267,7 +258,7 @@ describe("enrichFeedRowsWithCovers", () => {
       error: null,
     });
 
-    const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+    const items = await enrichFeedRowsWithCovers(supabase, USER_ID, [
       row({ book_isbn: ISBN_A }),
     ]);
 
@@ -318,7 +309,7 @@ describe("enrichFeedRowsWithCovers", () => {
       rows.push(row({ book_isbn: body + String(check) }));
     }
 
-    await enrichFeedRowsWithCovers(event, supabase, USER_ID, rows);
+    await enrichFeedRowsWithCovers(supabase, USER_ID, rows);
 
     expect(runInBackgroundSpy).toHaveBeenCalledTimes(10);
     expect(userLimitMock).toHaveBeenCalledTimes(11);
@@ -328,7 +319,7 @@ describe("enrichFeedRowsWithCovers", () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", { data: [], error: null });
 
-    await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+    await enrichFeedRowsWithCovers(supabase, USER_ID, [
       row({ book_isbn: ISBN_A }),
       row({ book_isbn: ISBN_A }),
       row({ book_isbn: ISBN_A }),
@@ -341,7 +332,7 @@ describe("enrichFeedRowsWithCovers", () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", { data: [], error: null });
 
-    const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+    const items = await enrichFeedRowsWithCovers(supabase, USER_ID, [
       row({ book_isbn: "not-a-real-isbn" }),
     ]);
 
@@ -365,7 +356,7 @@ describe("enrichFeedRowsWithCovers", () => {
         error: null,
       });
 
-      const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+      const items = await enrichFeedRowsWithCovers(supabase, USER_ID, [
         row({
           book_isbn: null,
           book_title: "Some Book",
@@ -382,7 +373,7 @@ describe("enrichFeedRowsWithCovers", () => {
       const supabase = createMockSupabase();
       supabase._results.set("book_catalog.select", { data: [], error: null });
 
-      await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+      await enrichFeedRowsWithCovers(supabase, USER_ID, [
         row({
           book_isbn: null,
           book_title: "Sideloaded Book",
@@ -393,7 +384,7 @@ describe("enrichFeedRowsWithCovers", () => {
       expect(userLimitMock).toHaveBeenCalledWith(USER_ID);
       expect(runInBackgroundSpy).toHaveBeenCalledTimes(1);
       const work = runInBackgroundSpy.mock
-        .calls[0][1] as () => Promise<unknown>;
+        .calls[0][0] as () => Promise<unknown>;
       await work();
       expect(resolveIsbnSpy).not.toHaveBeenCalled();
       expect(resolveTitleAuthorSpy).toHaveBeenCalledTimes(1);
@@ -407,7 +398,7 @@ describe("enrichFeedRowsWithCovers", () => {
       const supabase = createMockSupabase();
       supabase._results.set("book_catalog.select", { data: [], error: null });
 
-      await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+      await enrichFeedRowsWithCovers(supabase, USER_ID, [
         row({ book_isbn: null, book_title: "Dup", book_author: "Auth" }),
         row({ book_isbn: null, book_title: "Dup", book_author: "Auth" }),
         // Different casing/punctuation but normalises to the same key
@@ -421,7 +412,7 @@ describe("enrichFeedRowsWithCovers", () => {
       const supabase = createMockSupabase();
       supabase._results.set("book_catalog.select", { data: [], error: null });
 
-      await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+      await enrichFeedRowsWithCovers(supabase, USER_ID, [
         row({ book_isbn: null, book_title: "!!!", book_author: "???" }),
       ]);
 
@@ -433,7 +424,7 @@ describe("enrichFeedRowsWithCovers", () => {
       const supabase = createMockSupabase();
       supabase._results.set("book_catalog.select", { data: [], error: null });
 
-      await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+      await enrichFeedRowsWithCovers(supabase, USER_ID, [
         row({ book_isbn: ISBN_A }),
         row({
           book_isbn: null,
@@ -448,7 +439,7 @@ describe("enrichFeedRowsWithCovers", () => {
       // Two scheduled background jobs — one resolveIsbn + one resolveTitleAuthor.
       expect(runInBackgroundSpy).toHaveBeenCalledTimes(2);
       for (const call of runInBackgroundSpy.mock.calls) {
-        const work = call[1] as () => Promise<unknown>;
+        const work = call[0] as () => Promise<unknown>;
         await work();
       }
       expect(resolveIsbnSpy).toHaveBeenCalledTimes(1);
@@ -462,7 +453,7 @@ describe("enrichFeedRowsWithCovers", () => {
         error: { message: "boom" },
       });
 
-      const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+      const items = await enrichFeedRowsWithCovers(supabase, USER_ID, [
         row({
           book_isbn: null,
           book_title: "Some Book",
@@ -498,7 +489,7 @@ describe("enrichFeedRowsWithCovers", () => {
         error: null,
       });
 
-      const items = await enrichFeedRowsWithCovers(event, supabase, USER_ID, [
+      const items = await enrichFeedRowsWithCovers(supabase, USER_ID, [
         row({
           book_isbn: null,
           book_title: "Some Book",

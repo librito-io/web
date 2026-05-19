@@ -39,7 +39,7 @@ export const load: PageServerLoad = async (event) => {
   const last = rows.at(-1);
   const nextCursor = last?.next_cursor ? encodeCursor(last.next_cursor) : null;
 
-  const items = await enrichFeedRowsWithCovers(event, supabase, user.id, rows);
+  const items = await enrichFeedRowsWithCovers(supabase, user.id, rows);
 
   return { items, nextCursor, sort };
 };

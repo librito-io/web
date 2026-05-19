@@ -66,7 +66,7 @@ export const GET: RequestHandler = async (event) => {
     );
     if (limited) return limited;
     const mutex = await getCatalogMutex();
-    runInBackground(event, () =>
+    runInBackground(() =>
       resolveIsbn(supabase, isbn, {
         rateLimiters: {
           openLibrary: catalogOpenLibraryLimiter,

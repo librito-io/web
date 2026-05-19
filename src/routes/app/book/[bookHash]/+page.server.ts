@@ -124,7 +124,7 @@ export const load: PageServerLoad = async (event) => {
     const allowed = outcome.kind === "ok" && outcome.result.success;
     if (!allowed) return;
     const mutexPromise = getCatalogMutex();
-    runInBackground(event, async () => {
+    runInBackground(async () => {
       const mutex = await mutexPromise;
       await work(mutex);
     });
@@ -224,7 +224,6 @@ export const load: PageServerLoad = async (event) => {
   // cards to enriched. All three feed surfaces now go through the same
   // enrichment pipeline.
   const items: FeedItem[] = await enrichFeedRowsWithCovers(
-    event,
     supabase,
     user.id,
     rows,

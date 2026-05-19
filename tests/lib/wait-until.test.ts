@@ -8,7 +8,12 @@ vi.mock("@sentry/sveltekit", () => ({
   flush,
 }));
 
-// Import AFTER mock so the SDK's captureException is the mocked one.
+const waitUntilMock = vi.fn();
+vi.mock("@vercel/functions", () => ({
+  waitUntil: waitUntilMock,
+}));
+
+// Import AFTER mocks so the SDK + waitUntil are the mocked ones.
 const { runInBackground } = await import("../../src/lib/server/wait-until");
 
 describe("runInBackground", () => {
@@ -19,28 +24,27 @@ describe("runInBackground", () => {
     __setTestDestination((line) => logWrites.push(JSON.parse(line)));
     captureException.mockClear();
     flush.mockClear();
+    waitUntilMock.mockClear();
   });
 
   afterEach(() => __resetTestDestination());
 
-  it("uses event.platform.context.waitUntil when available", () => {
-    const waitUntil = vi.fn();
-    runInBackground(
-      { platform: { context: { waitUntil } } } as never,
-      async () => {},
-    );
-    expect(waitUntil).toHaveBeenCalled();
+  it("registers the wrapped promise with @vercel/functions waitUntil", () => {
+    runInBackground(async () => {});
+    expect(waitUntilMock).toHaveBeenCalledTimes(1);
+    const arg = waitUntilMock.mock.calls[0][0];
+    expect(arg).toBeInstanceOf(Promise);
   });
 
-  it("falls back to setImmediate-style scheduling when platform missing", async () => {
+  it("starts the work synchronously (microtask) — does not wait for waitUntil host", async () => {
     const fn = vi.fn(async () => {});
-    runInBackground({} as never, fn);
+    runInBackground(fn);
     await new Promise((r) => setTimeout(r, 0));
     expect(fn).toHaveBeenCalled();
   });
 
   it("logs unhandled rejection from background work", async () => {
-    runInBackground({} as never, async () => {
+    runInBackground(async () => {
       throw new Error("boom");
     });
     await new Promise((r) => setTimeout(r, 0));
@@ -54,7 +58,7 @@ describe("runInBackground", () => {
 
   it("captures unhandled rejection to Sentry with wait_until tag", async () => {
     const err = new Error("captured");
-    runInBackground({} as never, async () => {
+    runInBackground(async () => {
       throw err;
     });
     await new Promise((r) => setTimeout(r, 0));
@@ -64,7 +68,7 @@ describe("runInBackground", () => {
   });
 
   it("both logs and captures on the same throw (additive paths)", async () => {
-    runInBackground({} as never, async () => {
+    runInBackground(async () => {
       throw new Error("dual");
     });
     await new Promise((r) => setTimeout(r, 0));
@@ -72,5 +76,31 @@ describe("runInBackground", () => {
       expect.objectContaining({ event: "wait_until_failed", error: "dual" }),
     );
     expect(captureException).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers the post-catch wrapped promise so Sentry flush is awaited inside the waitUntil window", async () => {
+    let resolveFlush!: () => void;
+    flush.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((r) => {
+          resolveFlush = () => r(true);
+        }),
+    );
+    runInBackground(async () => {
+      throw new Error("flush-window");
+    });
+    // The promise registered with waitUntil is the catch-wrapped one — it
+    // resolves only after Sentry.flush settles, ensuring Vercel keeps the
+    // function alive long enough for the async transport to complete.
+    const registered = waitUntilMock.mock.calls[0][0] as Promise<unknown>;
+    let settled = false;
+    void registered.then(() => {
+      settled = true;
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled).toBe(false);
+    resolveFlush();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled).toBe(true);
   });
 });

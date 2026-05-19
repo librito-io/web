@@ -31,7 +31,7 @@ export const POST: RequestHandler = async (event) => {
   // event that lands in Sentry. ~3.4M states is plenty for a smoke
   // endpoint that fires at most a handful of times per install.
   const id = crypto.randomUUID().slice(0, 8);
-  runInBackground(event, async () => {
+  runInBackground(async () => {
     throw new Error(`sentry-smoke-test-${id}`);
   });
   return jsonSuccess({ scheduled: true, id }, 202);

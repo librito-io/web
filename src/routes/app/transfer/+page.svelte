@@ -1,6 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { hashFileSha256 } from "$lib/sha256";
+  import { fetchWithSafariRetry } from "$lib/fetchRetry";
+  import { formatBytes } from "$lib/formatBytes";
+  import { formatDate } from "$lib/time/formatDate";
 
   interface Transfer {
     id: string;
@@ -164,20 +167,6 @@
     }
   }
 
-  async function fetchWithSafariRetry(
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> {
-    try {
-      return await fetch(input, init);
-    } catch {
-      // Safari/WebKit reuses idle HTTP keep-alive sockets the server already
-      // closed; first request fails mid-flight with "Load failed" / "network
-      // connection was lost". Retry once on a fresh connection.
-      return await fetch(input, init);
-    }
-  }
-
   async function refreshTransfers() {
     try {
       const res = await fetchWithSafariRetry("/api/transfer/list");
@@ -265,23 +254,6 @@
 
   function dismissUpload(upload: UploadState) {
     uploads = uploads.filter((u) => u.id !== upload.id);
-  }
-
-  function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  function formatDate(dateStr: string | null): string {
-    if (!dateStr) return "—";
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
   }
 
   const statusBadge: Record<
@@ -402,7 +374,7 @@
               </span>
             </div>
             <div class="transfer-meta">
-              <span>Added: {formatDate(transfer.uploadedAt)}</span>
+              <span>Added: {formatDate(transfer.uploadedAt, "—")}</span>
               {#if transfer.status === "pending"}
                 {@const hrs = hoursRemaining(transfer.uploadedAt)}
                 <span
@@ -414,7 +386,8 @@
                 </span>
               {/if}
               {#if transfer.downloadedAt}
-                <span>Downloaded: {formatDate(transfer.downloadedAt)}</span>
+                <span>Downloaded: {formatDate(transfer.downloadedAt, "—")}</span
+                >
               {/if}
             </div>
             {#if transfer.status === "pending"}

@@ -29,5 +29,6 @@
   "menuDonate": "Поддержать",
   "subtitle": "{count, plural, one {# книга} few {# книги} other {# книг}} · {highlights, plural, one {# выделение} few {# выделения} other {# выделений}}",
   "highlightCount": "{count, plural, one {# выделение} few {# выделения} other {# выделений}}",
-  "pageCount": "{count, plural, one {# страница} few {# страницы} other {# страниц}}"
+  "pageCount": "{count, plural, one {# страница} few {# страницы} other {# страниц}}",
+  "never": "Никогда"
 }

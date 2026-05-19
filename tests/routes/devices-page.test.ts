@@ -1,4 +1,4 @@
-// Covers the /app/devices route's rename + revoke actions after the
+// Covers the /app/devices route's rename + unpair actions after the
 // migration to RLS-gated writes (issues #129 + #130). The page now uses
 // the per-request anon client (`event.locals.supabase`); ownership is
 // enforced atomically inside Postgres via the "Users can update own
@@ -194,16 +194,16 @@ describe("action rename /app/devices", () => {
   });
 });
 
-describe("action revoke /app/devices", () => {
+describe("action unpair /app/devices", () => {
   it("returns 401 when unauthenticated", async () => {
-    const res = await actions.revoke(
+    const res = await actions.unpair(
       buildActionEvent({ deviceId: "d-1" }, null),
     );
     expect(res).toMatchObject({ status: 401 });
   });
 
   it("returns 400 when deviceId missing", async () => {
-    const res = await actions.revoke(buildActionEvent({}));
+    const res = await actions.unpair(buildActionEvent({}));
     expect(res).toMatchObject({ status: 400 });
   });
 
@@ -212,16 +212,16 @@ describe("action revoke /app/devices", () => {
       data: null,
       error: { code: "PGRST116" },
     });
-    const res = await actions.revoke(buildActionEvent({ deviceId: "d-other" }));
+    const res = await actions.unpair(buildActionEvent({ deviceId: "d-other" }));
     expect(res).toMatchObject({ status: 404 });
   });
 
-  it("revokes the device and reports success", async () => {
+  it("unpairs the device and reports success", async () => {
     supabase._results.set("devices.update", {
       data: { id: "d-1" },
       error: null,
     });
-    const res = await actions.revoke(buildActionEvent({ deviceId: "d-1" }));
+    const res = await actions.unpair(buildActionEvent({ deviceId: "d-1" }));
     expect(res).toEqual({ success: true });
     // Payload must carry an ISO-formatted revoked_at timestamp. A bug
     // that wrote the wrong shape (e.g. `null`, a Date object, an empty
@@ -233,8 +233,8 @@ describe("action revoke /app/devices", () => {
     expect(typeof payload.revoked_at).toBe("string");
     expect(payload.revoked_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     // Predicate assertions: id + user_id scoping, plus the
-    // .is("revoked_at", null) guard that makes revoke idempotent
-    // (already-revoked rows hit no candidates → PGRST116 → 404, rather
+    // .is("revoked_at", null) guard that makes unpair idempotent
+    // (already-unpaired rows hit no candidates → PGRST116 → 404, rather
     // than refreshing the timestamp).
     const updateChain = supabase._chainCalls.filter(
       (c) => c.table === "devices" && c.operation === "update",
@@ -262,13 +262,13 @@ describe("action revoke /app/devices", () => {
       data: null,
       error: { code: "23514", message: "check constraint" },
     });
-    const res = await actions.revoke(buildActionEvent({ deviceId: "d-1" }));
+    const res = await actions.unpair(buildActionEvent({ deviceId: "d-1" }));
     expect(res).toMatchObject({ status: 500 });
   });
 
-  it("returns 404 for an already-revoked device (idempotent revoke)", async () => {
+  it("returns 404 for an already-unpaired device (idempotent unpair)", async () => {
     // The route adds .is("revoked_at", null) to the UPDATE chain, so
-    // an already-revoked row matches no candidates and PostgREST yields
+    // an already-unpaired row matches no candidates and PostgREST yields
     // PGRST116 from .single(). Behaviorally indistinguishable from
     // "device id doesn't exist" — both collapse to 404 by design.
     // Backstop at the DB layer is trigger devices_prevent_unrevoke,
@@ -277,7 +277,7 @@ describe("action revoke /app/devices", () => {
       data: null,
       error: { code: "PGRST116" },
     });
-    const res = await actions.revoke(
+    const res = await actions.unpair(
       buildActionEvent({ deviceId: "d-already-revoked" }),
     );
     expect(res).toMatchObject({ status: 404 });

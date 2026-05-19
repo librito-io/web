@@ -134,7 +134,7 @@
             <button onclick={() => (renamingId = device.id)}>Rename</button>
             <form
               method="POST"
-              action="?/revoke"
+              action="?/unpair"
               use:enhance={({ formElement }) => {
                 return async ({ result, update }) => {
                   // Safari/WebKit stale keep-alive: retry once on a fresh socket.

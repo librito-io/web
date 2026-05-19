@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { hashFileSha256 } from "$lib/sha256";
 
   interface Transfer {
     id: string;
@@ -75,14 +76,6 @@
       xhr.open("PUT", url);
       xhr.send(new Uint8Array(fileData));
     });
-  }
-
-  async function hashFileSha256(file: File): Promise<string> {
-    const buf = await file.arrayBuffer();
-    const digest = await crypto.subtle.digest("SHA-256", buf);
-    return Array.from(new Uint8Array(digest))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
   }
 
   async function processFile(file: File) {

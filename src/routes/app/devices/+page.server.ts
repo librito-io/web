@@ -58,7 +58,14 @@ export const actions: Actions = {
     return { success: true };
   },
 
-  revoke: async ({ request, locals: { safeGetSession, supabase } }) => {
+  // Action name `unpair` matches the UI's binding vocabulary; the
+  // underlying write still sets `devices.revoked_at` because that column
+  // tracks token validity (a strict superset of binding state — manual
+  // unpair AND server-side token revocation both null out the binding).
+  // Keeping the schema column name `revoked_at` is intentional; only
+  // the user-visible action name is reconciled here. See #181/#183
+  // archeology in CLAUDE.md for the design history.
+  unpair: async ({ request, locals: { safeGetSession, supabase } }) => {
     const { user } = await safeGetSession();
     if (!user) return fail(401, { error: "Not authenticated" });
 
@@ -70,8 +77,8 @@ export const actions: Actions = {
 
     // .is("revoked_at", null) collapses three cases into the same 404:
     // device id doesn't exist, device belongs to another user, or device
-    // is already revoked. Aligns with the load query's filter so the
-    // "revoke an already-revoked row" code path doesn't refresh
+    // is already unpaired. Aligns with the load query's filter so the
+    // "unpair an already-unpaired row" code path doesn't refresh
     // revoked_at (also enforced at the DB layer by trigger
     // devices_prevent_unrevoke, but cheap to fast-path here).
     const { error } = await supabase
@@ -86,7 +93,7 @@ export const actions: Actions = {
     if (error) {
       if (error.code === "PGRST116")
         return fail(404, { error: "Device not found" });
-      return fail(500, { error: "Failed to revoke device" });
+      return fail(500, { error: "Failed to unpair device" });
     }
     return { success: true };
   },

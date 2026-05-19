@@ -147,6 +147,7 @@
         text: item.text,
         styles: item.styles,
       }}
+      hasNote={!!noteText}
       onMenu={({ x, y, id }) =>
         onHighlightMenu({
           x,

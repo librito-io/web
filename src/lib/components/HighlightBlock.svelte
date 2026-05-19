@@ -7,8 +7,9 @@
     styles: string | null;
   };
 
-  let { highlight, onMenu } = $props<{
+  let { highlight, hasNote, onMenu } = $props<{
     highlight: HighlightInput;
+    hasNote: boolean;
     onMenu: (payload: { x: number; y: number; id: string }) => void;
   }>();
 
@@ -16,14 +17,17 @@
     renderStyledText(highlight.text, highlight.styles),
   );
 
-  function openMenu(e: MouseEvent, preventDefault: boolean): void {
-    if (preventDefault) e.preventDefault();
+  function openMenu(e: MouseEvent): void {
     e.stopPropagation();
     onMenu({ x: e.clientX, y: e.clientY, id: highlight.id });
   }
 </script>
 
-<blockquote dir="auto" oncontextmenu={(e) => openMenu(e, true)}>
+<blockquote
+  dir="auto"
+  data-highlight-id={highlight.id}
+  data-has-note={hasNote ? "true" : "false"}
+>
   {#each runs as run, i (i)}
     {#if run.isBreak}
       <br /><br />
@@ -35,9 +39,7 @@
       <span>{run.text}</span>
     {/if}
   {/each}
-  <button class="bq-more" onclick={(e) => openMenu(e, false)} aria-label="More"
-    >⋯</button
-  >
+  <button class="bq-more" onclick={openMenu} aria-label="More">⋯</button>
 </blockquote>
 
 <style>

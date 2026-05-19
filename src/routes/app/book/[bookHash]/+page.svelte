@@ -7,6 +7,7 @@
   import Breadcrumb from "$lib/components/Breadcrumb.svelte";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import Toast from "$lib/components/Toast.svelte";
+  import { installHighlightContextMenuListener } from "$lib/contextMenu/highlightDocListener";
   import { BOOK_SORT_OPTIONS, writeSortCookie } from "$lib/feed/sort";
   import type { FeedItem, Sort } from "$lib/feed/types";
 
@@ -106,6 +107,17 @@
     items = data.items;
     cursor = data.nextCursor;
     done = data.nextCursor === null;
+  });
+
+  $effect(() => {
+    return installHighlightContextMenuListener({
+      resolveText: (id) =>
+        items.find((it) => it.highlight_id === id)?.text ?? null,
+      onMenu: onHighlightMenu,
+      onHide: () => {
+        ctxVisible = false;
+      },
+    });
   });
 
   async function onSortChange(next: Sort): Promise<void> {
@@ -218,6 +230,7 @@
   bind:visible={ctxVisible}
   x={ctxX}
   y={ctxY}
+  targetId={ctxTargetId}
   hasNote={ctxHasNote}
   {onCopy}
   {onShare}

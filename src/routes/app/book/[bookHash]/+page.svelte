@@ -3,18 +3,9 @@
   import HighlightFeed from "$lib/components/HighlightFeed.svelte";
   import Breadcrumb from "$lib/components/Breadcrumb.svelte";
   import { BOOK_SORT_OPTIONS } from "$lib/feed/sort";
-  import type { Sort } from "$lib/feed/types";
+  import { buildFeedUrl } from "$lib/feed/url";
 
   let { data } = $props();
-
-  function buildFeedUrl(params: { sort: Sort; cursor: string | null }): string {
-    const qs = new URLSearchParams({
-      sort: params.sort,
-      book_hash: data.book.book_hash,
-    });
-    if (params.cursor) qs.set("cursor", params.cursor);
-    return `/app/feed?${qs}`;
-  }
 </script>
 
 <div class="content">
@@ -68,7 +59,7 @@
     initialSort={data.sort}
     initialCursor={data.nextCursor}
     sortOptions={BOOK_SORT_OPTIONS}
-    fetchUrl={buildFeedUrl}
+    fetchUrl={(p) => buildFeedUrl({ ...p, bookHash: data.book.book_hash })}
     emptyMessage={$_("noHighlightsInBook")}
     supabase={data.supabase}
     userId={data.user?.id ?? ""}

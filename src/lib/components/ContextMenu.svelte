@@ -5,6 +5,7 @@
     visible = $bindable<boolean>(false),
     x = 0,
     y = 0,
+    targetId = null,
     hasNote = false,
     onCopy,
     onShare,
@@ -13,6 +14,7 @@
     visible: boolean;
     x: number;
     y: number;
+    targetId?: string | null;
     hasNote: boolean;
     onCopy: () => void;
     onShare: () => void;
@@ -21,12 +23,17 @@
 
   let menuEl: HTMLDivElement | undefined = $state();
   let firstItemEl: HTMLButtonElement | undefined = $state();
+  let clampedX = $state(0);
+  let clampedY = $state(0);
 
   function close(): void {
     visible = false;
   }
 
   function onOutside(e: MouseEvent): void {
+    // Right-click on Mac fires `click` with button=2 before `contextmenu` in
+    // some browsers; ignore so reopening the menu doesn't immediately close.
+    if (e.button === 2) return;
     if (!menuEl) return;
     if (!menuEl.contains(e.target as Node)) close();
   }
@@ -35,12 +42,59 @@
     if (e.key === "Escape") close();
   }
 
+  function preventScroll(e: Event): void {
+    e.preventDefault();
+  }
+
   $effect(() => {
-    if (!visible) return;
+    if (!visible) {
+      clampedX = x;
+      clampedY = y;
+      return;
+    }
+    // Start at requested coords, then clamp after measuring.
+    clampedX = x;
+    clampedY = y;
+
     firstItemEl?.focus();
+
+    // Pin the ⋯ button on the targeted blockquote so it stays visible while
+    // the menu is open — without this the button fades on :hover exit and
+    // the menu hovers over nothing.
+    let pinnedBtn: HTMLElement | null = null;
+    if (targetId) {
+      pinnedBtn = document.querySelector<HTMLElement>(
+        `blockquote[data-highlight-id="${CSS.escape(targetId)}"] .bq-more`,
+      );
+      pinnedBtn?.classList.add("pinned");
+    }
+
+    // Scroll lock keeps the scrollbar gutter visible; hiding the gutter
+    // reflows the page and the menu would jump.
+    window.addEventListener("wheel", preventScroll, { passive: false });
+    window.addEventListener("touchmove", preventScroll, { passive: false });
+
     const onScroll = (): void => close();
     window.addEventListener("scroll", onScroll, true);
-    return () => window.removeEventListener("scroll", onScroll, true);
+
+    // Clamp position to viewport after the menu has rendered.
+    queueMicrotask(() => {
+      if (!menuEl) return;
+      const r = menuEl.getBoundingClientRect();
+      if (r.right > window.innerWidth) {
+        clampedX = Math.max(8, window.innerWidth - r.width - 8);
+      }
+      if (r.bottom > window.innerHeight) {
+        clampedY = Math.max(8, window.innerHeight - r.height - 8);
+      }
+    });
+
+    return () => {
+      window.removeEventListener("wheel", preventScroll);
+      window.removeEventListener("touchmove", preventScroll);
+      window.removeEventListener("scroll", onScroll, true);
+      pinnedBtn?.classList.remove("pinned");
+    };
   });
 </script>
 
@@ -50,7 +104,7 @@
   bind:this={menuEl}
   class="ctx-menu"
   class:visible
-  style="left: {x}px; top: {y}px"
+  style="left: {clampedX}px; top: {clampedY}px"
   role="menu"
   tabindex="-1"
   aria-label={$_("ctxMenuLabel")}

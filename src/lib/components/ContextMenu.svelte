@@ -22,7 +22,6 @@
   }>();
 
   let menuEl: HTMLDivElement | undefined = $state();
-  let firstItemEl: HTMLButtonElement | undefined = $state();
   let clampedX = $state(0);
   let clampedY = $state(0);
 
@@ -56,7 +55,12 @@
     clampedX = x;
     clampedY = y;
 
-    firstItemEl?.focus();
+    // Focus the menu container, not the first button. Focusing a button
+    // matches `:focus-visible` on the initial post-load programmatic focus
+    // (before any user pointer interaction has set the browser's heuristic
+    // to "pointer mode"), causing a spurious focus ring on first open.
+    // The container has tabindex="-1" and keeps Escape/Tab working.
+    menuEl?.focus({ preventScroll: true });
 
     // Pin the ⋯ button on the targeted blockquote so it stays visible while
     // the menu is open — without this the button fades on :hover exit and
@@ -110,7 +114,6 @@
   aria-label={$_("ctxMenuLabel")}
 >
   <button
-    bind:this={firstItemEl}
     role="menuitem"
     onclick={() => {
       onCopy();

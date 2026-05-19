@@ -1,144 +1,17 @@
 <script lang="ts">
-  import { untrack } from "svelte";
   import { _ } from "$lib/i18n";
-  import HighlightCard from "$lib/components/HighlightCard.svelte";
-  import SortPillRow from "$lib/components/SortPillRow.svelte";
-  import InfiniteScroll from "$lib/components/InfiniteScroll.svelte";
-  import ContextMenu from "$lib/components/ContextMenu.svelte";
-  import Toast from "$lib/components/Toast.svelte";
-  import { installHighlightContextMenuListener } from "$lib/contextMenu/highlightDocListener";
-  import { FEED_SORT_OPTIONS, writeSortCookie } from "$lib/feed/sort";
-  import type { FeedItem, Sort } from "$lib/feed/types";
-  import { copyText } from "$lib/clipboard";
+  import HighlightFeed from "$lib/components/HighlightFeed.svelte";
+  import { FEED_SORT_OPTIONS } from "$lib/feed/sort";
+  import type { Sort } from "$lib/feed/types";
 
   let { data } = $props();
 
-  let sort = $state<Sort>(untrack(() => data.sort));
-  let items = $state<FeedItem[]>(untrack(() => data.items));
-  let cursor = $state<string | null>(untrack(() => data.nextCursor));
-  let done = $state(untrack(() => data.nextCursor === null));
+  const totalBooks = $derived(new Set(data.items.map((r) => r.book_hash)).size);
 
-  const totalBooks = $derived(new Set(items.map((r) => r.book_hash)).size);
-
-  let ctxVisible = $state(false);
-  let ctxX = $state(0);
-  let ctxY = $state(0);
-  let ctxTargetId = $state<string | null>(null);
-  let ctxTargetText = $state("");
-  let ctxHasNote = $state(false);
-
-  let toastVisible = $state(false);
-  let toastMessage = $state("");
-
-  const noteDeleters = new Map<string, () => Promise<void>>();
-
-  function registerNoteEditor(
-    highlightId: string,
-    handleDelete: () => Promise<void>,
-  ): void {
-    noteDeleters.set(highlightId, handleDelete);
-  }
-
-  function onHighlightMenu(payload: {
-    x: number;
-    y: number;
-    highlightId: string;
-    text: string;
-    hasNote: boolean;
-  }): void {
-    ctxX = payload.x;
-    ctxY = payload.y;
-    ctxTargetId = payload.highlightId;
-    ctxTargetText = payload.text;
-    ctxHasNote = payload.hasNote;
-    ctxVisible = true;
-  }
-
-  function showToast(msg: string): void {
-    toastMessage = msg;
-    toastVisible = true;
-  }
-
-  async function onCopy(): Promise<void> {
-    const ok = await copyText(ctxTargetText);
-    showToast($_(ok ? "toastCopied" : "toastCopyFailed"));
-  }
-
-  async function onShare(): Promise<void> {
-    if (navigator.share) {
-      try {
-        await navigator.share({ text: ctxTargetText });
-      } catch {
-        // user cancelled
-      }
-    } else {
-      const ok = await copyText(ctxTargetText);
-      showToast($_(ok ? "toastCopied" : "toastCopyFailed"));
-    }
-  }
-
-  async function onDelete(): Promise<void> {
-    if (!ctxTargetId) return;
-    const deleter = noteDeleters.get(ctxTargetId);
-    if (deleter) {
-      await deleter();
-      showToast($_("toastNoteDeleted"));
-    }
-  }
-
-  let fetchGen = 0;
-  let inflight = false;
-
-  $effect(() => {
-    sort = data.sort;
-    items = data.items;
-    cursor = data.nextCursor;
-    done = data.nextCursor === null;
-  });
-
-  $effect(() => {
-    return installHighlightContextMenuListener({
-      resolveText: (id) =>
-        items.find((it) => it.highlight_id === id)?.text ?? null,
-      onMenu: onHighlightMenu,
-      onHide: () => {
-        ctxVisible = false;
-      },
-    });
-  });
-
-  async function onSortChange(next: Sort): Promise<void> {
-    if (next === sort) return;
-    writeSortCookie(next);
-    fetchGen += 1;
-    inflight = false;
-    sort = next;
-    cursor = null;
-    done = false;
-    await loadMore({ replace: true });
-  }
-
-  async function loadMore(opts: { replace?: boolean } = {}): Promise<void> {
-    if (inflight) return;
-    inflight = true;
-    const myGen = fetchGen;
-    try {
-      const qs = new URLSearchParams({ sort });
-      if (!opts.replace && cursor) qs.set("cursor", cursor);
-      const res = await fetch(`/app/feed?${qs}`);
-      if (myGen !== fetchGen) return;
-      if (!res.ok) throw new Error(`feed fetch ${res.status}`);
-      const payload = (await res.json()) as {
-        items: FeedItem[];
-        nextCursor: string | null;
-      };
-      if (myGen !== fetchGen) return;
-      items = opts.replace ? payload.items : [...items, ...payload.items];
-      cursor = payload.nextCursor;
-      if (!cursor || payload.items.length === 0) done = true;
-    } finally {
-      inflight = false;
-    }
+  function buildFeedUrl(params: { sort: Sort; cursor: string | null }): string {
+    const qs = new URLSearchParams({ sort: params.sort });
+    if (params.cursor) qs.set("cursor", params.cursor);
+    return `/app/feed?${qs}`;
   }
 </script>
 
@@ -147,45 +20,19 @@
     <h2>{$_("highlights")}</h2>
     <div class="page-subtitle">
       {$_("subtitle", {
-        values: { count: totalBooks, highlights: items.length },
+        values: { count: totalBooks, highlights: data.items.length },
       })}
     </div>
   </div>
 
-  <SortPillRow
-    options={FEED_SORT_OPTIONS}
-    active={sort}
-    onChange={onSortChange}
+  <HighlightFeed
+    initialItems={data.items}
+    initialSort={data.sort}
+    initialCursor={data.nextCursor}
+    sortOptions={FEED_SORT_OPTIONS}
+    fetchUrl={buildFeedUrl}
+    emptyMessage={$_("noHighlights")}
+    supabase={data.supabase}
+    userId={data.user?.id ?? ""}
   />
-
-  <div class="book-list">
-    {#if items.length === 0}
-      <div class="empty">{$_("noHighlights")}</div>
-    {:else}
-      {#each items as item (item.highlight_id)}
-        <HighlightCard
-          {item}
-          supabase={data.supabase}
-          userId={data.user?.id ?? ""}
-          {onHighlightMenu}
-          {registerNoteEditor}
-        />
-      {/each}
-    {/if}
-  </div>
-
-  <InfiniteScroll {loadMore} hasMore={!done} />
 </div>
-
-<ContextMenu
-  bind:visible={ctxVisible}
-  x={ctxX}
-  y={ctxY}
-  targetId={ctxTargetId}
-  hasNote={ctxHasNote}
-  {onCopy}
-  {onShare}
-  {onDelete}
-/>
-
-<Toast bind:visible={toastVisible} message={toastMessage} />

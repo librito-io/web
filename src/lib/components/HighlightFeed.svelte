@@ -14,7 +14,6 @@
 
   type CardFlags = {
     showChapterHeading?: boolean;
-    showHighlightCount?: boolean;
     linkBookText?: boolean;
   };
 

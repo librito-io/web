@@ -63,7 +63,7 @@
     emptyMessage={$_("noHighlightsInBook")}
     supabase={data.supabase}
     userId={data.user?.id ?? ""}
-    cardProps={{ showHighlightCount: false, linkBookText: false }}
+    cardProps={{ linkBookText: false }}
   />
 </div>
 

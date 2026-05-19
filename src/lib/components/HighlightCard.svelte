@@ -12,7 +12,6 @@
     onHighlightMenu,
     registerNoteEditor,
     showChapterHeading = true,
-    showHighlightCount = true,
     linkBookText = true,
   } = $props<{
     item: FeedItem;
@@ -30,7 +29,6 @@
       handleDelete: () => Promise<void>,
     ) => void;
     showChapterHeading?: boolean;
-    showHighlightCount?: boolean;
     linkBookText?: boolean;
   }>();
 
@@ -126,13 +124,6 @@
         <div class="book-author" dir="auto">
           {item.book_author || $_("unknownAuthor")}
         </div>
-      {/if}
-      {#if showHighlightCount}
-        <a href={bookHref} class="book-meta book-link">
-          {$_("highlightCount", {
-            values: { count: item.book_highlight_count },
-          })}
-        </a>
       {/if}
     </div>
   </div>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { hashFileSha256 } from "$lib/sha256";
+  import { fetchWithSafariRetry } from "$lib/fetchRetry";
   import { formatDate } from "$lib/time/formatDate";
 
   interface Transfer {
@@ -162,20 +163,6 @@
         status: "error",
         error: err instanceof Error ? err.message : "Upload failed",
       });
-    }
-  }
-
-  async function fetchWithSafariRetry(
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> {
-    try {
-      return await fetch(input, init);
-    } catch {
-      // Safari/WebKit reuses idle HTTP keep-alive sockets the server already
-      // closed; first request fails mid-flight with "Load failed" / "network
-      // connection was lost". Retry once on a fresh connection.
-      return await fetch(input, init);
     }
   }
 

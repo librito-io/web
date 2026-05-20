@@ -307,6 +307,20 @@ export const pairRequestLimiter = createLimiter({
   failMode: "closed",
 });
 
+// /api/pair/request — second axis: 5 requests per 5 minutes per
+// hardwareId. The per-IP limit alone cannot bound a per-hardware flood
+// when the attacker rotates IPs; this caps per-device damage at 5
+// outstanding codes per 5-minute window, which still permits the
+// legitimate retry pattern (lost-power re-pair) inside one TTL. Same
+// fail-closed posture as `pairRequestLimiter` — an Upstash blip must
+// not collapse the defense-in-depth invariant on a credential-mint
+// path. (Issue #285.)
+export const pairRequestPerHardwareLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(5, "5m"),
+  prefix: "rl:pair:request:hw",
+  failMode: "closed",
+});
+
 // /api/pair/status/[pairingId] — 1 request per 3 seconds per IP
 export const pairStatusLimiter = createLimiter({
   window: Ratelimit.slidingWindow(1, "3s"),

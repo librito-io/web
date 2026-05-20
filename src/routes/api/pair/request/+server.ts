@@ -1,19 +1,23 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { pairRequestLimiter, enforceRateLimit } from "$lib/server/ratelimit";
+import {
+  pairRequestLimiter,
+  pairRequestPerHardwareLimiter,
+  enforceRateLimit,
+} from "$lib/server/ratelimit";
 import { requestPairingCode } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { UUID_RE } from "$lib/server/validation";
 
 export const POST: RequestHandler = async ({ request, getClientAddress }) => {
-  // Rate limit by IP
+  // Layer 1: per-IP. Cheap; bounds body-parsing cost for IP-bound floods.
   const ip = getClientAddress();
-  const limited = await enforceRateLimit(
+  const ipLimited = await enforceRateLimit(
     pairRequestLimiter,
     ip,
     "Too many requests",
   );
-  if (limited) return limited;
+  if (ipLimited) return ipLimited;
 
   let body: { hardwareId?: string };
   try {
@@ -33,6 +37,17 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
       "hardwareId must be a valid UUID v4",
     );
   }
+
+  // Layer 2: per-hardwareId. Bounds per-device damage when the attacker
+  // rotates IPs to bypass layer 1 — the unique index on `pairing_codes`
+  // covers `code`, not `hardware_id`, so per-hardware flooding is
+  // otherwise only bounded by the 5-minute TTL on each row.
+  const hwLimited = await enforceRateLimit(
+    pairRequestPerHardwareLimiter,
+    body.hardwareId,
+    "Too many requests",
+  );
+  if (hwLimited) return hwLimited;
 
   try {
     const supabase = createAdminClient();

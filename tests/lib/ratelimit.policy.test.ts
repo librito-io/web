@@ -7,6 +7,7 @@ vi.mock("$env/static/private", () => ({
 
 import {
   pairRequestLimiter,
+  pairRequestPerHardwareLimiter,
   pairStatusLimiter,
   pairClaimLimiter,
   syncLimiter,
@@ -29,6 +30,7 @@ describe("rate-limit policy snapshot", () => {
   // implication.
   it("locks per-limiter failMode policy", () => {
     expect(pairRequestLimiter.failMode).toBe("closed");
+    expect(pairRequestPerHardwareLimiter.failMode).toBe("closed");
     expect(pairStatusLimiter.failMode).toBe("open");
     expect(pairClaimLimiter.failMode).toBe("closed");
     expect(syncLimiter.failMode).toBe("open");
@@ -44,6 +46,7 @@ describe("rate-limit policy snapshot", () => {
 
   it("locks per-limiter labels (no namespace drift)", () => {
     expect(pairRequestLimiter.label).toBe("pair:request");
+    expect(pairRequestPerHardwareLimiter.label).toBe("pair:request:hw");
     expect(pairStatusLimiter.label).toBe("pair:status");
     expect(pairClaimLimiter.label).toBe("pair:claim");
     expect(syncLimiter.label).toBe("sync:device");

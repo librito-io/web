@@ -4,18 +4,8 @@ import { parseSort, SORT_COOKIE } from "$lib/feed/sort";
 import { encodeCursor } from "$lib/feed/cursor";
 import { parseFeedRows } from "$lib/feed/types";
 import type { FeedItem, Sort } from "$lib/feed/types";
-import { createAdminClient } from "$lib/server/supabase";
 import { canonicalizeIsbn } from "$lib/server/catalog/isbn";
 import { normalizeTitleAuthor } from "$lib/server/catalog/title-author";
-import { resolveIsbn, resolveTitleAuthor } from "$lib/server/catalog/fetcher";
-import {
-  catalogOpenLibraryLimiter,
-  catalogGoogleBooksLimiter,
-  catalogITunesLimiter,
-  catalogUserLimiter,
-  safeLimit,
-} from "$lib/server/ratelimit";
-import { runInBackground } from "$lib/server/wait-until";
 import {
   getCatalogForBrowser,
   getCatalogForBrowserByTitleAuthor,
@@ -23,13 +13,8 @@ import {
   type CatalogView,
 } from "$lib/server/catalog/view";
 import { enrichFeedRowsWithCovers } from "$lib/server/catalog/feed-enrichment";
-import { getCatalogMutex } from "$lib/server/catalog/mutex";
+import { scheduleCatalogResolveIfAllowed } from "$lib/server/catalog/scheduling";
 import { logger } from "$lib/server/log";
-// GOOGLE_BOOKS_API_KEY is Sensitive in Vercel; static-imported sensitive
-// vars bake empty strings into prebuilt deploys. Read at runtime via
-// dynamic/private. Anonymous Google Books quota is 0/day per project, so
-// missing key silently degrades the entire premium-cover + description path.
-import { env as privateEnv } from "$env/dynamic/private";
 
 export const load: PageServerLoad = async (event) => {
   const {
@@ -107,52 +92,18 @@ export const load: PageServerLoad = async (event) => {
     };
   }
 
-  // Per-user budget on cold-miss work-scheduling. Page loader treats any
-  // non-allowed outcome (denied, failClosed) as "skip schedule" and renders
-  // the existing placeholder catalog state — returning 429/503 from a load
-  // function would render an error page over already-readable data. See
-  // catalogUserLimiter doc in ratelimit.ts. Mutex acquisition runs inside
-  // the runInBackground callback so the page load does not block on the
-  // lazy Upstash singleton init.
   const userId = user.id;
-  async function scheduleColdMissResolve(
-    work: (
-      mutex: Awaited<ReturnType<typeof getCatalogMutex>>,
-    ) => Promise<unknown>,
-  ): Promise<void> {
-    const outcome = await safeLimit(catalogUserLimiter, userId);
-    const allowed = outcome.kind === "ok" && outcome.result.success;
-    if (!allowed) return;
-    const mutexPromise = getCatalogMutex();
-    runInBackground(async () => {
-      const mutex = await mutexPromise;
-      await work(mutex);
-    });
-  }
 
   if (isbn) {
-    let view: CatalogView | null = null;
-    let failed = false;
-    try {
-      view = await getCatalogForBrowser(supabase, isbn, "large");
-    } catch {
-      failed = true;
-    }
-    if (!failed && view && view.cover_url !== null) {
+    const view: CatalogView | null = await getCatalogForBrowser(
+      supabase,
+      isbn,
+      "large",
+    ).catch(() => null);
+    if (view && view.cover_url !== null) {
       catalog = projectCatalogView(view);
-    } else if (!failed) {
-      await scheduleColdMissResolve((mutex) => {
-        const admin = createAdminClient();
-        return resolveIsbn(admin, isbn, {
-          rateLimiters: {
-            openLibrary: catalogOpenLibraryLimiter,
-            googleBooks: catalogGoogleBooksLimiter,
-            itunes: catalogITunesLimiter,
-          },
-          mutex,
-          googleBooksApiKey: privateEnv.GOOGLE_BOOKS_API_KEY,
-        });
-      });
+    } else if (view === null) {
+      await scheduleCatalogResolveIfAllowed(userId, [{ kind: "isbn", isbn }]);
     }
   } else if (
     bookRow.title &&
@@ -166,33 +117,18 @@ export const load: PageServerLoad = async (event) => {
     // from `catalog:lock:isbn:${isbn}`.
     const title = bookRow.title;
     const author = bookRow.author;
-    let view: CatalogView | null = null;
-    let failed = false;
-    try {
-      view = await getCatalogForBrowserByTitleAuthor(
-        supabase,
-        title,
-        author,
-        "large",
-      );
-    } catch {
-      failed = true;
-    }
-    if (!failed && view && view.cover_url !== null) {
+    const view: CatalogView | null = await getCatalogForBrowserByTitleAuthor(
+      supabase,
+      title,
+      author,
+      "large",
+    ).catch(() => null);
+    if (view && view.cover_url !== null) {
       catalog = projectCatalogView(view);
-    } else if (!failed) {
-      await scheduleColdMissResolve((mutex) => {
-        const admin = createAdminClient();
-        return resolveTitleAuthor(admin, title, author, {
-          rateLimiters: {
-            openLibrary: catalogOpenLibraryLimiter,
-            googleBooks: catalogGoogleBooksLimiter,
-            itunes: catalogITunesLimiter,
-          },
-          mutex,
-          googleBooksApiKey: privateEnv.GOOGLE_BOOKS_API_KEY,
-        });
-      });
+    } else if (view === null) {
+      await scheduleCatalogResolveIfAllowed(userId, [
+        { kind: "ta", title, author },
+      ]);
     }
   }
 

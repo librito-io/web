@@ -3,5 +3,7 @@
 // under `$lib/server/` cannot be imported into client code, so the constant
 // must live here to keep server and browser caps in lock-step.
 
+import { formatBytes } from "./formatBytes";
+
 export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MiB
-export const MAX_FILE_SIZE_LABEL = "10 MB";
+export const MAX_FILE_SIZE_LABEL = formatBytes(MAX_FILE_SIZE);

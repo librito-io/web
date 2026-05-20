@@ -4,6 +4,7 @@
   import { fetchWithSafariRetry } from "$lib/fetchRetry";
   import { formatBytes } from "$lib/formatBytes";
   import { formatDate } from "$lib/time/formatDate";
+  import { MAX_FILE_SIZE, MAX_FILE_SIZE_LABEL } from "$lib/transfer-config";
 
   interface Transfer {
     id: string;
@@ -44,7 +45,6 @@
 
   const PENDING_TTL_MS = 48 * 3600 * 1000;
   const RETRY_ERROR_TTL_MS = 5000;
-  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
   const MAX_TRANSFER_ATTEMPTS = 10;
 
   function hoursRemaining(uploadedAt: string): number {
@@ -104,7 +104,10 @@
       return;
     }
     if (file.size > MAX_FILE_SIZE) {
-      updateUpload({ status: "error", error: "File exceeds 20MB limit" });
+      updateUpload({
+        status: "error",
+        error: `File exceeds ${MAX_FILE_SIZE_LABEL} limit`,
+      });
       return;
     }
 
@@ -297,7 +300,9 @@
           style="display: none;"
         />
       </label>
-      <p class="drop-hint">EPUB only &middot; max 20 MB per file</p>
+      <p class="drop-hint">
+        EPUB only &middot; max {MAX_FILE_SIZE_LABEL} per file
+      </p>
     </div>
   </section>
 

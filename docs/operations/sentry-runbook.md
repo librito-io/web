@@ -30,7 +30,7 @@ Body includes:
 4. **Read the stack trace.** With source maps uploaded (production builds only), frames show TypeScript file + line.
 5. **Tag interpretation:**
    - `wait_until: true` → originated inside `runInBackground` (`src/lib/server/wait-until.ts`). Background work failure — user request returned 200, the background job silently failed. This is the class of issue #214 / issue #219.
-   - Error message matching `sentry-smoke-test-*` → operator-triggered self-test (`/api/debug/sentry-smoke`). Not a real failure; ignore or use to verify the alert pipeline still works.
+   - Error message matching `sentry-smoke-test-*` → operator-triggered self-test (`/api/cron/sentry-smoke`). Not a real failure; ignore or use to verify the alert pipeline still works.
    - Neither tag → unhandled error from a page load, server action, API route, or other server entry point. Captured by SvelteKit's `handleError` hook wrapped with `Sentry.handleErrorWithSentry()`.
 
 ## How to acknowledge
@@ -44,7 +44,7 @@ Body includes:
 The smoke endpoint deliberately fires an event into the Sentry pipeline so you can verify alerts still arrive end-to-end.
 
 ```bash
-curl -X POST https://librito.io/api/debug/sentry-smoke \
+curl -X POST https://librito.io/api/cron/sentry-smoke \
   -H "Authorization: Bearer $CRON_SECRET"
 ```
 

@@ -117,12 +117,18 @@ export const GET: RequestHandler = async ({ request, fetch, url }) => {
 
 // POST path retained for operator-triggered bulk seeds with explicit ISBN
 // list in the JSON body (scripts/data/README.md).
-export const POST: RequestHandler = async ({ request, fetch }) => {
+export const POST: RequestHandler = async ({ request, fetch, url }) => {
   if (!privateEnv.CRON_SECRET) {
     return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
   }
   if (!authorized(request)) {
     return jsonError(401, "unauthorized", "Cron secret mismatch");
+  }
+  // ?probe=1 short-circuits after auth, mirroring the GET handler — keeps
+  // operator smoke probes against the bulk-seed entry from burning
+  // NYT/OpenLibrary/GoogleBooks budget and uploading covers needlessly.
+  if (url.searchParams.get("probe") === "1") {
+    return jsonSuccess({ probe: true });
   }
   if (privateEnv.CATALOG_WARMUP_ENABLED !== "true") {
     return jsonSuccess({ skipped: true });

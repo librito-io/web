@@ -11,15 +11,14 @@ vi.mock("@sentry/sveltekit", () => ({
   flush,
 }));
 
-const { POST } =
-  await import("../../src/routes/api/debug/sentry-smoke/+server");
+const { POST } = await import("../../src/routes/api/cron/sentry-smoke/+server");
 
 function buildEvent(
   headers: Record<string, string> = {},
   query: string = "",
   platform?: { context?: { waitUntil?: (p: Promise<unknown>) => void } },
 ) {
-  const url = `http://x/api/debug/sentry-smoke${query}`;
+  const url = `http://x/api/cron/sentry-smoke${query}`;
   return {
     request: new Request(url, { method: "POST", headers }),
     url: new URL(url),
@@ -31,7 +30,7 @@ beforeEach(() => {
   captureException.mockClear();
 });
 
-describe("POST /api/debug/sentry-smoke", () => {
+describe("POST /api/cron/sentry-smoke", () => {
   it("returns 401 when Authorization header missing", async () => {
     const res = await POST(buildEvent());
     expect(res.status).toBe(401);
@@ -77,11 +76,11 @@ describe("POST /api/debug/sentry-smoke", () => {
   });
 });
 
-describe("POST /api/debug/sentry-smoke — missing CRON_SECRET", () => {
+describe("POST /api/cron/sentry-smoke — missing CRON_SECRET", () => {
   it("returns 500 server_misconfigured when env unset", async () => {
     vi.resetModules();
     vi.doMock("$env/dynamic/private", () => ({ env: {} }));
-    const mod = await import("../../src/routes/api/debug/sentry-smoke/+server");
+    const mod = await import("../../src/routes/api/cron/sentry-smoke/+server");
     const res = await mod.POST(
       buildEvent({ Authorization: "Bearer anything" }),
     );

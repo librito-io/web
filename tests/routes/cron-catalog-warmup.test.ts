@@ -50,13 +50,13 @@ const { GET, POST } =
 function buildEvent(
   headers: Record<string, string> = {},
   fetchFn: typeof fetch = makeFetchSpy() as unknown as typeof fetch,
+  query: string = "",
 ) {
+  const fullUrl = `http://x/api/cron/catalog-warmup${query}`;
   return {
-    request: new Request("http://x/api/cron/catalog-warmup", {
-      method: "POST",
-      headers,
-    }),
+    request: new Request(fullUrl, { method: "POST", headers }),
     fetch: fetchFn,
+    url: new URL(fullUrl),
   } as unknown as Parameters<typeof POST>[0];
 }
 
@@ -114,6 +114,7 @@ describe("POST /api/cron/catalog-warmup", () => {
         }),
       }),
       fetch: makeFetchSpy(),
+      url: new URL("http://x/api/cron/catalog-warmup"),
     } as unknown as Parameters<typeof POST>[0];
     const res = await POST(event);
     const body = await res.json();
@@ -134,6 +135,7 @@ describe("POST /api/cron/catalog-warmup", () => {
         body: JSON.stringify({ isbns: "not-an-array" }),
       }),
       fetch: makeFetchSpy(),
+      url: new URL("http://x/api/cron/catalog-warmup"),
     } as unknown as Parameters<typeof POST>[0];
     const res = await POST(event);
     const body = await res.json();
@@ -163,6 +165,7 @@ describe("POST /api/cron/catalog-warmup", () => {
         }),
       }),
       fetch: makeFetchSpy(),
+      url: new URL("http://x/api/cron/catalog-warmup"),
     } as unknown as Parameters<typeof POST>[0];
     const res = await POST(event);
     const body = await res.json();
@@ -192,12 +195,42 @@ describe("POST /api/cron/catalog-warmup", () => {
         }),
       }),
       fetch: makeFetchSpy(),
+      url: new URL("http://x/api/cron/catalog-warmup"),
     } as unknown as Parameters<typeof POST>[0];
     const res = await POST(event);
     expect(res.status).toBe(200);
     // resolveIsbn decides whether to short-circuit based on TTL; the cron
     // must hand all candidates to it regardless of catalog presence.
     expect(resolveIsbnSpy.mock.calls.length).toBe(2);
+  });
+
+  it("?probe=1 short-circuits after auth without running warmup or parsing body", async () => {
+    const fetchSpy = makeFetchSpy();
+    const event = {
+      request: new Request("http://x/api/cron/catalog-warmup?probe=1", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ isbns: ["9780743273565"] }),
+      }),
+      fetch: fetchSpy,
+      url: new URL("http://x/api/cron/catalog-warmup?probe=1"),
+    } as unknown as Parameters<typeof POST>[0];
+    const res = await POST(event);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.probe).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(resolveIsbnSpy).not.toHaveBeenCalled();
+  });
+
+  it("?probe=1 without auth still returns 401 (auth before probe)", async () => {
+    const res = await POST(
+      buildEvent({}, makeFetchSpy() as unknown as typeof fetch, "?probe=1"),
+    );
+    expect(res.status).toBe(401);
   });
 
   it("uses injected event.fetch (not global fetch) when calling NYT API", async () => {

@@ -34,6 +34,17 @@ type ClaimResult =
 // `expires_at`, Redis token TTL, and the `expiresIn` response field.
 const PAIRING_CODE_TTL_SEC = 300;
 
+// Per-code global claim-attempt cap. Closes the IP-rotation bypass on the
+// 6-digit pairing code: the route-level pairClaimLimiter is keyed on
+// ${code}:${ip}, so any caller with rotating proxies can fan out around the
+// per-IP cap. This counter is incremented atomically inside
+// claim_pairing_atomic regardless of source IP. With the 1M code keyspace
+// and the 5-minute TTL, 10 global attempts caps brute-force success
+// probability at ~10/1M per code, well below noise. Source of truth lives
+// here; the RPC takes it as a parameter so SQL and TS stay aligned.
+// See issue #260 and migration 20260520000001.
+export const MAX_CLAIM_ATTEMPTS_PER_CODE = 10;
+
 // Logs and Sentry breadcrumbs must never embed a full pairingId. A leaked
 // UUID within the 5-min TTL is enough for an unauthenticated caller to
 // fetch the plaintext device token from /api/pair/status/<pairingId>.
@@ -118,22 +129,40 @@ export async function checkPairingStatus(
 }
 
 // claim_pairing_atomic RPC return shape (one row or empty).
-//   row + won=true  → caller won the claim, device row freshly written
-//   row + won=false → claim already held by same user (idempotent replay)
-//   no row          → claim held by different user, or pairing_id missing
-type AtomicClaimRow = {
-  device_id: string;
-  device_name: string;
-  won: boolean;
-};
+//   row + expired=true             → per-code cap exceeded (#260), device_*
+//                                    are null; caller maps to code_expired
+//   row + won=true, expired=false  → caller won the claim, device row freshly written
+//   row + won=false, expired=false → claim already held by same user (idempotent replay)
+//   no row                         → claim held by different user, or pairing_id missing
+type AtomicClaimRow =
+  | {
+      device_id: string;
+      device_name: string;
+      won: boolean;
+      expired: false;
+    }
+  | {
+      device_id: null;
+      device_name: null;
+      won: false;
+      expired: true;
+    };
 
 function isAtomicClaimRow(value: unknown): value is AtomicClaimRow {
   if (value === null || typeof value !== "object") return false;
   const row = value as Record<string, unknown>;
+  if (typeof row.won !== "boolean") return false;
+  if (typeof row.expired !== "boolean") return false;
+  // Per the migration (20260520000001): expired=true emits NULL device
+  // fields and won=false; any other shape (e.g. expired=true with a
+  // device_id) is schema drift.
+  if (row.expired) {
+    return (
+      row.won === false && row.device_id === null && row.device_name === null
+    );
+  }
   return (
-    typeof row.device_id === "string" &&
-    typeof row.device_name === "string" &&
-    typeof row.won === "boolean"
+    typeof row.device_id === "string" && typeof row.device_name === "string"
   );
 }
 
@@ -188,6 +217,8 @@ export async function claimPairingCode(
   const tokenHash = hashToken(token);
 
   // p_user_email denormalised onto pairing_codes — see migration 20260430000006.
+  // p_max_attempts threads MAX_CLAIM_ATTEMPTS_PER_CODE into the RPC so the cap
+  // lives in one place (TS) — see migration 20260520000001.
   const { data: rpcRows, error: rpcError } = await supabase.rpc(
     "claim_pairing_atomic",
     {
@@ -195,6 +226,7 @@ export async function claimPairingCode(
       p_pairing_id: pairingCode.id,
       p_token_hash: tokenHash,
       p_user_email: userEmail,
+      p_max_attempts: MAX_CLAIM_ATTEMPTS_PER_CODE,
     },
   );
 
@@ -224,6 +256,10 @@ export async function claimPairingCode(
     );
     return { error: "server_error" };
   }
+
+  // Per-code attempt cap exceeded (#260). Refuse without consulting Redis or
+  // emitting a token. Same surface as a real expiry from the caller's POV.
+  if (row.expired) return { error: "code_expired" };
 
   // Only the winner writes Redis. Idempotent-replay losers (won=false) trust
   // that the winner has already written; clobbering with a different token

@@ -138,13 +138,19 @@ describe.skipIf(SKIP)(
     `;
 
       const [result] = await sql<
-        { device_id: string; device_name: string; won: boolean }[]
+        {
+          device_id: string;
+          device_name: string;
+          won: boolean;
+          expired: boolean;
+        }[]
       >`
       SELECT * FROM public.claim_pairing_atomic(
         ${user.id}::uuid,
         ${pairing.id}::uuid,
         ${"hash-case-5-new"}::text,
-        ${user.email}::text
+        ${user.email}::text,
+        ${10}::integer
       )
     `;
       expect(result.won).toBe(true);

@@ -31,17 +31,16 @@ export const GET: RequestHandler = async ({ request, params }) => {
   );
   if (limited) return limited;
 
-  const { data: rows, error: fetchError } = await supabase
+  const { data: transfer, error: fetchError } = await supabase
     .from("book_transfers")
     .select("id, user_id, device_id, status, storage_path, sha256, filename")
     .eq("id", params.id)
-    .is("scrubbed_at", null);
+    .is("scrubbed_at", null)
+    .maybeSingle();
 
   if (fetchError) {
     return jsonError(500, "server_error", "Failed to fetch transfer record");
   }
-
-  const transfer = Array.isArray(rows) ? (rows[0] ?? null) : rows;
 
   if (!transfer || transfer.user_id !== device.userId) {
     return jsonError(404, "not_found", "Transfer not found");

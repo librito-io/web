@@ -42,9 +42,9 @@ export const POST: RequestHandler = async ({ request }) => {
     );
   }
 
-  let privateJwk: RealtimeSigningJwk;
+  let parsed: unknown;
   try {
-    privateJwk = JSON.parse(rawJwk) as RealtimeSigningJwk;
+    parsed = JSON.parse(rawJwk);
   } catch {
     logger().error(
       { event: "realtime.jwk_parse_failed" },
@@ -52,6 +52,31 @@ export const POST: RequestHandler = async ({ request }) => {
     );
     return jsonError(500, "server_error", "Failed to mint Realtime token");
   }
+
+  // Valid-JSON-but-wrong-shape JWK (missing `d`, RSA instead of EC, ES384,
+  // etc.) would otherwise reach importJWK in mintRealtimeToken and surface
+  // as an opaque crypto error mapped to a generic 500 server_error —
+  // indistinguishable in Sentry from a transient signing failure. Split
+  // here so config drift is loud (server_misconfigured) and operationally
+  // distinct from runtime crypto failures.
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    (parsed as Record<string, unknown>).kty !== "EC" ||
+    (parsed as Record<string, unknown>).alg !== "ES256" ||
+    typeof (parsed as Record<string, unknown>).d !== "string"
+  ) {
+    logger().error(
+      { event: "realtime.jwk_shape_invalid" },
+      "realtime.jwk_shape_invalid",
+    );
+    return jsonError(
+      500,
+      "server_misconfigured",
+      "Invalid LIBRITO_JWT_PRIVATE_KEY_JWK shape",
+    );
+  }
+  const privateJwk = parsed as RealtimeSigningJwk;
 
   const limited = await enforceRateLimits(
     [

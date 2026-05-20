@@ -132,11 +132,17 @@ describe("checkPairingStatus", () => {
         claimed: false,
         expires_at: new Date(Date.now() + 60000).toISOString(),
         user_email: null,
+        poll_secret_hash: TEST_POLL_SECRET_HASH,
       },
       error: null,
     });
 
-    const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
+    const result = await checkPairingStatus(
+      supabase,
+      redis,
+      "pairing-uuid",
+      TEST_POLL_SECRET,
+    );
     expect(result).toEqual({ paired: false });
   });
 
@@ -148,6 +154,7 @@ describe("checkPairingStatus", () => {
         claimed: true,
         expires_at: new Date(Date.now() + 60000).toISOString(),
         user_email: "claimer@example.com",
+        poll_secret_hash: TEST_POLL_SECRET_HASH,
       },
       error: null,
     });
@@ -155,7 +162,12 @@ describe("checkPairingStatus", () => {
       ex: 300,
     });
 
-    const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
+    const result = await checkPairingStatus(
+      supabase,
+      redis,
+      "pairing-uuid",
+      TEST_POLL_SECRET,
+    );
     expect(result).toEqual({
       paired: true,
       token: "sk_device_test_token",
@@ -174,6 +186,7 @@ describe("checkPairingStatus", () => {
         claimed: true,
         expires_at: new Date(Date.now() + 60000).toISOString(),
         user_email: null,
+        poll_secret_hash: TEST_POLL_SECRET_HASH,
       },
       error: null,
     });
@@ -181,7 +194,12 @@ describe("checkPairingStatus", () => {
       ex: 300,
     });
 
-    const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
+    const result = await checkPairingStatus(
+      supabase,
+      redis,
+      "pairing-uuid",
+      TEST_POLL_SECRET,
+    );
     expect(result).toEqual({
       paired: true,
       token: "sk_device_test_token",
@@ -197,11 +215,17 @@ describe("checkPairingStatus", () => {
         claimed: true,
         expires_at: new Date(Date.now() + 60000).toISOString(),
         user_email: "claimer@example.com",
+        poll_secret_hash: TEST_POLL_SECRET_HASH,
       },
       error: null,
     });
 
-    const result = await checkPairingStatus(supabase, redis, "pairing-uuid");
+    const result = await checkPairingStatus(
+      supabase,
+      redis,
+      "pairing-uuid",
+      TEST_POLL_SECRET,
+    );
     expect(result).toEqual({ error: "code_expired" });
   });
 
@@ -224,11 +248,17 @@ describe("checkPairingStatus", () => {
       data: {
         claimed: false,
         expires_at: new Date(Date.now() - 1000).toISOString(),
+        poll_secret_hash: TEST_POLL_SECRET_HASH,
       },
       error: null,
     });
 
-    const result = await checkPairingStatus(supabase, redis, "expired-uuid");
+    const result = await checkPairingStatus(
+      supabase,
+      redis,
+      "expired-uuid",
+      TEST_POLL_SECRET,
+    );
     expect(result).toEqual({ error: "code_expired" });
   });
 
@@ -302,10 +332,11 @@ describe("checkPairingStatus", () => {
     expect(mismatch).not.toHaveProperty("pairingId");
   });
 
-  it("proceeds and logs poll_secret_absent when caller omits secret on a row that has a hash (backward-compat)", async () => {
-    // Backward-compat window: pre-update firmware does not forward the
-    // secret. Today we admit and log; phase 3 follow-up flips this to
-    // refuse once firmware has rolled out.
+  it("returns poll_secret_mismatch when caller omits the secret (phase 3 cutover)", async () => {
+    // Phase 3 of issue #286: the backward-compat admit-on-absent path is
+    // removed. A row with a stored hash and no presented secret refuses
+    // with the same shape as a wrong-secret mismatch; the audit log
+    // distinguishes the cases via the `pairing.poll_secret_absent` event.
     const supabase = createMockSupabase();
     const redis = createMockRedis();
     const pairingId = "pairing-uuid-1234";
@@ -323,59 +354,17 @@ describe("checkPairingStatus", () => {
     });
 
     const result = await checkPairingStatus(supabase, redis, pairingId, null);
-    expect(result).toEqual({
-      paired: true,
-      token: "sk_device_test_token",
-      userEmail: "claimer@example.com",
-    });
+    expect(result).toEqual({ error: "poll_secret_mismatch" });
     expect(logWrites).toContainEqual(
       expect.objectContaining({
         event: "pairing.poll_secret_absent",
         pairingIdPrefix: "pairing-",
       }),
     );
-  });
-
-  it("proceeds normally on pre-migration row (poll_secret_hash NULL) regardless of provided secret", async () => {
-    // Rows minted before the column existed survive their 5-min TTL. The
-    // challenge gate must not refuse them — there is no hash to verify
-    // against — but record so the rollout-window count is observable.
-    const supabase = createMockSupabase();
-    const redis = createMockRedis();
-    const pairingId = "pairing-uuid-1234";
-    supabase._results.set("pairing_codes.select", {
-      data: {
-        claimed: true,
-        expires_at: new Date(Date.now() + 60000).toISOString(),
-        user_email: "claimer@example.com",
-        poll_secret_hash: null,
-      },
-      error: null,
-    });
-    await redis.set(`pair:token:${pairingId}`, "sk_device_test_token", {
-      ex: 300,
-    });
-
-    const withSecret = await checkPairingStatus(
-      supabase,
-      redis,
-      pairingId,
-      TEST_POLL_SECRET,
+    const absent = logWrites.find(
+      (w) => w.event === "pairing.poll_secret_absent",
     );
-    expect(withSecret).toMatchObject({ paired: true });
-    expect(logWrites).toContainEqual(
-      expect.objectContaining({
-        event: "pairing.poll_secret_missing_on_row",
-      }),
-    );
-
-    const withoutSecret = await checkPairingStatus(
-      supabase,
-      redis,
-      pairingId,
-      null,
-    );
-    expect(withoutSecret).toMatchObject({ paired: true });
+    expect(absent).not.toHaveProperty("pairingId");
   });
 });
 

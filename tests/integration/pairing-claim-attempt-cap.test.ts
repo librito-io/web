@@ -45,9 +45,14 @@ describe.skipIf(SKIP)("claim_pairing_atomic: per-code attempt cap", () => {
   }> {
     const code = String(Math.floor(100000 + Math.random() * 900000));
     const hardwareId = `hw-${label}-${Math.random().toString(36).slice(2, 10)}`;
+    // poll_secret_hash is NOT NULL post-migration 20260520000004. Use a
+    // deterministic 64-char hex placeholder; tests here exercise the
+    // claim atomic RPC, not the status-poll challenge, so the value
+    // never gets hashed against anything.
+    const pollSecretHash = "0".repeat(64);
     const [row] = await sql<{ id: string }[]>`
-      INSERT INTO public.pairing_codes (code, hardware_id, expires_at)
-      VALUES (${code}, ${hardwareId}, ${new Date(Date.now() + 5 * 60 * 1000).toISOString()})
+      INSERT INTO public.pairing_codes (code, hardware_id, expires_at, poll_secret_hash)
+      VALUES (${code}, ${hardwareId}, ${new Date(Date.now() + 5 * 60 * 1000).toISOString()}, ${pollSecretHash})
       RETURNING id
     `;
     return { id: row.id, code, hardwareId };

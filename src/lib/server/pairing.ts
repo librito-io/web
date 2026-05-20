@@ -120,9 +120,9 @@ export async function checkPairingStatus(
   supabase: SupabaseClient,
   redis: Redis,
   pairingId: string,
-  // Plaintext pollSecret presented by the caller. Optional during the
-  // backward-compat window: pre-update firmware does not forward it, and
-  // pre-migration rows have a NULL poll_secret_hash. See issue #286 step 2.
+  // Plaintext pollSecret presented by the caller. Required: a row without
+  // an Authorization: Bearer or ?pollSecret= is the unauthenticated
+  // token-fetch surface that issue #286 closed.
   providedPollSecret?: string | null,
 ): Promise<StatusResult> {
   const { data, error } = await supabase
@@ -133,53 +133,35 @@ export async function checkPairingStatus(
 
   if (error || !data) return { error: "not_found" };
 
-  // pollSecret challenge gate. Three reachable states during rollout:
-  //   row has hash + caller provides secret → verify (mismatch → 401)
-  //   row has hash + caller omits secret    → log warn, proceed (backward-compat)
-  //   row has NULL hash                     → pre-migration row, proceed
-  // Once firmware ships with the secret forwarder, the middle case
-  // becomes a refuse path — tracked in the phase-3 follow-up issue.
-  const storedHash = data.poll_secret_hash as string | null;
-  if (storedHash) {
-    if (providedPollSecret) {
-      const presentedHash = hashPollSecret(providedPollSecret);
-      // Constant-time comparison: both values are deterministic 64-char
-      // lowercase hex of equal length, so a plain === leaks no timing
-      // signal beyond the per-char compare cost (negligible at 64 chars).
-      // If a future change widens shape, swap to crypto.timingSafeEqual.
-      if (presentedHash !== storedHash) {
-        logger().warn(
-          {
-            event: "pairing.poll_secret_mismatch",
-            pairingIdPrefix: pairingIdPrefix(pairingId),
-          },
-          "pairing.poll_secret_mismatch",
-        );
-        return { error: "poll_secret_mismatch" };
-      }
-    } else {
-      // Backward-compat: pre-update firmware. Single operator signal so
-      // the rollout-tightening cutover decision (phase 3) has data.
-      logger().warn(
-        {
-          event: "pairing.poll_secret_absent",
-          pairingIdPrefix: pairingIdPrefix(pairingId),
-        },
-        "pairing.poll_secret_absent",
-      );
-    }
-  } else if (providedPollSecret) {
-    // New-firmware caller polling a pre-migration row. The row predates
-    // the column; the secret the device holds was never written here.
-    // Proceed — there is nothing to verify against — but record so the
-    // rollout window can be observed.
+  // pollSecret challenge gate. Column is NOT NULL post-migration
+  // 20260520000004, so storedHash is always present. Caller must
+  // forward the matching plaintext on every poll.
+  const storedHash = data.poll_secret_hash as string;
+  if (!providedPollSecret) {
     logger().warn(
       {
-        event: "pairing.poll_secret_missing_on_row",
+        event: "pairing.poll_secret_absent",
         pairingIdPrefix: pairingIdPrefix(pairingId),
       },
-      "pairing.poll_secret_missing_on_row",
+      "pairing.poll_secret_absent",
     );
+    return { error: "poll_secret_mismatch" };
+  }
+  const presentedHash = hashPollSecret(providedPollSecret);
+  // Constant-time-equivalent compare: both values are deterministic
+  // 64-char lowercase hex of equal length, so a plain === leaks no
+  // timing signal beyond the per-char compare cost (negligible at 64
+  // chars). If a future change widens shape, swap to
+  // crypto.timingSafeEqual.
+  if (presentedHash !== storedHash) {
+    logger().warn(
+      {
+        event: "pairing.poll_secret_mismatch",
+        pairingIdPrefix: pairingIdPrefix(pairingId),
+      },
+      "pairing.poll_secret_mismatch",
+    );
+    return { error: "poll_secret_mismatch" };
   }
 
   if (new Date(data.expires_at) < new Date()) return { error: "code_expired" };

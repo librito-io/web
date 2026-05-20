@@ -126,7 +126,6 @@
     }
 
     try {
-      updateUpload({ status: "validating" });
       const sha256 = await hashFileSha256(file);
 
       updateUpload({ status: "initiating" });
@@ -433,8 +432,12 @@
               >
                 {cancellingIds.has(transfer.id) ? "Removing..." : "Remove"}
               </button>
-            {/if}
-            {#if transfer.status === "failed"}
+              {#if transfer.attemptCount > 0}
+                <p class="attempt-meta">
+                  Attempt {transfer.attemptCount} of {MAX_TRANSFER_ATTEMPTS}
+                </p>
+              {/if}
+            {:else if transfer.status === "failed"}
               {#if transfer.lastError}
                 <p class="error-reason">{transfer.lastError}</p>
               {/if}
@@ -448,11 +451,6 @@
               >
                 {retryingIds.has(transfer.id) ? "Retrying..." : "Retry"}
               </button>
-            {/if}
-            {#if transfer.status === "pending" && transfer.attemptCount > 0}
-              <p class="attempt-meta">
-                Attempt {transfer.attemptCount} of {MAX_TRANSFER_ATTEMPTS}
-              </p>
             {/if}
           </li>
         {/each}

@@ -407,6 +407,7 @@ export type Database = {
       }
       pairing_codes: {
         Row: {
+          claim_attempts: number
           claimed: boolean
           code: string
           created_at: string
@@ -417,6 +418,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          claim_attempts?: number
           claimed?: boolean
           code: string
           created_at?: string
@@ -427,6 +429,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          claim_attempts?: number
           claimed?: boolean
           code?: string
           created_at?: string
@@ -471,6 +474,7 @@ export type Database = {
     Functions: {
       claim_pairing_atomic: {
         Args: {
+          p_max_attempts: number
           p_pairing_id: string
           p_token_hash: string
           p_user_email: string
@@ -479,6 +483,7 @@ export type Database = {
         Returns: {
           device_id: string
           device_name: string
+          expired: boolean
           won: boolean
         }[]
       }

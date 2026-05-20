@@ -12,6 +12,7 @@ import {
   requestPairingCode,
   checkPairingStatus,
   claimPairingCode,
+  MAX_CLAIM_ATTEMPTS_PER_CODE,
 } from "$lib/server/pairing";
 import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 
@@ -235,7 +236,14 @@ describe("claimPairingCode", () => {
     const pairingId = setupValidLookup(supabase);
     const rpcSpy = vi.spyOn(supabase, "rpc");
     supabase._results.set("rpc.claim_pairing_atomic", {
-      data: [{ device_id: "device-uuid", device_name: "Librito", won: true }],
+      data: [
+        {
+          device_id: "device-uuid",
+          device_name: "Librito",
+          won: true,
+          expired: false,
+        },
+      ],
       error: null,
     });
 
@@ -257,6 +265,7 @@ describe("claimPairingCode", () => {
       p_token_hash:
         "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
       p_user_email: "user@example.com",
+      p_max_attempts: MAX_CLAIM_ATTEMPTS_PER_CODE,
     });
     expect(redis.set).toHaveBeenCalledWith(
       `pair:token:${pairingId}`,
@@ -274,7 +283,14 @@ describe("claimPairingCode", () => {
     const redis = createMockRedis();
     const pairingId = setupValidLookup(supabase);
     supabase._results.set("rpc.claim_pairing_atomic", {
-      data: [{ device_id: "device-uuid", device_name: "Librito", won: false }],
+      data: [
+        {
+          device_id: "device-uuid",
+          device_name: "Librito",
+          won: false,
+          expired: false,
+        },
+      ],
       error: null,
     });
     // Original winner's token still alive in Redis — replay must succeed.
@@ -306,7 +322,14 @@ describe("claimPairingCode", () => {
     const redis = createMockRedis();
     setupValidLookup(supabase);
     supabase._results.set("rpc.claim_pairing_atomic", {
-      data: [{ device_id: "device-uuid", device_name: "Librito", won: false }],
+      data: [
+        {
+          device_id: "device-uuid",
+          device_name: "Librito",
+          won: false,
+          expired: false,
+        },
+      ],
       error: null,
     });
     // Redis empty: pair:token:* was never written or has expired.
@@ -428,7 +451,14 @@ describe("claimPairingCode", () => {
     const redis = createMockRedis();
     const pairingId = setupValidLookup(supabase);
     supabase._results.set("rpc.claim_pairing_atomic", {
-      data: [{ device_id: "device-uuid", device_name: "Librito", won: true }],
+      data: [
+        {
+          device_id: "device-uuid",
+          device_name: "Librito",
+          won: true,
+          expired: false,
+        },
+      ],
       error: null,
     });
     redis.set.mockRejectedValueOnce(new Error("ECONNREFUSED"));
@@ -453,7 +483,14 @@ describe("claimPairingCode", () => {
     const redis = createMockRedis();
     const pairingId = setupValidLookup(supabase);
     supabase._results.set("rpc.claim_pairing_atomic", {
-      data: [{ device_id: "device-uuid", device_name: "Librito", won: true }],
+      data: [
+        {
+          device_id: "device-uuid",
+          device_name: "Librito",
+          won: true,
+          expired: false,
+        },
+      ],
       error: null,
     });
     supabase._results.set("rpc.rollback_claim_pairing", {
@@ -499,12 +536,171 @@ describe("claimPairingCode", () => {
     expect(rollbackFailLog).not.toHaveProperty("pairingId");
   });
 
+  it("threads MAX_CLAIM_ATTEMPTS_PER_CODE through as p_max_attempts (issue #260)", async () => {
+    // The cap value lives in TS so SQL and TS stay aligned via the RPC arg.
+    // If a future refactor forgets to wire it through (or hardcodes a literal
+    // instead of importing the constant), this test fails loudly.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [
+        {
+          device_id: "device-uuid",
+          device_name: "Librito",
+          won: true,
+          expired: false,
+        },
+      ],
+      error: null,
+    });
+    const rpcSpy = vi.spyOn(supabase, "rpc");
+
+    await callClaim(supabase, redis);
+
+    expect(rpcSpy).toHaveBeenCalledWith(
+      "claim_pairing_atomic",
+      expect.objectContaining({
+        p_max_attempts: MAX_CLAIM_ATTEMPTS_PER_CODE,
+      }),
+    );
+  });
+
+  it("returns code_expired when RPC signals cap exceeded (expired=true)", async () => {
+    // Sentinel row shape from migration 20260520000001: expired=true with
+    // NULL device fields. Caller must surface this as code_expired and
+    // touch neither Redis nor rollback (no claim was committed).
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [
+        {
+          device_id: null,
+          device_name: null,
+          won: false,
+          expired: true,
+        },
+      ],
+      error: null,
+    });
+    const rpcSpy = vi.spyOn(supabase, "rpc");
+
+    const result = await callClaim(supabase, redis);
+
+    expect(result).toEqual({ error: "code_expired" });
+    expect(redis.set).not.toHaveBeenCalled();
+    // Exactly one RPC call: claim_pairing_atomic. No rollback, no replay
+    // Redis read — the cap path must short-circuit entirely.
+    expect(rpcSpy).toHaveBeenCalledTimes(1);
+    expect(redis.get).not.toHaveBeenCalled();
+  });
+
+  it("returns server_error on cap row with non-NULL device fields (schema drift defense)", async () => {
+    // Any expired=true row with a populated device_id is unreachable per
+    // the migration's RETURN QUERY shape. Treat it as drift so an
+    // accidental future RPC change cannot accidentally surface a deviceId
+    // alongside an expired sentinel.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    setupValidLookup(supabase);
+    supabase._results.set("rpc.claim_pairing_atomic", {
+      data: [
+        {
+          device_id: "device-uuid",
+          device_name: "Librito",
+          won: false,
+          expired: true,
+        },
+      ],
+      error: null,
+    });
+
+    const result = await callClaim(supabase, redis);
+
+    expect(result).toEqual({ error: "server_error" });
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  it("acceptance: 11 attempts on the same code succeed/refuse per cap (issue #260)", async () => {
+    // Unit-level emulation of the per-code global cap. Per CLAUDE.md mocks,
+    // the IP-distinct angle lives outside claimPairingCode (route-level
+    // pairClaimLimiter keys on ${code}:${ip}); claimPairingCode itself is
+    // IP-blind. This test confirms the wired behavior: first
+    // MAX_CLAIM_ATTEMPTS_PER_CODE invocations succeed, MAX+1 is refused
+    // with code_expired regardless of caller identity.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    const pairingId = setupValidLookup(supabase);
+    // Pre-seed Redis so the replay branch (won=false) does not surface
+    // code_expired from the Redis-missing fallback.
+    await redis.set(`pair:token:${pairingId}`, "sk_device_test_token", {
+      ex: 300,
+    });
+    const winRow = {
+      data: [
+        {
+          device_id: "device-uuid",
+          device_name: "Librito",
+          won: true,
+          expired: false,
+        },
+      ],
+      error: null,
+    };
+    const replayRow = {
+      data: [
+        {
+          device_id: "device-uuid",
+          device_name: "Librito",
+          won: false,
+          expired: false,
+        },
+      ],
+      error: null,
+    };
+    const expiredRow = {
+      data: [
+        {
+          device_id: null,
+          device_name: null,
+          won: false,
+          expired: true,
+        },
+      ],
+      error: null,
+    };
+
+    for (let i = 0; i < MAX_CLAIM_ATTEMPTS_PER_CODE; i++) {
+      supabase._results.set(
+        "rpc.claim_pairing_atomic",
+        i === 0 ? winRow : replayRow,
+      );
+      const result = await callClaim(supabase, redis);
+      expect(result).toEqual({
+        deviceId: "device-uuid",
+        deviceName: "Librito",
+      });
+    }
+
+    supabase._results.set("rpc.claim_pairing_atomic", expiredRow);
+    const refused = await callClaim(supabase, redis);
+    expect(refused).toEqual({ error: "code_expired" });
+  });
+
   it("does NOT invoke rollback when Redis write succeeds", async () => {
     const supabase = createMockSupabase();
     const redis = createMockRedis();
     setupValidLookup(supabase);
     supabase._results.set("rpc.claim_pairing_atomic", {
-      data: [{ device_id: "device-uuid", device_name: "Librito", won: true }],
+      data: [
+        {
+          device_id: "device-uuid",
+          device_name: "Librito",
+          won: true,
+          expired: false,
+        },
+      ],
       error: null,
     });
     const rpcSpy = vi.spyOn(supabase, "rpc");

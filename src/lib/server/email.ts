@@ -1,7 +1,16 @@
 import { Resend } from "resend";
-import { RESEND_API_KEY } from "$env/static/private";
+import { env as privateEnv } from "$env/dynamic/private";
 import welcomeHtml from "../../../supabase/templates/welcome.html?raw";
 import { logger } from "$lib/server/log";
+
+// Read at module load (still serverless-cold-start scope), via
+// $env/dynamic/private so the value resolves at runtime rather than being
+// baked at build time. RESEND_API_KEY is a candidate for Vercel's
+// `Sensitive` env type — Sensitive vars are redacted to an empty string by
+// `vercel pull` and would otherwise inline as `""` in the prebuilt deploy
+// flow (.github/workflows/production-deploy.yml). See CLAUDE.md
+// "Vercel Sensitive env vars require $env/dynamic/private".
+const RESEND_API_KEY = privateEnv.RESEND_API_KEY;
 
 // One warn at module load; per-call would spam self-host logs.
 if (!RESEND_API_KEY) {

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock $env/static/private before importing email.ts
-vi.mock("$env/static/private", () => ({
-  RESEND_API_KEY: "test-key",
+// Mock $env/dynamic/private before importing email.ts
+vi.mock("$env/dynamic/private", () => ({
+  env: { RESEND_API_KEY: "test-key" },
 }));
 
 // Mock the resend module before importing email.ts

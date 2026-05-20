@@ -32,13 +32,23 @@ export const POST: RequestHandler = async ({ request, params }) => {
   );
   if (limited) return limited;
 
+  // Filter scrubbed rows so a scrubbed-and-delivered transfer returns 404,
+  // not 409 — matches sibling endpoints (delete, retry, download-url) and
+  // removes the 404/409 distinction as an existence oracle for transfer IDs.
   const { data: transfer, error: fetchError } = await supabase
     .from("book_transfers")
     .select("id, user_id, status, storage_path, attempt_count")
     .eq("id", transferId)
+    .is("scrubbed_at", null)
     .maybeSingle();
 
-  if (fetchError || !transfer) {
+  // Split fetchError vs missing-row so transient Supabase errors return 500
+  // (device firmware retries on 5xx, stops on 404). Pre-fix, both collapsed
+  // to 404 and a flaky DB would silently leave transfers stuck pending.
+  if (fetchError) {
+    return jsonError(500, "server_error", "Failed to fetch transfer");
+  }
+  if (!transfer) {
     return jsonError(404, "not_found", "Transfer not found");
   }
 
@@ -55,7 +65,11 @@ export const POST: RequestHandler = async ({ request, params }) => {
   }
 
   // Guarded UPDATE: status='pending' arm prevents double-confirm clobbering
-  // a row that another path already moved out of pending.
+  // a row that another path already moved out of pending. The user_id arm
+  // makes the write self-authorizing — under service_role (RLS bypass) the
+  // only authorization gate is app code, so a future refactor that drops
+  // the SELECT-then-compare guard above must still find the UPDATE safe.
+  // Pattern matches the sibling DELETE in transfer/[id]/+server.ts.
   const { data: updateRows, error: updateError } = await supabase
     .from("book_transfers")
     .update({
@@ -67,6 +81,7 @@ export const POST: RequestHandler = async ({ request, params }) => {
       last_attempt_at: null,
     })
     .eq("id", transferId)
+    .eq("user_id", device.userId)
     .eq("status", "pending")
     .select("id");
 

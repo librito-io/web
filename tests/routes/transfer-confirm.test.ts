@@ -329,6 +329,68 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     expect(res.status).toBe(404);
   });
 
+  it("returns 500 on fetchError (distinct from 404 not_found)", async () => {
+    // Pre-fix this collapsed to 404, which firmware reads as 'no longer
+    // exists' and stops retrying. Device retry policy needs 5xx vs 404
+    // to be distinguishable for transient Supabase outages.
+    supabase._results.set("book_transfers.select", {
+      data: null,
+      error: { message: "transient db error", code: "08006" },
+    });
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("server_error");
+  });
+
+  it("SELECT filters scrubbed_at IS NULL (scrubbed rows return 404, not 409)", async () => {
+    // Mock returns null when seeded with no data — exercising the
+    // !transfer → 404 branch. The behavioral assertion that matters is
+    // the chain-call: confirm now applies the same scrubbed filter as the
+    // sibling endpoints, removing the 404/409 existence oracle.
+    supabase._results.set("book_transfers.select", { data: null, error: null });
+    await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
+    const scrubbedFilter = supabase._chainCalls.find(
+      (c) =>
+        c.table === "book_transfers" &&
+        c.operation === "select" &&
+        c.method === "is" &&
+        c.args[0] === "scrubbed_at" &&
+        c.args[1] === null,
+    );
+    expect(scrubbedFilter).toBeDefined();
+  });
+
+  it("guarded UPDATE includes .eq('user_id', device.userId) for RLS defense-in-depth", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: {
+        id: "11111111-1111-4111-8111-111111111111",
+        user_id: "u-1",
+        status: "pending",
+        storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
+        attempt_count: 0,
+      },
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", {
+      data: [{ id: "11111111-1111-4111-8111-111111111111" }],
+      error: null,
+    });
+
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
+    expect(res.status).toBe(200);
+
+    const userIdFilter = supabase._chainCalls.find(
+      (c) =>
+        c.table === "book_transfers" &&
+        c.operation === "update" &&
+        c.method === "eq" &&
+        c.args[0] === "user_id" &&
+        c.args[1] === "u-1",
+    );
+    expect(userIdFilter).toBeDefined();
+  });
+
   it("returns 404 when transfer.user_id !== device.userId", async () => {
     supabase._results.set("book_transfers.select", {
       data: {

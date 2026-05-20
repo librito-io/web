@@ -1,25 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FeedItem, FeedRow } from "$lib/feed/types";
 import { canonicalizeIsbn } from "./isbn";
-import { resolveIsbn, resolveTitleAuthor } from "./fetcher";
 import { normalizeTitleAuthor } from "./title-author";
 import { getCoverUrlsByIsbns, getCoverUrlsByTitleAuthor } from "./view";
-import { getCatalogMutex } from "./mutex";
 import {
-  catalogOpenLibraryLimiter,
-  catalogGoogleBooksLimiter,
-  catalogITunesLimiter,
-  catalogUserLimiter,
-  safeLimit,
-} from "$lib/server/ratelimit";
-import { runInBackground } from "$lib/server/wait-until";
-import { createAdminClient } from "$lib/server/supabase";
+  scheduleCatalogResolveIfAllowed,
+  type CatalogResolveWork,
+} from "./scheduling";
 import { logger } from "$lib/server/log";
-// GOOGLE_BOOKS_API_KEY is Sensitive in Vercel; static-imported sensitive
-// vars bake empty strings into prebuilt deploys. Read at runtime via
-// dynamic/private. Anonymous Google Books quota is 0/day per project, so
-// missing key silently degrades the entire premium-cover + description path.
-import { env as privateEnv } from "$env/dynamic/private";
 
 /**
  * Batch-resolve cover thumbnails for a page of feed rows. Two cache paths
@@ -135,61 +123,13 @@ export async function enrichFeedRowsWithCovers(
       )
     : [];
 
-  if (missingIsbns.length > 0 || missingTaKeys.length > 0) {
-    const admin = createAdminClient();
-    // Mutex acquisition lives inside the runInBackground callbacks so the
-    // request-handling path does not wait on the lazy Upstash singleton
-    // init. The cached singleton means subsequent awaits are sync after
-    // first acquisition; the shared promise is reused across the cohort.
-    const mutexPromise = getCatalogMutex();
-    const rateLimiters = {
-      openLibrary: catalogOpenLibraryLimiter,
-      googleBooks: catalogGoogleBooksLimiter,
-      itunes: catalogITunesLimiter,
-    };
-    const googleBooksApiKey = privateEnv.GOOGLE_BOOKS_API_KEY;
-    // Per-resolve token consumption with short-circuit on deny. Issue #110:
-    // the prior single-token-per-request limiter let a 50-ISBN feed page
-    // consume 50 cold-miss resolves while only spending 1/10 of the user's
-    // per-minute budget. Sequential safeLimit + break enforces "10 cold-miss
-    // resolves/min/user max" matching the limiter's declared bound. Worst-
-    // case latency is bounded by the per-user budget (10 calls + 1 deny
-    // before bail) so the request-path cost is capped.
-    type Work =
-      | { kind: "isbn"; isbn: string }
-      | { kind: "ta"; key: string; pair: { title: string; author: string } };
-    const work: Work[] = [];
-    for (const isbn of missingIsbns) work.push({ kind: "isbn", isbn });
-    for (const key of missingTaKeys) {
-      const pair = taPairsByKey.get(key);
-      if (pair) work.push({ kind: "ta", key, pair });
-    }
-    for (const item of work) {
-      const outcome = await safeLimit(catalogUserLimiter, userId);
-      if (outcome.kind !== "ok" || !outcome.result.success) break;
-      if (item.kind === "isbn") {
-        const isbn = item.isbn;
-        runInBackground(async () => {
-          const mutex = await mutexPromise;
-          await resolveIsbn(admin, isbn, {
-            rateLimiters,
-            mutex,
-            googleBooksApiKey,
-          });
-        });
-      } else {
-        const { pair } = item;
-        runInBackground(async () => {
-          const mutex = await mutexPromise;
-          await resolveTitleAuthor(admin, pair.title, pair.author, {
-            rateLimiters,
-            mutex,
-            googleBooksApiKey,
-          });
-        });
-      }
-    }
+  const work: CatalogResolveWork[] = [];
+  for (const isbn of missingIsbns) work.push({ kind: "isbn", isbn });
+  for (const key of missingTaKeys) {
+    const pair = taPairsByKey.get(key);
+    if (pair) work.push({ kind: "ta", title: pair.title, author: pair.author });
   }
+  await scheduleCatalogResolveIfAllowed(userId, work);
 
   return rows.map((r) => {
     if (r.book_isbn) {

@@ -377,6 +377,18 @@ export const transferRetryLimiter = createLimiter({
   failMode: "open",
 });
 
+// Transfer: finalize (browser, per user). One call per upload, fired once
+// the browser's PUT to the signed upload URL succeeds. Matches the
+// initiate posture (5/min) — a stuck client cannot loop finalize on the
+// same transferId because the handler is idempotent on already-verified
+// rows and guarded on the pending→verified transition. Fail-open mirrors
+// sibling browser transfer limiters.
+export const transferFinalizeLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(5, "1m"),
+  prefix: "rl:transfer:finalize",
+  failMode: "open",
+});
+
 // Transfer: cancel/DELETE (browser, per user). DELETE is non-idempotent
 // (Storage remove + DB row delete) and callable in a loop. Fail-open
 // matches sibling browser transfer limiters — downstream ownership

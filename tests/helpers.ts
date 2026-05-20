@@ -187,9 +187,16 @@ export function createMockSupabase() {
   // against the exact payload written to storage fields.
   const updateCalls: Array<{ table: string; payload: unknown }> = [];
 
+  // Records every `.from(table).insert(row)` call so tests can assert the
+  // exact insert payload (e.g. the hashed pollSecret on pairing_codes).
+  const insertCalls: Array<{ table: string; payload: unknown }> = [];
+
   const client = {
     from: (table: string) => ({
-      insert: (..._args: unknown[]) => makeChain(table, "insert"),
+      insert: (...args: unknown[]) => {
+        insertCalls.push({ table, payload: args[0] });
+        return makeChain(table, "insert");
+      },
       select: (...args: unknown[]) => {
         if (table === "notes") {
           return makeNotesSelectChain(args);
@@ -215,6 +222,7 @@ export function createMockSupabase() {
     _upsertCalls: upsertCalls,
     _rpcCalls: rpcCalls,
     _updateCalls: updateCalls,
+    _insertCalls: insertCalls,
     _chainCalls: chainCalls,
   };
 
@@ -226,6 +234,7 @@ export function createMockSupabase() {
     _upsertCalls: Array<{ table: string; rows: unknown; opts: unknown }>;
     _rpcCalls: Array<{ name: string; args: unknown }>;
     _updateCalls: Array<{ table: string; payload: unknown }>;
+    _insertCalls: Array<{ table: string; payload: unknown }>;
     _chainCalls: Array<{
       table: string;
       operation: string;

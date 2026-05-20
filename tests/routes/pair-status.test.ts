@@ -35,9 +35,27 @@ const { GET } =
 
 const VALID_ID = "11111111-1111-4111-8111-111111111111";
 
-function buildEvent(pairingId: string) {
+// SHA-256 of "device-held-secret" — production code in checkPairingStatus
+// hashes the presented secret and compares to the stored hash, so the
+// route-level tests need a real hash pair to drive the verify branch.
+const DEVICE_SECRET = "device-held-secret";
+const DEVICE_SECRET_HASH =
+  "2e061994eed9393b7ab719b700330b1da390577b5c10000b823bcb07f29accd6";
+
+function buildEvent(
+  pairingId: string,
+  opts: { authHeader?: string; query?: string } = {},
+) {
+  const search = opts.query ? `?${opts.query}` : "";
+  const headers = new Headers();
+  if (opts.authHeader) headers.set("Authorization", opts.authHeader);
   return {
     params: { pairingId },
+    url: new URL(`http://x/api/pair/status/${pairingId}${search}`),
+    request: new Request(`http://x/api/pair/status/${pairingId}${search}`, {
+      method: "GET",
+      headers,
+    }),
     getClientAddress: () => "1.2.3.4",
   } as unknown as Parameters<typeof GET>[0];
 }
@@ -65,5 +83,62 @@ describe("GET /api/pair/status/[pairingId]", () => {
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error).toBe("not_found");
+  });
+
+  // ---- pollSecret challenge wire shape (issue #286 step 2) ----
+
+  it("forwards Authorization: Bearer header value to checkPairingStatus and returns 401 on mismatch", async () => {
+    // The row carries a hash, the caller presents the wrong secret →
+    // route maps poll_secret_mismatch to 401 / unauthorized.
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_email: "u@example.com",
+        poll_secret_hash: DEVICE_SECRET_HASH,
+      },
+      error: null,
+    });
+    const res = await GET(
+      buildEvent(VALID_ID, { authHeader: "Bearer wrong-secret" }),
+    );
+    expect(res.status).toBe(401);
+    expect((await res.json()).error).toBe("unauthorized");
+  });
+
+  it("admits Bearer header when secret matches the stored hash", async () => {
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: false,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_email: null,
+        poll_secret_hash: DEVICE_SECRET_HASH,
+      },
+      error: null,
+    });
+    const res = await GET(
+      buildEvent(VALID_ID, { authHeader: `Bearer ${DEVICE_SECRET}` }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).paired).toBe(false);
+  });
+
+  it("falls back to ?pollSecret= query param when no Authorization header is set", async () => {
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: false,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_email: null,
+        poll_secret_hash: DEVICE_SECRET_HASH,
+      },
+      error: null,
+    });
+    const res = await GET(
+      buildEvent(VALID_ID, {
+        query: `pollSecret=${encodeURIComponent(DEVICE_SECRET)}`,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).paired).toBe(false);
   });
 });

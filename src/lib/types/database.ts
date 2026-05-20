@@ -414,6 +414,7 @@ export type Database = {
           expires_at: string
           hardware_id: string
           id: string
+          poll_secret_hash: string | null
           user_email: string | null
           user_id: string | null
         }
@@ -425,6 +426,7 @@ export type Database = {
           expires_at: string
           hardware_id: string
           id?: string
+          poll_secret_hash?: string | null
           user_email?: string | null
           user_id?: string | null
         }
@@ -436,6 +438,7 @@ export type Database = {
           expires_at?: string
           hardware_id?: string
           id?: string
+          poll_secret_hash?: string | null
           user_email?: string | null
           user_id?: string | null
         }

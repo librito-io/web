@@ -24,6 +24,7 @@ vi.mock("$lib/server/pairing", () => ({
     code: "482901",
     pairingId: "pairing-uuid",
     expiresIn: 300,
+    pollSecret: "mock-poll-secret",
   })),
 }));
 

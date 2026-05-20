@@ -1,7 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SetCommandOptions } from "@upstash/redis";
 import { firstRow } from "./rpc";
-import { generatePairingCode, generateDeviceToken, hashToken } from "./tokens";
+import {
+  generatePairingCode,
+  generateDeviceToken,
+  hashToken,
+  generatePollSecret,
+  hashPollSecret,
+} from "./tokens";
 import { logger } from "$lib/server/log";
 
 type Redis = {
@@ -13,12 +19,24 @@ type Redis = {
   get: (key: string) => Promise<string | null>;
 };
 
-type PairingResult = { code: string; pairingId: string; expiresIn: number };
+type PairingResult = {
+  code: string;
+  pairingId: string;
+  expiresIn: number;
+  // Plaintext pollSecret returned exactly once at request time. Device
+  // stores it locally and presents it on every /api/pair/status poll.
+  // Server stores SHA-256 hex only. See issue #286.
+  pollSecret: string;
+};
 
 type StatusResult =
   | { paired: false }
   | { paired: true; token: string; userEmail: string }
-  | { error: "not_found" | "code_expired" };
+  // poll_secret_mismatch: the row carries a poll_secret_hash but the
+  // provided secret hashed to a different value. Distinct from
+  // not_found / code_expired so the route can map it to 401 (vs 404/410)
+  // and so the audit log carries the right event name.
+  | { error: "not_found" | "code_expired" | "poll_secret_mismatch" };
 
 export type ClaimError =
   | "invalid_code"
@@ -58,6 +76,13 @@ export async function requestPairingCode(
   supabase: SupabaseClient,
   hardwareId: string,
 ): Promise<PairingResult> {
+  // pollSecret generated once per request and reused across the unique-
+  // violation retry: the failed insert leaves no row, so the secret was
+  // never observable. Re-using avoids a second crypto.randomBytes(32) on
+  // a path that already has a fresh code to retry with.
+  const pollSecret = generatePollSecret();
+  const pollSecretHash = hashPollSecret(pollSecret);
+
   // Re-roll once on PG unique violation (random code collision with a still-live row).
   for (let attempt = 0; attempt < 2; attempt++) {
     const code = generatePairingCode();
@@ -69,12 +94,18 @@ export async function requestPairingCode(
         code,
         hardware_id: hardwareId,
         expires_at: expiresAt.toISOString(),
+        poll_secret_hash: pollSecretHash,
       })
       .select("id")
       .single();
 
     if (!error) {
-      return { code, pairingId: data.id, expiresIn: PAIRING_CODE_TTL_SEC };
+      return {
+        code,
+        pairingId: data.id,
+        expiresIn: PAIRING_CODE_TTL_SEC,
+        pollSecret,
+      };
     }
     if (error.code !== "23505") {
       throw new Error(`Failed to create pairing code: ${error.message}`);
@@ -89,14 +120,67 @@ export async function checkPairingStatus(
   supabase: SupabaseClient,
   redis: Redis,
   pairingId: string,
+  // Plaintext pollSecret presented by the caller. Optional during the
+  // backward-compat window: pre-update firmware does not forward it, and
+  // pre-migration rows have a NULL poll_secret_hash. See issue #286 step 2.
+  providedPollSecret?: string | null,
 ): Promise<StatusResult> {
   const { data, error } = await supabase
     .from("pairing_codes")
-    .select("claimed, expires_at, user_email")
+    .select("claimed, expires_at, user_email, poll_secret_hash")
     .eq("id", pairingId)
     .single();
 
   if (error || !data) return { error: "not_found" };
+
+  // pollSecret challenge gate. Three reachable states during rollout:
+  //   row has hash + caller provides secret → verify (mismatch → 401)
+  //   row has hash + caller omits secret    → log warn, proceed (backward-compat)
+  //   row has NULL hash                     → pre-migration row, proceed
+  // Once firmware ships with the secret forwarder, the middle case
+  // becomes a refuse path — tracked in the phase-3 follow-up issue.
+  const storedHash = data.poll_secret_hash as string | null;
+  if (storedHash) {
+    if (providedPollSecret) {
+      const presentedHash = hashPollSecret(providedPollSecret);
+      // Constant-time comparison: both values are deterministic 64-char
+      // lowercase hex of equal length, so a plain === leaks no timing
+      // signal beyond the per-char compare cost (negligible at 64 chars).
+      // If a future change widens shape, swap to crypto.timingSafeEqual.
+      if (presentedHash !== storedHash) {
+        logger().warn(
+          {
+            event: "pairing.poll_secret_mismatch",
+            pairingIdPrefix: pairingIdPrefix(pairingId),
+          },
+          "pairing.poll_secret_mismatch",
+        );
+        return { error: "poll_secret_mismatch" };
+      }
+    } else {
+      // Backward-compat: pre-update firmware. Single operator signal so
+      // the rollout-tightening cutover decision (phase 3) has data.
+      logger().warn(
+        {
+          event: "pairing.poll_secret_absent",
+          pairingIdPrefix: pairingIdPrefix(pairingId),
+        },
+        "pairing.poll_secret_absent",
+      );
+    }
+  } else if (providedPollSecret) {
+    // New-firmware caller polling a pre-migration row. The row predates
+    // the column; the secret the device holds was never written here.
+    // Proceed — there is nothing to verify against — but record so the
+    // rollout window can be observed.
+    logger().warn(
+      {
+        event: "pairing.poll_secret_missing_on_row",
+        pairingIdPrefix: pairingIdPrefix(pairingId),
+      },
+      "pairing.poll_secret_missing_on_row",
+    );
+  }
 
   if (new Date(data.expires_at) < new Date()) return { error: "code_expired" };
 

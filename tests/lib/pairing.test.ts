@@ -1,12 +1,32 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("$lib/server/tokens", () => ({
-  generatePairingCode: vi.fn(() => "482901"),
-  generateDeviceToken: vi.fn(() => "sk_device_test_token_abc123"),
-  hashToken: vi.fn(
-    () => "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
-  ),
-}));
+// Deterministic test values for the pollSecret challenge. The plaintext
+// secret and its SHA-256 hash are paired here so test assertions can verify
+// either side: the API response carries the plaintext, the DB column
+// carries the hash. Hash is the actual SHA-256 of "test_poll_secret_plaintext"
+// so production code calling hashPollSecret against the mock plaintext gets
+// the matching hash deterministically (constant-time-equal path).
+const TEST_POLL_SECRET = "test_poll_secret_plaintext";
+const TEST_POLL_SECRET_HASH =
+  "3d2905d936ac1b763e8f5ae7e627241658a8222c7ccfd9580e0315184138ce90";
+
+vi.mock("$lib/server/tokens", async () => {
+  const { createHash } = await import("crypto");
+  return {
+    generatePairingCode: vi.fn(() => "482901"),
+    generateDeviceToken: vi.fn(() => "sk_device_test_token_abc123"),
+    hashToken: vi.fn(
+      () => "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+    ),
+    generatePollSecret: vi.fn(() => TEST_POLL_SECRET),
+    // Real SHA-256 so any plaintext the production code feeds in
+    // (including non-mock values an attacker would present) hashes
+    // correctly — mismatch tests need a non-canned hash function.
+    hashPollSecret: vi.fn((s: string) =>
+      createHash("sha256").update(s).digest("hex"),
+    ),
+  };
+});
 
 import {
   requestPairingCode,
@@ -25,7 +45,7 @@ afterEach(() => __resetTestDestination());
 import { createMockSupabase, createMockRedis } from "../helpers";
 
 describe("requestPairingCode", () => {
-  it("inserts a pairing code and returns code + pairingId + expiresIn", async () => {
+  it("inserts a pairing code and returns code + pairingId + expiresIn + pollSecret", async () => {
     const supabase = createMockSupabase();
     supabase._results.set("pairing_codes.insert", {
       data: { id: "pairing-uuid-123" },
@@ -38,7 +58,29 @@ describe("requestPairingCode", () => {
       code: "482901",
       pairingId: "pairing-uuid-123",
       expiresIn: 300,
+      pollSecret: TEST_POLL_SECRET,
     });
+  });
+
+  it("stores the hashed pollSecret (never the plaintext) on the inserted row", async () => {
+    // Defends against a future refactor leaking the plaintext to the DB
+    // column. The hash → token-leak resistance of issue #286 step 2 depends
+    // on this invariant.
+    const supabase = createMockSupabase();
+    supabase._results.set("pairing_codes.insert", {
+      data: { id: "pairing-uuid-123" },
+      error: null,
+    });
+
+    await requestPairingCode(supabase, "hw-device-1");
+
+    expect(supabase._insertCalls).toHaveLength(1);
+    const inserted = supabase._insertCalls[0].payload as Record<
+      string,
+      unknown
+    >;
+    expect(inserted.poll_secret_hash).toBe(TEST_POLL_SECRET_HASH);
+    expect(inserted.poll_secret_hash).not.toBe(TEST_POLL_SECRET);
   });
 
   it("throws on database error", async () => {
@@ -64,6 +106,7 @@ describe("requestPairingCode", () => {
       code: "482901",
       pairingId: "pairing-uuid-retry",
       expiresIn: 300,
+      pollSecret: TEST_POLL_SECRET,
     });
   });
 
@@ -187,6 +230,152 @@ describe("checkPairingStatus", () => {
 
     const result = await checkPairingStatus(supabase, redis, "expired-uuid");
     expect(result).toEqual({ error: "code_expired" });
+  });
+
+  // ---- pollSecret challenge (issue #286 step 2) ----
+
+  it("admits caller when pollSecret matches the stored hash", async () => {
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_email: "claimer@example.com",
+        poll_secret_hash: TEST_POLL_SECRET_HASH,
+      },
+      error: null,
+    });
+    await redis.set("pair:token:pairing-uuid", "sk_device_test_token", {
+      ex: 300,
+    });
+
+    const result = await checkPairingStatus(
+      supabase,
+      redis,
+      "pairing-uuid",
+      TEST_POLL_SECRET,
+    );
+    expect(result).toEqual({
+      paired: true,
+      token: "sk_device_test_token",
+      userEmail: "claimer@example.com",
+    });
+  });
+
+  it("returns poll_secret_mismatch when the presented secret hashes to a different value", async () => {
+    // Wrong-secret path — the token-leak gate from issue #286 step 2.
+    // The row must NOT escalate to paired/token-emit even though it
+    // is in fact claimed, and the log must carry the redacted prefix
+    // (no full pairingId).
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_email: "claimer@example.com",
+        poll_secret_hash: TEST_POLL_SECRET_HASH,
+      },
+      error: null,
+    });
+    await redis.set("pair:token:pairing-uuid", "sk_device_test_token", {
+      ex: 300,
+    });
+
+    const result = await checkPairingStatus(
+      supabase,
+      redis,
+      "pairing-uuid-1234",
+      "wrong-secret",
+    );
+    expect(result).toEqual({ error: "poll_secret_mismatch" });
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "pairing.poll_secret_mismatch",
+        pairingIdPrefix: "pairing-",
+      }),
+    );
+    const mismatch = logWrites.find(
+      (w) => w.event === "pairing.poll_secret_mismatch",
+    );
+    expect(mismatch).not.toHaveProperty("pairingId");
+  });
+
+  it("proceeds and logs poll_secret_absent when caller omits secret on a row that has a hash (backward-compat)", async () => {
+    // Backward-compat window: pre-update firmware does not forward the
+    // secret. Today we admit and log; phase 3 follow-up flips this to
+    // refuse once firmware has rolled out.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    const pairingId = "pairing-uuid-1234";
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_email: "claimer@example.com",
+        poll_secret_hash: TEST_POLL_SECRET_HASH,
+      },
+      error: null,
+    });
+    await redis.set(`pair:token:${pairingId}`, "sk_device_test_token", {
+      ex: 300,
+    });
+
+    const result = await checkPairingStatus(supabase, redis, pairingId, null);
+    expect(result).toEqual({
+      paired: true,
+      token: "sk_device_test_token",
+      userEmail: "claimer@example.com",
+    });
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "pairing.poll_secret_absent",
+        pairingIdPrefix: "pairing-",
+      }),
+    );
+  });
+
+  it("proceeds normally on pre-migration row (poll_secret_hash NULL) regardless of provided secret", async () => {
+    // Rows minted before the column existed survive their 5-min TTL. The
+    // challenge gate must not refuse them — there is no hash to verify
+    // against — but record so the rollout-window count is observable.
+    const supabase = createMockSupabase();
+    const redis = createMockRedis();
+    const pairingId = "pairing-uuid-1234";
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_email: "claimer@example.com",
+        poll_secret_hash: null,
+      },
+      error: null,
+    });
+    await redis.set(`pair:token:${pairingId}`, "sk_device_test_token", {
+      ex: 300,
+    });
+
+    const withSecret = await checkPairingStatus(
+      supabase,
+      redis,
+      pairingId,
+      TEST_POLL_SECRET,
+    );
+    expect(withSecret).toMatchObject({ paired: true });
+    expect(logWrites).toContainEqual(
+      expect.objectContaining({
+        event: "pairing.poll_secret_missing_on_row",
+      }),
+    );
+
+    const withoutSecret = await checkPairingStatus(
+      supabase,
+      redis,
+      pairingId,
+      null,
+    );
+    expect(withoutSecret).toMatchObject({ paired: true });
   });
 });
 

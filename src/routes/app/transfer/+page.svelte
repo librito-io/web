@@ -21,7 +21,13 @@
   interface UploadState {
     id: string;
     file: File;
-    status: "validating" | "initiating" | "uploading" | "done" | "error";
+    status:
+      | "validating"
+      | "initiating"
+      | "uploading"
+      | "verifying"
+      | "done"
+      | "error";
     progress: number;
     error: string | null;
     transferId: string | null;
@@ -159,6 +165,28 @@
       await uploadToSignedUrl(uploadUrl, fileData, (pct) => {
         updateUpload({ progress: pct });
       });
+
+      // Server-side sha256 verification (#287). The browser-computed
+      // sha256 at line 124 is what the device firmware will rehash
+      // against, so the server must independently confirm the uploaded
+      // bytes match the claim before the row is allowed to ship to a
+      // device. The sync gate (sha256_verified IS NOT NULL) filters
+      // out un-finalized rows; without this POST the upload is invisible
+      // to the device until the Pass C sweep backstop catches it.
+      updateUpload({ status: "verifying", progress: 100 });
+      const finalizeRes = await fetchWithSafariRetry(
+        `/api/transfer/${transferId}/finalize`,
+        { method: "POST" },
+      );
+      if (!finalizeRes.ok) {
+        const body = await finalizeRes.json().catch(() => ({}));
+        const error =
+          finalizeRes.status === 422
+            ? "Upload appears corrupted — please re-select the file"
+            : body.message || "Verification failed";
+        updateUpload({ status: "error", error });
+        return;
+      }
 
       updateUpload({ status: "done", progress: 100 });
       await refreshTransfers();
@@ -343,6 +371,8 @@
                   Preparing...
                 {:else if upload.status === "uploading"}
                   Uploading... {upload.progress}%
+                {:else if upload.status === "verifying"}
+                  Verifying...
                 {/if}
               </p>
             {/if}

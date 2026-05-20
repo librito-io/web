@@ -413,6 +413,17 @@ export async function processSync(
     .select("id, filename, file_size, storage_path, sha256")
     .eq("user_id", userId)
     .eq("status", "pending")
+    // Server-side sha256 verification gate (#287). A pending row is only
+    // ever visible to a device after /api/transfer/[id]/finalize has
+    // recomputed the storage object's sha256 and matched it against the
+    // client-claimed value at /initiate. The schema invariant
+    // (verified_pair CHECK in 20260520000003) guarantees verified_at is
+    // non-NULL exactly when sha256_verified is non-NULL, and /finalize
+    // is the single writer that ever sets sha256_verified — and only
+    // writes it equal to the existing sha256. So `IS NOT NULL` is
+    // sufficient to gate on "server-verified", without a column-equality
+    // predicate (which PostgREST cannot express directly).
+    .not("sha256_verified", "is", null)
     // deviceId UUID-validated at auth boundary; do NOT pass user-controlled identifiers to .or() filters without validation.
     .or(`device_id.eq.${deviceId},device_id.is.null`)
     .overrideTypes<TransferRow[], { merge: false }>();

@@ -7,6 +7,10 @@ vi.mock("$env/dynamic/private", () => ({
 }));
 
 const supabase = createMockSupabase();
+// Captured before any test runs so describes that override
+// `supabase.storage.from` for the duration of a single test can restore
+// the helper's default `download`/`remove` behaviour for sibling describes.
+const defaultStorageFrom = supabase.storage.from;
 vi.mock("$lib/server/supabase", () => ({
   createAdminClient: () => supabase,
 }));
@@ -79,6 +83,7 @@ describe("GET /api/cron/transfer-sweep", () => {
     supabase.storage.from = () =>
       ({
         remove: removeSpy,
+        download: vi.fn(async () => ({ data: null, error: null })),
       }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
 
     const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
@@ -103,6 +108,7 @@ describe("GET /api/cron/transfer-sweep", () => {
     supabase.storage.from = () =>
       ({
         remove: vi.fn(async () => ({ data: null, error: null })),
+        download: vi.fn(async () => ({ data: null, error: null })),
       }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
 
     await GET(buildEvent({ Authorization: "Bearer test-secret" }));
@@ -119,5 +125,146 @@ describe("GET /api/cron/transfer-sweep", () => {
         (c.args[1] as string[]).includes("downloaded"),
     );
     expect(statusFilter).toBeDefined();
+  });
+});
+
+describe("GET /api/cron/transfer-sweep — Pass C (sha256 verify backstop)", () => {
+  // sha256("hello") — used as the "claimed" hash on test rows.
+  const HELLO_SHA =
+    "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+  const HELLO_BYTES = new TextEncoder().encode("hello");
+
+  function blobFromBytes(bytes: Uint8Array): Blob {
+    const copy = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(copy).set(bytes);
+    return new Blob([copy]);
+  }
+
+  beforeEach(() => {
+    supabase._results.clear();
+    supabase._storage.clear();
+    supabase._updateCalls.length = 0;
+    supabase._chainCalls.length = 0;
+    // Sibling Pass A tests overwrite `supabase.storage.from` to inject
+    // ad-hoc `remove`/`download` stubs. Restore the helper default so
+    // Pass C's `.download()` honours `_storage.set("download", ...)`.
+    supabase.storage.from = defaultStorageFrom;
+  });
+
+  it("Pass C SELECT filters status='pending', sha256_verified IS NULL, storage_path NOT NULL, uploaded_at < cutoff", async () => {
+    supabase._results.set("book_transfers.select", { data: [], error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+
+    const selects = supabase._chainCalls.filter(
+      (c) => c.table === "book_transfers" && c.operation === "select",
+    );
+    const verifiedNull = selects.find(
+      (c) =>
+        c.method === "is" &&
+        c.args[0] === "sha256_verified" &&
+        c.args[1] === null,
+    );
+    const storagePathNotNull = selects.find(
+      (c) =>
+        c.method === "not" &&
+        c.args[0] === "storage_path" &&
+        c.args[1] === "is" &&
+        c.args[2] === null,
+    );
+    const uploadedAtCutoff = selects.find(
+      (c) => c.method === "lt" && c.args[0] === "uploaded_at",
+    );
+
+    expect(verifiedNull).toBeDefined();
+    expect(storagePathNotNull).toBeDefined();
+    expect(uploadedAtCutoff).toBeDefined();
+  });
+
+  it("on hash match: writes sha256_verified + verified_at for the unverified row", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: [
+        {
+          id: "t-1",
+          user_id: "u-1",
+          storage_path: "u-1/t-1.epub",
+          sha256: HELLO_SHA,
+          uploaded_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        },
+      ],
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", {
+      data: [{ id: "t-1" }],
+      error: null,
+    });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+    supabase._storage.set("download", {
+      data: blobFromBytes(HELLO_BYTES),
+      error: null,
+    });
+
+    const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.sweep.passC).toBe(1);
+    expect(body.sweep.passCMismatches).toBe(0);
+
+    const verifyWrite = supabase._updateCalls.find(
+      (u) =>
+        u.table === "book_transfers" &&
+        typeof u.payload === "object" &&
+        u.payload !== null &&
+        "sha256_verified" in (u.payload as Record<string, unknown>),
+    );
+    expect(verifyWrite).toBeDefined();
+    expect(
+      (verifyWrite!.payload as Record<string, unknown>).sha256_verified,
+    ).toBe(HELLO_SHA);
+  });
+
+  it("on hash mismatch: flips status to 'failed' with last_error='sha256_mismatch'", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: [
+        {
+          id: "t-2",
+          user_id: "u-1",
+          storage_path: "u-1/t-2.epub",
+          sha256: HELLO_SHA,
+          uploaded_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        },
+      ],
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", {
+      data: [{ id: "t-2" }],
+      error: null,
+    });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+    supabase._storage.set("download", {
+      data: blobFromBytes(new TextEncoder().encode("not hello")),
+      error: null,
+    });
+
+    const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.sweep.passC).toBe(0);
+    expect(body.sweep.passCMismatches).toBe(1);
+
+    const failWrite = supabase._updateCalls.find(
+      (u) =>
+        u.table === "book_transfers" &&
+        typeof u.payload === "object" &&
+        u.payload !== null &&
+        (u.payload as Record<string, unknown>).status === "failed",
+    );
+    expect(failWrite).toBeDefined();
+    expect((failWrite!.payload as Record<string, unknown>).last_error).toBe(
+      "sha256_mismatch",
+    );
   });
 });

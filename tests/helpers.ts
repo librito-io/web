@@ -168,6 +168,13 @@ export function createMockSupabase() {
         storageResults.get("remove") ?? { data: null, error: null },
       list: async (..._args: unknown[]) =>
         storageResults.get("list") ?? { data: [], error: null },
+      // `.download(path)` returns `{ data: Blob | null, error }` in
+      // production. Tests opting into the path-specific key get the
+      // narrower mock; the generic "download" key is the catch-all
+      // fallback for tests that don't care about the bucket/path.
+      download: async (path: string) =>
+        storageResults.get(`download.${bucket}.${path}`) ??
+        storageResults.get("download") ?? { data: null, error: null },
     };
   }
 

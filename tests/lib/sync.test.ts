@@ -731,6 +731,32 @@ describe("processSync", () => {
     ]);
   });
 
+  it("applies the sha256_verified gate to the book_transfers SELECT (#287)", async () => {
+    // Verifies the projection filter only — Postgres-level enforcement
+    // is exercised by the integration suite. Without this assertion, a
+    // refactor that drops `.not("sha256_verified", "is", null)` would
+    // re-introduce the #287 contract: device firmware would receive
+    // sha256s that the server has not independently verified.
+    const supabase = createMockSupabase();
+    setupSyncMocks(supabase);
+
+    await processSync(supabase, "dev-1", "user-1", {
+      lastSyncedAt: 0,
+      books: [],
+    });
+
+    const gate = supabase._chainCalls.find(
+      (c) =>
+        c.table === "book_transfers" &&
+        c.operation === "select" &&
+        c.method === "not" &&
+        c.args[0] === "sha256_verified" &&
+        c.args[1] === "is" &&
+        c.args[2] === null,
+    );
+    expect(gate).toBeDefined();
+  });
+
   it("throws on book upsert failure", async () => {
     const supabase = createMockSupabase();
     setupSyncMocks(supabase, {

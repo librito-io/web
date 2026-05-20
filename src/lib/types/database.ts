@@ -157,10 +157,12 @@ export type Database = {
           last_error: string | null
           scrubbed_at: string | null
           sha256: string | null
+          sha256_verified: string | null
           status: string
           storage_path: string | null
           uploaded_at: string
           user_id: string
+          verified_at: string | null
         }
         Insert: {
           attempt_count?: number
@@ -173,10 +175,12 @@ export type Database = {
           last_error?: string | null
           scrubbed_at?: string | null
           sha256?: string | null
+          sha256_verified?: string | null
           status?: string
           storage_path?: string | null
           uploaded_at?: string
           user_id: string
+          verified_at?: string | null
         }
         Update: {
           attempt_count?: number
@@ -189,10 +193,12 @@ export type Database = {
           last_error?: string | null
           scrubbed_at?: string | null
           sha256?: string | null
+          sha256_verified?: string | null
           status?: string
           storage_path?: string | null
           uploaded_at?: string
           user_id?: string
+          verified_at?: string | null
         }
         Relationships: [
           {

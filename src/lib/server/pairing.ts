@@ -34,6 +34,15 @@ type ClaimResult =
 // `expires_at`, Redis token TTL, and the `expiresIn` response field.
 const PAIRING_CODE_TTL_SEC = 300;
 
+// Logs and Sentry breadcrumbs must never embed a full pairingId. A leaked
+// UUID within the 5-min TTL is enough for an unauthenticated caller to
+// fetch the plaintext device token from /api/pair/status/<pairingId>.
+// First-8-char prefix preserves operator correlation across log lines
+// without exposing the full identifier. Tracked: issue #286.
+function pairingIdPrefix(id: string): string {
+  return id.slice(0, 8);
+}
+
 export async function requestPairingCode(
   supabase: SupabaseClient,
   hardwareId: string,
@@ -94,7 +103,7 @@ export async function checkPairingStatus(
     logger().error(
       {
         event: "pairing.redis_token_read_failed",
-        pairingId,
+        pairingIdPrefix: pairingIdPrefix(pairingId),
         error: err instanceof Error ? err.message : String(err),
       },
       "pairing.redis_token_read_failed",
@@ -193,7 +202,7 @@ export async function claimPairingCode(
     logger().error(
       {
         event: "pairing.claim_atomic_rpc_failed",
-        pairingId: pairingCode.id,
+        pairingIdPrefix: pairingIdPrefix(pairingCode.id),
         error: rpcError.message,
       },
       "pairing.claim_atomic_rpc_failed",
@@ -209,7 +218,7 @@ export async function claimPairingCode(
     logger().error(
       {
         event: "pairing.claim_atomic_rpc_unexpected_shape",
-        pairingId: pairingCode.id,
+        pairingIdPrefix: pairingIdPrefix(pairingCode.id),
       },
       "pairing.claim_atomic_rpc_unexpected_shape",
     );
@@ -228,7 +237,7 @@ export async function claimPairingCode(
       logger().error(
         {
           event: "pairing.redis_token_write_failed",
-          pairingId: pairingCode.id,
+          pairingIdPrefix: pairingIdPrefix(pairingCode.id),
           error: err instanceof Error ? err.message : String(err),
         },
         "pairing.redis_token_write_failed",
@@ -244,7 +253,7 @@ export async function claimPairingCode(
         logger().error(
           {
             event: "pairing.rollback_rpc_failed",
-            pairingId: pairingCode.id,
+            pairingIdPrefix: pairingIdPrefix(pairingCode.id),
             error: rollbackError.message,
           },
           "pairing.rollback_rpc_failed",
@@ -266,7 +275,7 @@ export async function claimPairingCode(
       logger().error(
         {
           event: "pairing.redis_token_read_failed",
-          pairingId: pairingCode.id,
+          pairingIdPrefix: pairingIdPrefix(pairingCode.id),
           error: err instanceof Error ? err.message : String(err),
         },
         "pairing.redis_token_read_failed",

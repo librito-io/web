@@ -22,9 +22,10 @@ describe("scrubEvent", () => {
     expect(REDACTED_FIELDS).toContain("api_token_hash");
     expect(REDACTED_FIELDS).toContain("password");
     expect(REDACTED_FIELDS).toContain("email");
+    expect(REDACTED_FIELDS).toContain("userEmail");
     expect(REDACTED_FIELDS).toContain("privateKey");
     expect(REDACTED_FIELDS).toContain("jwk");
-    expect(REDACTED_FIELDS).toHaveLength(6);
+    expect(REDACTED_FIELDS).toHaveLength(7);
   });
 
   it("strips authorization and cookie headers entirely", () => {
@@ -88,16 +89,24 @@ describe("scrubEvent", () => {
       contexts: {
         app: { build: "abc", token: "leak1" },
       },
-      extra: { user_email: "u@x.com", email: "leak2", note: "ok" },
+      extra: {
+        user_email: "u@x.com",
+        email: "leak2",
+        userEmail: "leak3",
+        note: "ok",
+      },
     });
     const out = scrubEvent(event)!;
     expect((out.contexts?.app as Record<string, unknown>).token).toBe(
       "[REDACTED]",
     );
     expect((out.extra as Record<string, unknown>).email).toBe("[REDACTED]");
+    // userEmail (camelCase) is on the redact list — matches StatusResult
+    // shape returned by checkPairingStatus.
+    expect((out.extra as Record<string, unknown>).userEmail).toBe("[REDACTED]");
     expect((out.extra as Record<string, unknown>).note).toBe("ok");
-    // user_email is not on the redact list (substring match would over-scrub);
-    // only exact field-name matches redact.
+    // user_email (snake_case DB column) is NOT on the redact list; only
+    // exact field-name matches redact. Documents the intentional asymmetry.
     expect((out.extra as Record<string, unknown>).user_email).toBe("u@x.com");
   });
 

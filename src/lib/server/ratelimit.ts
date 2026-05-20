@@ -417,11 +417,14 @@ export const realtimeTokenUserLimiter = createLimiter({
   failMode: "closed",
 });
 
-// Per-user budget on catalog cold-miss work-scheduling. Caps a single
-// user's parallel cover-resolve fan-out (e.g. 500 newly-synced ISBNs
-// opened in tabs) so they cannot monopolize the per-deployment budget.
-// 10/min covers normal interactive browsing (open a few book pages,
-// hit the API a few times) with headroom; bulk patterns are gated.
+// Per-user budget on catalog requests. Consumed at the /api/book-catalog
+// handler entry, before any Supabase round-trip — so worst-case DB load
+// on cold-miss spam matches the limiter budget rather than the request
+// volume, and the budget that gates expensive cover-resolve fan-out
+// can't be bypassed by interleaving cheap warm-hit reads. Warm hits
+// also consume one unit; 10/min covers normal interactive browsing
+// (open a few book pages, hit the API a few times) with headroom;
+// bulk patterns are intentionally gated regardless of cache state.
 //
 // Layered with the per-deployment fail-OPEN limiters
 // (catalogOpenLibraryLimiter / catalogGoogleBooksLimiter) inside

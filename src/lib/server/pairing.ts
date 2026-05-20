@@ -20,15 +20,15 @@ type StatusResult =
   | { paired: true; token: string; userEmail: string }
   | { error: "not_found" | "code_expired" };
 
+export type ClaimError =
+  | "invalid_code"
+  | "code_expired"
+  | "already_claimed"
+  | "server_error";
+
 type ClaimResult =
   | { deviceId: string; deviceName: string }
-  | {
-      error:
-        | "invalid_code"
-        | "code_expired"
-        | "already_claimed"
-        | "server_error";
-    };
+  | { error: ClaimError };
 
 // Single source of truth for pairing-code lifetime: drives Postgres
 // `expires_at`, Redis token TTL, and the `expiresIn` response field.

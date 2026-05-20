@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   fetchCatalogJson,
   downloadCover,
+  redactSecretParams,
 } from "../../../src/lib/server/catalog/http";
 
 const JPEG_143x218 = new Uint8Array(
@@ -58,6 +59,57 @@ describe("fetchCatalogJson", () => {
     await expect(
       fetchCatalogJson("https://example.com/book", { fetchFn }, "mylib"),
     ).rejects.toThrow("mylib 503");
+  });
+
+  it("redacts known secret query params from a thrown error message", async () => {
+    // The GoogleBooks cover chain appends `&key=<API_KEY>` plaintext to
+    // every request URL. Without this scrub, a non-200 from GB would
+    // embed the plaintext API key in Error.message — and sentry-scrub
+    // intentionally does NOT pattern-scrub event.message.
+    const apiKey = "AIzaSyTOPSECRETvalue";
+    const fetchFn = vi.fn(async () => new Response("err", { status: 500 }));
+    const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:9780000000001&maxResults=1&key=${apiKey}`;
+    await expect(
+      fetchCatalogJson(url, { fetchFn }, "googlebooks"),
+    ).rejects.toThrow(/googlebooks 500/);
+    try {
+      await fetchCatalogJson(url, { fetchFn }, "googlebooks");
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      const msg = (err as Error).message;
+      expect(msg).not.toContain(apiKey);
+      expect(msg).toContain("key=%5BREDACTED%5D");
+    }
+  });
+});
+
+describe("redactSecretParams", () => {
+  it("redacts known secret params (key, api_key, access_token, token)", () => {
+    const cases = [
+      ["https://x.test/?key=AIzaSecret", "key=%5BREDACTED%5D"],
+      ["https://x.test/?api_key=SECRET", "api_key=%5BREDACTED%5D"],
+      ["https://x.test/?access_token=SECRET", "access_token=%5BREDACTED%5D"],
+      ["https://x.test/?token=SECRET", "token=%5BREDACTED%5D"],
+    ];
+    for (const [input, marker] of cases) {
+      const out = redactSecretParams(input);
+      expect(out).not.toContain("SECRET");
+      expect(out).not.toContain("AIzaSecret");
+      expect(out).toContain(marker);
+    }
+  });
+
+  it("leaves non-secret params untouched", () => {
+    const out = redactSecretParams(
+      "https://x.test/?q=isbn%3A9780&maxResults=1&key=SECRET",
+    );
+    expect(out).toContain("q=isbn%3A9780");
+    expect(out).toContain("maxResults=1");
+    expect(out).not.toContain("SECRET");
+  });
+
+  it("returns a stable marker for unparseable URLs (no throw, no leak)", () => {
+    expect(redactSecretParams("not a url")).toBe("(unparseable url)");
   });
 });
 

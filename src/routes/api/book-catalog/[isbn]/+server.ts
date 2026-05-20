@@ -41,6 +41,20 @@ export const GET: RequestHandler = async (event) => {
   const isbn = canonicalizeIsbn(event.params.isbn);
   if (!isbn) return jsonError(400, "invalid_isbn", "ISBN failed validation");
 
+  // Per-user limiter consumed once per request, ahead of any Supabase
+  // round-trip — caps worst-case DB load on cold-miss spam at the
+  // limiter budget (rather than at full request volume) and keeps
+  // expensive cold-miss fan-out gated. Warm hits also consume one unit;
+  // CLAUDE.md catalogUserLimiter doc records that bulk patterns are
+  // intentionally gated and the 10/min budget covers normal browsing
+  // with headroom.
+  const limited = await enforceRateLimit(
+    catalogUserLimiter,
+    user.id,
+    "Catalog lookup rate limit exceeded",
+  );
+  if (limited) return limited;
+
   const supabase = createAdminClient();
   const rawVariant = event.url.searchParams.get("variant");
   const variant: CoverVariant = VALID_VARIANTS.has(rawVariant as CoverVariant)
@@ -55,16 +69,6 @@ export const GET: RequestHandler = async (event) => {
   }
 
   if (!catalogView || catalogView.cover_url === null) {
-    // Per-user budget on cold-miss work-scheduling. Layered with the
-    // per-deployment fail-open limiters inside resolveIsbn — see
-    // catalogUserLimiter doc in ratelimit.ts. Hit path (below) does not
-    // run the limiter; users reading already-cached data never see 429.
-    const limited = await enforceRateLimit(
-      catalogUserLimiter,
-      user.id,
-      "Catalog lookup rate limit exceeded",
-    );
-    if (limited) return limited;
     const mutex = await getCatalogMutex();
     runInBackground(() =>
       resolveIsbn(supabase, isbn, {

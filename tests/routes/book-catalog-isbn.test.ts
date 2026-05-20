@@ -131,7 +131,7 @@ describe("GET /api/book-catalog/[isbn]", () => {
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
   });
 
-  it("does not call per-user limiter on hit path (warm catalog row)", async () => {
+  it("consumes per-user limiter on warm-hit path (gates DB-read fan-out)", async () => {
     supabase._results.set("book_catalog.select", {
       data: [
         {
@@ -144,8 +144,21 @@ describe("GET /api/book-catalog/[isbn]", () => {
       ],
       error: null,
     });
-    // Configure limiter to deny — must be irrelevant on the hit path.
-    userLimitMock.mockResolvedValue({
+    const res = await GET(buildEvent("9780743273565"));
+    expect(res.status).toBe(200);
+    // Limiter fires once on every catalog request — warm or cold — so
+    // worst-case DB load matches the limiter budget, not request volume.
+    expect(userLimitMock).toHaveBeenCalledTimes(1);
+    expect(userLimitMock).toHaveBeenCalledWith("u1");
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+  });
+
+  it("429 with Retry-After when per-user limiter denies on warm hit (no Supabase round-trip)", async () => {
+    // Limiter sits ahead of any DB read; if the budget is gone the
+    // handler short-circuits before getCatalogForBrowser. Asserts the
+    // cold-miss-spam DB-load cap holds for any request, not just cold.
+    const baselineCalls = supabase._chainCalls.length;
+    userLimitMock.mockResolvedValueOnce({
       success: false,
       reset: Date.now() + 30_000,
       limit: 10,
@@ -153,8 +166,12 @@ describe("GET /api/book-catalog/[isbn]", () => {
       pending: Promise.resolve(),
     });
     const res = await GET(buildEvent("9780743273565"));
-    expect(res.status).toBe(200);
-    expect(userLimitMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(429);
+    // No new book_catalog.select chain calls after the rate-limit denial.
+    const newDbCalls = supabase._chainCalls
+      .slice(baselineCalls)
+      .filter((c) => c.table === "book_catalog" && c.operation === "select");
+    expect(newDbCalls).toHaveLength(0);
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
   });
 

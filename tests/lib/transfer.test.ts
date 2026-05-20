@@ -114,8 +114,12 @@ describe("validateTransferSize", () => {
   it("returns an error message when file exceeds limit", () => {
     expect(validateTransferSize(MAX_FILE_SIZE + 1)).toEqual({
       ok: false,
-      error: "File exceeds 20MB limit",
+      error: "File exceeds 10 MB limit",
     });
+  });
+
+  it("MAX_FILE_SIZE equals 10 MiB", () => {
+    expect(MAX_FILE_SIZE).toBe(10 * 1024 * 1024);
   });
 });
 

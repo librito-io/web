@@ -6,7 +6,8 @@ import type { Database } from "$lib/types/database";
 type IncrementTransferAttemptRow =
   Database["public"]["Functions"]["increment_transfer_attempt"]["Returns"][number];
 
-export const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+export { MAX_FILE_SIZE, MAX_FILE_SIZE_LABEL } from "$lib/transfer-config";
+import { MAX_FILE_SIZE, MAX_FILE_SIZE_LABEL } from "$lib/transfer-config";
 export const MAX_FILENAME_LENGTH = 255;
 export const MAX_PENDING_TRANSFERS = 20;
 export const UPLOAD_URL_TTL = 300; // 5 minutes
@@ -118,7 +119,7 @@ export function validateTransferSize(size: number): ValidationResult {
   if (size <= 0)
     return { ok: false, error: "File size must be greater than 0" };
   if (size > MAX_FILE_SIZE)
-    return { ok: false, error: "File exceeds 20MB limit" };
+    return { ok: false, error: `File exceeds ${MAX_FILE_SIZE_LABEL} limit` };
   return { ok: true };
 }
 

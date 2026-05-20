@@ -106,6 +106,25 @@ describe("GET /api/pair/status/[pairingId]", () => {
     expect((await res.json()).error).toBe("unauthorized");
   });
 
+  it("returns 401 when caller forwards no Bearer header and no query secret (phase 3 cutover)", async () => {
+    // Phase 3 of issue #286: a row with a stored hash and a poll that
+    // omits Authorization: Bearer and ?pollSecret= is the surface that
+    // was admitted during the backward-compat window. Now refused with
+    // the same 401 / unauthorized shape as a mismatch.
+    supabase._results.set("pairing_codes.select", {
+      data: {
+        claimed: true,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        user_email: "u@example.com",
+        poll_secret_hash: DEVICE_SECRET_HASH,
+      },
+      error: null,
+    });
+    const res = await GET(buildEvent(VALID_ID));
+    expect(res.status).toBe(401);
+    expect((await res.json()).error).toBe("unauthorized");
+  });
+
   it("admits Bearer header when secret matches the stored hash", async () => {
     supabase._results.set("pairing_codes.select", {
       data: {

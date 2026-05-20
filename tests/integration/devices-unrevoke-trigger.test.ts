@@ -131,9 +131,12 @@ describe.skipIf(SKIP)(
     it("permits re-pair via claim_pairing_atomic against a revoked row", async () => {
       await resetToRevoked("hash-case-5-old");
 
+      // poll_secret_hash NOT NULL post-migration 20260520000004; this test
+      // only exercises the claim atomic RPC, so a placeholder 64-char hex
+      // value satisfies the constraint without affecting behavior.
       const [pairing] = await sql<{ id: string }[]>`
-      INSERT INTO public.pairing_codes (code, hardware_id, expires_at)
-      VALUES (${"TEST5"}, ${hardwareId}, ${new Date(Date.now() + 5 * 60 * 1000).toISOString()})
+      INSERT INTO public.pairing_codes (code, hardware_id, expires_at, poll_secret_hash)
+      VALUES (${"TEST5"}, ${hardwareId}, ${new Date(Date.now() + 5 * 60 * 1000).toISOString()}, ${"0".repeat(64)})
       RETURNING id
     `;
 

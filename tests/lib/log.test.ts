@@ -80,6 +80,21 @@ describe("log.ts", () => {
       expect(writes[0].email).toBe("[REDACTED]");
     });
 
+    it("redacts userEmail at top level and nested (StatusResult leak guard)", () => {
+      logger().info(
+        { event: "pair_status", userEmail: "user@example.com" },
+        "pair_status",
+      );
+      logger().info(
+        { event: "pair_status", result: { userEmail: "nested@example.com" } },
+        "pair_status",
+      );
+      expect(writes[0].userEmail).toBe("[REDACTED]");
+      expect((writes[1].result as Record<string, unknown>).userEmail).toBe(
+        "[REDACTED]",
+      );
+    });
+
     it("redacts *.api_token_hash", () => {
       logger().info({ event: "auth", api_token_hash: "deadbeef" }, "auth");
       expect(writes[0].api_token_hash).toBe("[REDACTED]");

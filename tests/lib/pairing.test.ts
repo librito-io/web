@@ -478,6 +478,25 @@ describe("claimPairingCode", () => {
     expect(logWrites).toContainEqual(
       expect.objectContaining({ event: "pairing.rollback_rpc_failed" }),
     );
+
+    // pairingId must be scrubbed to first-8-char prefix (issue #286 step 1).
+    // A leaked full pairingId within the 5-min TTL is enough to fetch the
+    // plaintext device token from an unauth endpoint. Guard the redaction
+    // here so a future contributor reintroducing the raw id fails CI.
+    const redisWriteFailLog = logWrites.find(
+      (w) => w.event === "pairing.redis_token_write_failed",
+    );
+    const rollbackFailLog = logWrites.find(
+      (w) => w.event === "pairing.rollback_rpc_failed",
+    );
+    expect(redisWriteFailLog).toMatchObject({
+      pairingIdPrefix: pairingId.slice(0, 8),
+    });
+    expect(redisWriteFailLog).not.toHaveProperty("pairingId");
+    expect(rollbackFailLog).toMatchObject({
+      pairingIdPrefix: pairingId.slice(0, 8),
+    });
+    expect(rollbackFailLog).not.toHaveProperty("pairingId");
   });
 
   it("does NOT invoke rollback when Redis write succeeds", async () => {

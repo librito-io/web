@@ -33,6 +33,8 @@ function makeBase(): Logger {
           "*.password",
           "email",
           "*.email",
+          "userEmail",
+          "*.userEmail",
           "privateKey",
           "*.privateKey",
           "jwk",

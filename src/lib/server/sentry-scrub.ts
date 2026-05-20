@@ -34,6 +34,7 @@ export const REDACTED_FIELDS = [
   "api_token_hash",
   "password",
   "email",
+  "userEmail",
   "privateKey",
   "jwk",
 ] as const;

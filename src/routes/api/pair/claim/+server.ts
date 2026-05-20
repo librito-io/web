@@ -5,7 +5,7 @@ import {
   pairClaimLimiter,
   enforceRateLimit,
 } from "$lib/server/ratelimit";
-import { claimPairingCode } from "$lib/server/pairing";
+import { claimPairingCode, type ClaimError } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 
 export const POST: RequestHandler = async ({
@@ -48,7 +48,12 @@ export const POST: RequestHandler = async ({
   });
 
   if ("error" in result) {
-    const messages: Record<string, string> = {
+    // Record<ClaimError, ...> gives compile-time exhaustiveness: a new
+    // variant added to ClaimError in pairing.ts forces an entry here.
+    // The `??` fallback is the runtime backstop for any code path that
+    // ships without a full typecheck (feature flag, hot-fix) — without
+    // it, a missing entry surfaces to clients as the literal "undefined".
+    const messages: Record<ClaimError, string> = {
       invalid_code: "Invalid or expired pairing code",
       code_expired:
         "Pairing code has expired. Request a new one from the device.",
@@ -56,7 +61,11 @@ export const POST: RequestHandler = async ({
       server_error: "Failed to pair device",
     };
     const status = result.error === "server_error" ? 500 : 400;
-    return jsonError(status, result.error, messages[result.error]);
+    return jsonError(
+      status,
+      result.error,
+      messages[result.error] ?? "Unknown pairing error",
+    );
   }
 
   return jsonSuccess(result);

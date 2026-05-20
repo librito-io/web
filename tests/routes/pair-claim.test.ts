@@ -139,4 +139,21 @@ describe("POST /api/pair/claim — session-email wiring", () => {
     expect(res.status).toBe(401);
     expect(claimSpy).not.toHaveBeenCalled();
   });
+
+  it("returns 'Unknown pairing error' fallback for an unrecognized ClaimError code", async () => {
+    // Forge a future-ClaimError variant that hasn't been added to the
+    // messages map. Simulates the hot-fix / feature-flag path where
+    // typecheck exhaustiveness was bypassed; pre-fix this surfaced the
+    // literal "undefined" to clients.
+    claimSpy.mockResolvedValueOnce({
+      error: "future_variant_not_in_messages",
+    });
+    const res = await POST(
+      buildEvent({ code: "482901" }, { id: "user-uuid", email: "a@b" }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("future_variant_not_in_messages");
+    expect(body.message).toBe("Unknown pairing error");
+  });
 });

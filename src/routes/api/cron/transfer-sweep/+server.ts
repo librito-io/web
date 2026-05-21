@@ -9,6 +9,7 @@ import { constantTimeEqualString } from "$lib/server/cron-auth";
 // the deployed bundle and every cron fire would 401. See PR #194 thread.
 import { env as privateEnv } from "$env/dynamic/private";
 import { logger } from "$lib/server/log";
+import * as Sentry from "@sentry/sveltekit";
 
 const BUCKET = "book-transfers";
 const PASS_A_BATCH = 500;
@@ -23,27 +24,22 @@ const PASS_A_BATCH = 500;
 const PASS_C_BATCH = 100;
 const PASS_C_AGE_MS = 15 * 60 * 1000; // 15 minutes
 
-// Vercel cron invokes scheduled paths via GET. A POST-only handler returns
-// 405 every fire and never executes Pass A/B. See issue #187.
-export const GET: RequestHandler = async ({ request, url }) => {
-  const cronSecret = privateEnv.CRON_SECRET;
-  if (!cronSecret) {
-    return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
-  }
-  const auth = request.headers.get("authorization") ?? "";
-  const expected = `Bearer ${cronSecret}`;
-  if (!constantTimeEqualString(auth, expected)) {
-    return jsonError(401, "unauthorized", "Cron secret mismatch");
-  }
+// Mirror of vercel.ts crons[] entry for /api/cron/transfer-sweep. Sentry's
+// monitor config needs the schedule at the SDK call site to compute
+// expected check-in times; Vercel reads vercel.ts at a different layer.
+// Drift surfaces fast — a real off-schedule fire produces a "missed
+// check-in" alert in the Sentry Crons UI within minutes.
+const TRANSFER_SWEEP_SCHEDULE = "0 3 * * *";
 
-  // ?probe=1 lets the deploy-time smoke check exercise auth + reachability
-  // without doing the actual sweep (Storage deletes, DB writes). Gated
-  // behind successful auth so an unauthenticated caller can never trigger
-  // the short-circuit.
-  if (url.searchParams.get("probe") === "1") {
-    return jsonSuccess({ probe: true });
-  }
+type SweepSummary = {
+  passA: number;
+  passB: number;
+  passC: number;
+  passCMismatches: number;
+  durationMs: number;
+};
 
+async function runSweep(): Promise<SweepSummary> {
   const start = Date.now();
   const supabase = createAdminClient();
 
@@ -59,7 +55,10 @@ export const GET: RequestHandler = async ({ request, url }) => {
     .limit(PASS_A_BATCH);
 
   if (selectError) {
-    return jsonError(500, "server_error", "Pass A select failed");
+    // throw, not jsonError — Sentry.withMonitor marks a check-in failed
+    // only when the wrapped callback throws. A returned non-2xx Response
+    // counts as success. Outer handler translates back to 500.
+    throw new Error("Pass A select failed");
   }
 
   // Storage remove errors are intentionally swallowed: a failed remove still
@@ -111,9 +110,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
       },
       "cron.transfer_sweep.pass_b_failed",
     );
-    return jsonError(
-      500,
-      "server_error",
+    throw new Error(
       `Pass B delete failed: ${deleteError.message ?? "unknown"}`,
     );
   }
@@ -148,6 +145,10 @@ export const GET: RequestHandler = async ({ request, url }) => {
   let passC = 0;
   let passCMismatches = 0;
   if (pcSelectError) {
+    // Pass C select failures log-and-continue rather than throw — Pass A
+    // and Pass B already succeeded by this point and the monitor should
+    // record success. Pass C is a backstop; missing a single run is not
+    // a sweep-level failure.
     logger().error(
       {
         event: "cron.transfer_sweep.pass_c_select_failed",
@@ -230,13 +231,55 @@ export const GET: RequestHandler = async ({ request, url }) => {
     "cron.transfer_sweep.pass_c",
   );
 
-  return jsonSuccess({
-    sweep: {
-      passA,
-      passB,
-      passC,
-      passCMismatches,
-      durationMs: Date.now() - start,
-    },
-  });
+  return {
+    passA,
+    passB,
+    passC,
+    passCMismatches,
+    durationMs: Date.now() - start,
+  };
+}
+
+// Vercel cron invokes scheduled paths via GET. A POST-only handler returns
+// 405 every fire and never executes Pass A/B. See issue #187.
+export const GET: RequestHandler = async ({ request, url }) => {
+  const cronSecret = privateEnv.CRON_SECRET;
+  if (!cronSecret) {
+    return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
+  }
+  const auth = request.headers.get("authorization") ?? "";
+  const expected = `Bearer ${cronSecret}`;
+  if (!constantTimeEqualString(auth, expected)) {
+    return jsonError(401, "unauthorized", "Cron secret mismatch");
+  }
+
+  // ?probe=1 lets the deploy-time smoke check exercise auth + reachability
+  // without doing the actual sweep (Storage deletes, DB writes). Gated
+  // behind successful auth so an unauthenticated caller can never trigger
+  // the short-circuit. Outside the withMonitor scope: emitting check-ins
+  // for probe runs would skew the Sentry Crons timeline.
+  if (url.searchParams.get("probe") === "1") {
+    return jsonSuccess({ probe: true });
+  }
+
+  try {
+    const summary = await Sentry.withMonitor("transfer-sweep", runSweep, {
+      schedule: { type: "crontab", value: TRANSFER_SWEEP_SCHEDULE },
+      checkinMargin: 5, // minutes — alert if check-in late by >5 min
+      maxRuntime: 10, // minutes — alert if run takes >10 min
+      failureIssueThreshold: 1, // first failure creates an issue
+      recoveryThreshold: 1, // one success after failure resolves it
+    });
+    return jsonSuccess({ sweep: summary });
+  } catch (err) {
+    // withMonitor already emitted an error check-in to Sentry. The
+    // sentryHandle() wrapper in hooks.server.ts will also captureException
+    // via handleErrorWithSentry — acceptable duplication; both surfaces
+    // are useful (Crons UI shows failure pattern, Issues UI shows stack).
+    return jsonError(
+      500,
+      "server_error",
+      err instanceof Error ? err.message : "transfer_sweep_failed",
+    );
+  }
 };

@@ -13,8 +13,10 @@ const withMonitor = vi.fn(
     _options?: unknown,
   ): Promise<unknown> => cb(),
 );
+const captureMessage = vi.fn();
 vi.mock("@sentry/sveltekit", () => ({
   withMonitor,
+  captureMessage,
 }));
 
 const supabase = createMockSupabase();
@@ -45,6 +47,7 @@ beforeEach(() => {
   withMonitor.mockClear();
   // Restore default pass-through after .mockClear() drops it.
   withMonitor.mockImplementation(async (_slug, cb, _options) => cb());
+  captureMessage.mockClear();
 });
 
 describe("GET /api/cron/transfer-sweep", () => {
@@ -124,7 +127,9 @@ describe("GET /api/cron/transfer-sweep", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.sweep.passA).toBe(0);
+    expect(body.sweep.passAStorageRemoved).toBe(0);
+    expect(body.sweep.passAStorageFailed).toBe(0);
+    expect(body.sweep.passAPathNulled).toBe(0);
     expect(body.sweep.passB).toBe(0);
   });
 
@@ -153,7 +158,9 @@ describe("GET /api/cron/transfer-sweep", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.sweep.passA).toBe(2);
+    expect(body.sweep.passAStorageRemoved).toBe(2);
+    expect(body.sweep.passAStorageFailed).toBe(0);
+    expect(body.sweep.passAPathNulled).toBe(2);
     // Batched: one Storage.remove call with all paths, regardless of N rows.
     expect(removeSpy).toHaveBeenCalledTimes(1);
     expect(removeSpy).toHaveBeenCalledWith(["u/t1/a.epub", "u/t2/b.epub"]);
@@ -208,10 +215,11 @@ describe("GET /api/cron/transfer-sweep", () => {
     expect(idInFilter!.args[1]).toEqual(["t1", "t2", "t3"]);
   });
 
-  // Issue #278 + #277 free side-effect: paths whose Storage remove failed
-  // (absent from the response data array) must NOT be in the bulk UPDATE's
-  // id list, so storage_path stays populated for the next sweep to retry.
-  it("Pass A only nulls storage_path for IDs whose path appears in Storage.remove response", async () => {
+  // Issue #277 + #278: paths whose Storage remove failed (absent from the
+  // response data array) must NOT be in the bulk UPDATE's id list, AND the
+  // failure must surface in passAStorageFailed so operators can distinguish
+  // a clean sweep from one that created orphans.
+  it("Pass A only nulls storage_path for IDs whose path appears in Storage.remove response, and counts failures separately", async () => {
     supabase._results.set("book_transfers.select", {
       data: [
         { id: "t1", storage_path: "u/t1/a.epub" },
@@ -237,7 +245,9 @@ describe("GET /api/cron/transfer-sweep", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.sweep.passA).toBe(2);
+    expect(body.sweep.passAStorageRemoved).toBe(2);
+    expect(body.sweep.passAStorageFailed).toBe(1);
+    expect(body.sweep.passAPathNulled).toBe(2);
 
     const updateChainCalls = supabase._chainCalls.filter(
       (c) => c.table === "book_transfers" && c.operation === "update",
@@ -247,6 +257,107 @@ describe("GET /api/cron/transfer-sweep", () => {
     );
     expect(idInFilter).toBeDefined();
     expect(idInFilter!.args[1]).toEqual(["t1", "t3"]);
+  });
+
+  it("Pass A emits a Sentry warning when any Storage removal failed (loud signal for orphan creation)", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: [
+        { id: "t1", storage_path: "u/t1/a.epub" },
+        { id: "t2", storage_path: "u/t2/b.epub" },
+      ],
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", { data: null, error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    supabase.storage.from = () =>
+      ({
+        remove: vi.fn(async () => ({
+          data: [{ name: "u/t1/a.epub" }],
+          error: null,
+        })),
+        download: vi.fn(async () => ({ data: null, error: null })),
+      }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
+
+    await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+
+    expect(captureMessage).toHaveBeenCalledTimes(1);
+    const [msg, opts] = captureMessage.mock.calls[0];
+    expect(msg).toBe("transfer_sweep_pass_a_storage_failure");
+    expect(opts).toEqual(
+      expect.objectContaining({
+        level: "warning",
+        extra: expect.objectContaining({
+          passAStorageRemoved: 1,
+          passAStorageFailed: 1,
+          passAPathNulled: 1,
+          batchSize: 2,
+        }),
+      }),
+    );
+  });
+
+  it("Pass A does NOT emit a Sentry warning on a clean sweep", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: [{ id: "t1", storage_path: "u/t1/a.epub" }],
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", { data: null, error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    supabase.storage.from = () =>
+      ({
+        remove: vi.fn(async (paths: string[]) => ({
+          data: paths.map((name) => ({ name })),
+          error: null,
+        })),
+        download: vi.fn(async () => ({ data: null, error: null })),
+      }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
+
+    await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+
+    expect(captureMessage).not.toHaveBeenCalled();
+  });
+
+  // Top-level Storage error (network blip, full-batch 5xx): the entire
+  // batch is counted as failed, no UPDATE runs, storage_path stays
+  // populated for the next sweep.
+  it("Pass A counts every row as failed and skips UPDATE when Storage.remove returns a top-level error", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: [
+        { id: "t1", storage_path: "u/t1/a.epub" },
+        { id: "t2", storage_path: "u/t2/b.epub" },
+      ],
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", { data: null, error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    supabase.storage.from = () =>
+      ({
+        remove: vi.fn(async () => ({
+          data: null,
+          error: { message: "storage_unavailable" },
+        })),
+        download: vi.fn(async () => ({ data: null, error: null })),
+      }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
+
+    const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.sweep.passAStorageRemoved).toBe(0);
+    expect(body.sweep.passAStorageFailed).toBe(2);
+    expect(body.sweep.passAPathNulled).toBe(0);
+
+    const passAUpdateCalls = supabase._updateCalls.filter(
+      (u) =>
+        u.table === "book_transfers" &&
+        typeof u.payload === "object" &&
+        u.payload !== null &&
+        (u.payload as Record<string, unknown>).storage_path === null,
+    );
+    expect(passAUpdateCalls.length).toBe(0);
   });
 
   // Empty batch: SELECT returns zero rows. Pass A must skip both
@@ -268,7 +379,9 @@ describe("GET /api/cron/transfer-sweep", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.sweep.passA).toBe(0);
+    expect(body.sweep.passAStorageRemoved).toBe(0);
+    expect(body.sweep.passAStorageFailed).toBe(0);
+    expect(body.sweep.passAPathNulled).toBe(0);
     expect(removeSpy).not.toHaveBeenCalled();
 
     const passAUpdateCalls = supabase._updateCalls.filter(

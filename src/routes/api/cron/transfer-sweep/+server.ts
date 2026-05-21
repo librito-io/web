@@ -32,7 +32,9 @@ const PASS_C_AGE_MS = 15 * 60 * 1000; // 15 minutes
 const TRANSFER_SWEEP_SCHEDULE = "0 3 * * *";
 
 type SweepSummary = {
-  passA: number;
+  passAStorageRemoved: number;
+  passAStorageFailed: number;
+  passAPathNulled: number;
   passB: number;
   passC: number;
   passCMismatches: number;
@@ -74,42 +76,70 @@ async function runSweep(): Promise<SweepSummary> {
   const rows = (retiredRows ?? []).filter(
     (r): r is { id: string; storage_path: string } => r.storage_path !== null,
   );
-  let passA = 0;
+  // Three counters, not one. A silent Storage failure (transient 5xx, ACL
+  // drift) that we conflate with success leaves an orphan in Storage while
+  // every operator signal reports a clean sweep. Splitting removed/failed/
+  // nulled lets operators (and a future orphan-reconciliation pass)
+  // distinguish a clean sweep from one that created orphans. Issue #277.
+  let passAStorageRemoved = 0;
+  let passAStorageFailed = 0;
+  let passAPathNulled = 0;
   if (rows.length > 0) {
     const paths = rows.map((r) => r.storage_path);
-    // Storage.remove failures: the response `data` array enumerates paths
-    // actually deleted. Paths absent from `data` (transient 5xx, ACL drift)
-    // are NOT added to the UPDATE batch, so `storage_path` stays populated
-    // and the next sweep retries the remove. Matches the orphan-avoidance
-    // posture from the per-row loop, but without the silent-success
-    // counter conflation (sibling issue #277 covers explicit per-result
-    // counters).
-    const { data: removed } = await supabase.storage.from(BUCKET).remove(paths);
-    const removedSet = new Set((removed ?? []).map((f) => f.name));
-    const idsToNull = rows
-      .filter((r) => removedSet.has(r.storage_path))
-      .map((r) => r.id);
+    const { data: removed, error: removeError } = await supabase.storage
+      .from(BUCKET)
+      .remove(paths);
+    if (removeError) {
+      // Top-level error: assume the entire batch failed. Do NOT null
+      // storage_path for any row; next sweep retries the whole batch.
+      passAStorageFailed = rows.length;
+    } else {
+      // Per-path: paths absent from `data` (partial failure) stay
+      // populated for the next sweep to retry. Set ensures we only null
+      // storage_path for rows the Storage API confirmed it deleted.
+      const removedSet = new Set((removed ?? []).map((f) => f.name));
+      const idsToNull = rows
+        .filter((r) => removedSet.has(r.storage_path))
+        .map((r) => r.id);
+      passAStorageRemoved = idsToNull.length;
+      passAStorageFailed = rows.length - passAStorageRemoved;
 
-    if (idsToNull.length > 0) {
-      // Re-apply the status filter on UPDATE to close a TOCTOU window
-      // between the SELECT above and this write — if a row transitioned
-      // out of a retired status (e.g. /retry flipped 'failed' → 'pending',
-      // though Pass A only selects 'expired'/'downloaded', a future
-      // migration could widen the candidate set), nulling storage_path
-      // would orphan the file on a live row.
-      await supabase
-        .from("book_transfers")
-        .update({ storage_path: null })
-        .in("id", idsToNull)
-        .in("status", ["expired", "downloaded"]);
-      passA = idsToNull.length;
+      if (idsToNull.length > 0) {
+        // Re-apply the status filter on UPDATE to close a TOCTOU window
+        // between the SELECT above and this write — if a row transitioned
+        // out of a retired status, nulling storage_path would orphan the
+        // file on a live row.
+        const { error: updateError } = await supabase
+          .from("book_transfers")
+          .update({ storage_path: null })
+          .in("id", idsToNull)
+          .in("status", ["expired", "downloaded"]);
+        if (!updateError) passAPathNulled = idsToNull.length;
+      }
     }
+  }
+  if (passAStorageFailed > 0) {
+    // Loud signal per CLAUDE.md "Cron handlers" — orphans accumulate
+    // silently otherwise. Sentry warning, not error: failed-but-tracked
+    // rows are retried next sweep; persistent failure surfaces as an
+    // alert pattern in the Crons UI.
+    Sentry.captureMessage("transfer_sweep_pass_a_storage_failure", {
+      level: "warning",
+      extra: {
+        passAStorageRemoved,
+        passAStorageFailed,
+        passAPathNulled,
+        batchSize: rows.length,
+      },
+    });
   }
   const passADurationMs = Date.now() - start;
   logger().info(
     {
       event: "cron.transfer_sweep.pass_a",
-      rowsAffected: passA,
+      passAStorageRemoved,
+      passAStorageFailed,
+      passAPathNulled,
       durationMs: passADurationMs,
     },
     "cron.transfer_sweep.pass_a",
@@ -254,7 +284,9 @@ async function runSweep(): Promise<SweepSummary> {
   );
 
   return {
-    passA,
+    passAStorageRemoved,
+    passAStorageFailed,
+    passAPathNulled,
     passB,
     passC,
     passCMismatches,

@@ -531,6 +531,13 @@ export type Database = {
           status: string
         }[]
       }
+      pg_cron_failure_summary: {
+        Args: never
+        Returns: {
+          failures: number
+          jobname: string
+        }[]
+      }
       rollback_claim_pairing: {
         Args: { p_pairing_id: string; p_user_id: string }
         Returns: undefined

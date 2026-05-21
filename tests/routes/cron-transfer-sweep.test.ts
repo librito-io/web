@@ -6,6 +6,17 @@ vi.mock("$env/dynamic/private", () => ({
   env: { CRON_SECRET: "test-secret" },
 }));
 
+const withMonitor = vi.fn(
+  async (
+    _slug: string,
+    cb: () => Promise<unknown>,
+    _options?: unknown,
+  ): Promise<unknown> => cb(),
+);
+vi.mock("@sentry/sveltekit", () => ({
+  withMonitor,
+}));
+
 const supabase = createMockSupabase();
 // Captured before any test runs so describes that override
 // `supabase.storage.from` for the duration of a single test can restore
@@ -29,6 +40,9 @@ function buildEvent(headers: Record<string, string> = {}, query: string = "") {
 beforeEach(() => {
   supabase._results.clear();
   supabase._storage.clear();
+  withMonitor.mockClear();
+  // Restore default pass-through after .mockClear() drops it.
+  withMonitor.mockImplementation(async (_slug, cb, _options) => cb());
 });
 
 describe("GET /api/cron/transfer-sweep", () => {
@@ -54,6 +68,50 @@ describe("GET /api/cron/transfer-sweep", () => {
   it("?probe=1 without auth still returns 401 (gate runs before probe)", async () => {
     const res = await GET(buildEvent({}, "?probe=1"));
     expect(res.status).toBe(401);
+  });
+
+  it("does NOT call Sentry.withMonitor on the 401 path", async () => {
+    await GET(buildEvent({}));
+    expect(withMonitor).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call Sentry.withMonitor on the ?probe=1 short-circuit", async () => {
+    await GET(buildEvent({ Authorization: "Bearer test-secret" }, "?probe=1"));
+    expect(withMonitor).not.toHaveBeenCalled();
+  });
+
+  it("wraps the sweep body in Sentry.withMonitor with the canonical slug and schedule", async () => {
+    supabase._results.set("book_transfers.select", { data: [], error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+
+    expect(withMonitor).toHaveBeenCalledTimes(1);
+    const [slug, _cb, options] = withMonitor.mock.calls[0];
+    expect(slug).toBe("transfer-sweep");
+    expect(options).toEqual(
+      expect.objectContaining({
+        schedule: { type: "crontab", value: "0 3 * * *" },
+        checkinMargin: 5,
+        maxRuntime: 10,
+        failureIssueThreshold: 1,
+        recoveryThreshold: 1,
+      }),
+    );
+  });
+
+  it("translates a thrown error inside runSweep to a 500 response", async () => {
+    // Simulate Pass A select failure — runSweep throws, withMonitor
+    // re-throws, outer catch translates to 500. Verifies the throw-to-500
+    // contract on which the monitor's failure semantics rely.
+    withMonitor.mockImplementationOnce(async () => {
+      throw new Error("pass_a_select_failed");
+    });
+    const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body.error).toBe("server_error");
+    expect(body.message).toBe("pass_a_select_failed");
   });
 
   it("returns 200 with zero counts on empty state", async () => {

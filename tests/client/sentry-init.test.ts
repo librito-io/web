@@ -17,6 +17,7 @@ beforeEach(() => {
   init.mockReset();
   handleErrorWithSentry.mockReset();
   handleErrorWithSentry.mockImplementation((fallback) => fallback);
+  delete (globalThis as unknown as { SENTRY_RELEASE?: unknown }).SENTRY_RELEASE;
   vi.resetModules();
 });
 
@@ -33,12 +34,14 @@ describe("src/hooks.client.ts", () => {
     expect(init).not.toHaveBeenCalled();
   });
 
-  it("calls Sentry.init when PUBLIC_SENTRY_DSN is set, with PII off and tracing off", async () => {
+  it("calls Sentry.init with release from globalThis.SENTRY_RELEASE.id, PII off, tracing off", async () => {
+    (
+      globalThis as unknown as { SENTRY_RELEASE: { id: string } }
+    ).SENTRY_RELEASE = { id: "deadbeef" };
     vi.doMock("$env/dynamic/public", () => ({
       env: {
         PUBLIC_SENTRY_DSN: "https://abc@o123.ingest.sentry.io/456",
         PUBLIC_VERCEL_ENV: "production",
-        PUBLIC_VERCEL_GIT_COMMIT_SHA: "deadbeef",
       },
     }));
     await import("../../src/hooks.client");
@@ -54,12 +57,11 @@ describe("src/hooks.client.ts", () => {
     expect(typeof opts.beforeSend).toBe("function");
   });
 
-  it("defaults environment to 'development' when PUBLIC_VERCEL_ENV is empty", async () => {
+  it("defaults environment to 'development' and release to undefined when both unset", async () => {
     vi.doMock("$env/dynamic/public", () => ({
       env: {
         PUBLIC_SENTRY_DSN: "https://abc@o123.ingest.sentry.io/456",
         PUBLIC_VERCEL_ENV: "",
-        PUBLIC_VERCEL_GIT_COMMIT_SHA: "",
       },
     }));
     await import("../../src/hooks.client");

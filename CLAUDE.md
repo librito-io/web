@@ -79,94 +79,15 @@ supabase stop           # Stop local Supabase
 
 ### Integration suite (`tests/integration/`)
 
-The default `npm test` (`vitest.config.ts`) runs the fast, hermetic unit suite under `tests/lib/` and `tests/routes/` against mocks. The **integration suite** lives in `tests/integration/` and exercises real Postgres behavior against a running local Supabase (port `54322`):
+`npm test` runs the fast hermetic unit suite (`tests/lib/`, `tests/routes/`) against mocks. **`npm run test:integration`** sets `INTEGRATION=1` and runs `vitest.integration.config.ts` against a running local Supabase (port `54322`); without the env var every `describe` is `.skipIf`'d. Helpers shell out to `supabase status -o env` for `DB_URL`/`API_URL`/`SERVICE_ROLE_KEY`, so no env wiring needed.
 
-- **Trigger**: `npm run test:integration`, which sets `INTEGRATION=1` and points Vitest at `vitest.integration.config.ts`. Without `INTEGRATION=1`, every `describe` is `.skipIf`'d so the suite is a no-op.
-- **Prerequisites**: `supabase start` must be running before invocation. The helpers shell out to `supabase status -o env` to discover `DB_URL` / `API_URL` / `SERVICE_ROLE_KEY` — fresh CI boots and local machines both work without env wiring.
-- **Scope**: behavior-level guards that string-match unit tests cannot catch — RPC tombstone filtering, `pg_cron` job presence + canonical schedule, `supabase_realtime` publication membership, `REPLICA IDENTITY FULL` on replicated tables. A future migration that drops `AND n.deleted_at IS NULL` from an RPC join or removes a table from the publication will fail integration without touching unit tests.
-- **Out of scope**: RLS policy assertions. The suite connects as superuser via raw `postgres-js` and, where `auth.uid()` matters, sets `request.jwt.claims` / `SET LOCAL ROLE authenticated` to impersonate. RLS itself is not exercised here; an RLS suite is a separate concern.
-- **Serial execution**: the entire suite shares a single Postgres instance. `vitest.integration.config.ts` pins `pool: 'forks'`, `singleFork: true`, and disables `sequence.concurrent` so tests don't trample each other.
-- **CI**: extends `migration-smoke.yml`'s `db-reset` job — same `supabase start`, runs after the type-gen verification step. Path filters include `tests/integration/**` and `vitest.integration.config.ts` so PRs that only edit integration tests still run the suite.
+**Scope**: behavior-level guards unit tests can't catch — RPC tombstone filtering, `pg_cron` job presence + schedule, `supabase_realtime` publication membership, `REPLICA IDENTITY FULL` on replicated tables. Connects as superuser via `postgres-js`, impersonates via `request.jwt.claims` / `SET LOCAL ROLE authenticated` where needed. **RLS is out of scope** — separate suite. Serial: `pool: 'forks'`, `singleFork: true`, `sequence.concurrent` disabled.
 
-**Migration CI gate**: `.github/workflows/migration-smoke.yml` runs `supabase start && supabase db reset --local` on every PR (and `main` push) that touches `supabase/migrations/**`, `supabase/seed.sql`, `supabase/config.toml`, `tests/integration/**`, or `vitest.integration.config.ts`. The same job also runs the behavior-level integration suite (`npm run test:integration`) after the type-gen verification step — see "Integration suite" above for scope. The CLI is pinned to the version used for local dev and production `supabase db push` so parser-class regressions surface in CI rather than at production push time. **Pin must stay ≥ v2.91.1** — earlier versions carry the [`atomic` parser bug](https://github.com/supabase/cli/pull/5064) that mishandles function names containing the substring "atomic" and trips Postgres SQLSTATE 42601 on subsequent statements (this hit production via PR #40 → hotfix PR #41). Bumping the pin requires a coordinated bump of every contributor's local CLI and the laptop that runs `supabase db push`. If you edit a migration file mid-review, **re-run `supabase db reset --local` locally** before pushing — CI is the safety net, not the primary signal.
+**Migration CI gate** (`.github/workflows/migration-smoke.yml`): runs `supabase start && supabase db reset --local` then the integration suite + `gen:types` diff on every PR / `main` push that touches `supabase/migrations/**`, `supabase/seed.sql`, `supabase/config.toml`, `src/lib/types/database.ts`, `tests/integration/**`, or `vitest.integration.config.ts`. **CLI pin ≥ v2.91.1** — earlier versions carry the [`atomic` parser bug](https://github.com/supabase/cli/pull/5064) (function names containing "atomic" trip SQLSTATE 42601 on subsequent statements; hit prod via PR #40 → hotfix #41). Bumping the pin requires a coordinated bump of every contributor's local CLI and the laptop that runs `supabase db push`. Re-run `supabase db reset --local` locally before pushing migration edits — CI is the safety net, not the primary signal.
 
 ## Local dev setup — Realtime signing key
 
-Tests run on CI without any Supabase setup (the fixture in `tests/fixtures/dev-jwk.ts` is self-contained). But the **manual local Realtime smoke test** — minting a token from `/api/realtime-token` and joining a Phoenix channel against local Supabase — requires that local gotrue and our minter share a signing key.
-
-One-time bootstrap on each dev machine:
-
-1. Generate two ES256 keys (one current, one standby):
-
-   ```bash
-   supabase gen signing-key --algorithm ES256
-   supabase gen signing-key --algorithm ES256
-   ```
-
-   `supabase gen signing-key --append` prints to stdout but does NOT write the file (CLI v2.90 behavior). Capture both stdout outputs by hand.
-
-2. Create `supabase/signing_keys.json` (gitignored) as a JSON array. Mark one key as current, the other as standby. Local gotrue (≥ v2.188) refuses more than one key with `key_ops: ["sign"]`, so the standby gets `key_ops: ["verify"]` only:
-
-   ```json
-   [
-     {
-       "kty": "EC",
-       "kid": "<uuid-1>",
-       "use": "sig",
-       "key_ops": ["sign", "verify"],
-       "alg": "ES256",
-       "ext": true,
-       "d": "...",
-       "crv": "P-256",
-       "x": "...",
-       "y": "..."
-     },
-     {
-       "kty": "EC",
-       "kid": "<uuid-2>",
-       "use": "sig",
-       "key_ops": ["verify"],
-       "alg": "ES256",
-       "ext": true,
-       "d": "...",
-       "crv": "P-256",
-       "x": "...",
-       "y": "..."
-     }
-   ]
-   ```
-
-3. In `supabase/config.toml`, uncomment the `signing_keys_path` line under `[auth]`:
-
-   ```toml
-   [auth]
-   signing_keys_path = "./signing_keys.json"
-   ```
-
-   This is a per-dev local modification — do NOT commit. The committed form keeps the line commented to match the upstream Supabase CLI template default; CI, fresh clones, and self-hosters need it that way so `supabase start` doesn't error on a missing key file. The Supabase CLI does not support `env(...)` substitution for `signing_keys_path` ([`pkg/config/auth.go:163`](https://github.com/supabase/cli/blob/v2.90.0/pkg/config/auth.go#L163) declares it as a plain `string`, not the `Secret` wrapper type), so there is no committed form that works for everyone — the line must stay commented in version control.
-
-   To prevent the local edit from following you into accidental commits, mark the file as locally modified:
-
-   ```bash
-   git update-index --skip-worktree supabase/config.toml
-   ```
-
-   Undo when you need to pull a real upstream change to this file:
-
-   ```bash
-   git update-index --no-skip-worktree supabase/config.toml
-   git pull
-   # re-apply the uncomment, then re-skip:
-   git update-index --skip-worktree supabase/config.toml
-   ```
-
-4. Set `LIBRITO_JWT_PRIVATE_KEY_JWK` in your `.env` to the **standby** key's full JWK as a single-line JSON string (include the `d` field — the minter signs with it).
-
-5. Restart Supabase: `supabase stop && supabase start`.
-
-6. Confirm both `kid`s appear at `http://127.0.0.1:54321/auth/v1/.well-known/jwks.json`.
-
-Production keys are managed entirely through Supabase Dashboard → Project Settings → JWT signing keys → "new standby key", and `LIBRITO_JWT_PRIVATE_KEY_JWK` in Vercel Production env. Production keys never touch a developer's disk.
+One-time per-machine bootstrap to share an ES256 key between local gotrue and the `/api/realtime-token` minter. See [`docs/dev/realtime-signing-key.md`](docs/dev/realtime-signing-key.md) for the full procedure. Production keys live in Supabase Dashboard → JWT signing keys + `LIBRITO_JWT_PRIVATE_KEY_JWK` in Vercel env — never on a developer disk.
 
 ## Release Process
 
@@ -181,315 +102,45 @@ Production deploys are automated via `.github/workflows/production-deploy.yml`. 
 
 Vercel git auto-deploy on `main` is disabled in `vercel.ts` — the workflow is the single deploy source of truth. Preview deploys for PRs remain enabled.
 
-**One-time GitHub setup (before workflow will succeed):**
-
-Create environment named `production` (Settings → Environments) with at least one required reviewer. Then set:
-
-| Type     | Name                    | Where to get it                                                                        |
-| -------- | ----------------------- | -------------------------------------------------------------------------------------- |
-| Secret   | `SUPABASE_ACCESS_TOKEN` | [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) |
-| Secret   | `SUPABASE_DB_PASSWORD`  | Supabase project → Settings → Database                                                 |
-| Secret   | `VERCEL_TOKEN`          | [vercel.com/account/tokens](https://vercel.com/account/tokens)                         |
-| Secret   | `CRON_SECRET`           | Same value as the `CRON_SECRET` Vercel production env var (used by `smoke` job)        |
-| Variable | `SUPABASE_PROJECT_REF`  | `<ref>` portion of your Supabase project URL                                           |
-| Variable | `VERCEL_ORG_ID`         | `team_97PZEmFN50tinLPzmLF0ql0O` (from `.vercel/project.json`)                          |
-| Variable | `VERCEL_PROJECT_ID`     | `prj_wl2OutUDRlAtw9N222fGzfg10uJQ` (from `.vercel/project.json`)                       |
-
-If tokens are not set before the first merge, the workflow fails loudly — no deploy happens.
-
-**Token rotation:** every 90 days. Regenerate via the respective dashboards, update the GitHub secret.
+**One-time GitHub setup**: create `production` environment with a required reviewer. Secrets needed: `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `VERCEL_TOKEN`, `CRON_SECRET`. Variables: `SUPABASE_PROJECT_REF`, `VERCEL_ORG_ID` (from `.vercel/project.json`), `VERCEL_PROJECT_ID` (ditto). Workflow fails loudly when any are missing. **Token rotation**: 90 days.
 
 **Migration CI gate** (still active): `.github/workflows/migration-smoke.yml` runs `supabase start && supabase db reset --local` on every PR and `main` push that touches migration files **or `src/lib/types/database.ts`**. This is the PR-time validator; `production-deploy.yml` is the production pusher. Both must stay in sync on Supabase CLI version (currently `2.95.4`). The previous post-`db push` drift-check job was removed because the production gen API drifts independently of project state on Supabase platform metadata changes — see Database Schema section.
 
 ## Self-hosting
 
-Production runs on Vercel via `@sveltejs/adapter-vercel`. To self-host on Node.js (Docker, fly.io, bare metal, etc.):
-
-1. Replace the adapter dep:
-   ```bash
-   npm uninstall @sveltejs/adapter-vercel
-   npm install -D @sveltejs/adapter-node
-   ```
-2. In `svelte.config.js`, change the import line from `@sveltejs/adapter-vercel` to `@sveltejs/adapter-node`.
-3. Build + run:
-   ```bash
-   npm run build
-   node build/
-   ```
-4. Provision a Realtime signing key in your own Supabase project:
-   ```bash
-   supabase gen signing-key --algorithm ES256
-   ```
-   In your project's Dashboard → Project Settings → JWT signing keys → "new standby key", paste the JWK. Set `LIBRITO_JWT_PRIVATE_KEY_JWK` in your env to the same JWK JSON.
-
-Env vars required regardless of host: see [Environment Variables](#environment-variables). Supabase, Upstash Redis, and the JWT signing key are platform-agnostic; only the SvelteKit adapter is Vercel-specific.
-
-Self-hosters do **not** need `.github/workflows/production-deploy.yml` — it is Vercel-specific. Run `supabase db push` manually against your own Supabase project after each schema-touching deploy.
+Vercel adapter swap to `@sveltejs/adapter-node` is the only Vercel-specific bit. Full procedure (adapter swap, build/run, own-Supabase JWT signing key) in [`docs/dev/self-hosting.md`](docs/dev/self-hosting.md). Self-hosters do not need `.github/workflows/production-deploy.yml` and run `supabase db push` manually.
 
 ## Issue tracking
 
-All work — bugs, features, chores, docs — is tracked in GitHub Issues under the `librito-io` org's "Librito" Project (`https://github.com/orgs/librito-io/projects/1`). The Project spans both `librito-io/web` and `librito-io/reader`. New issues from either repo auto-add to the Backlog column.
+All work tracked in GitHub Issues under `librito-io` org's "Librito" Project (`https://github.com/orgs/librito-io/projects/1`). Spans both `librito-io/web` and `librito-io/reader`.
 
-### When to file
+**Before filing any issue, read [`docs/dev/issue-tracking.md`](docs/dev/issue-tracking.md)** for full protocol (filing CLI two-step, label scheme, triage flow, audit-doc hybrid, model selection). Core invariants:
 
-- Incidental finds during a primary task — file immediately. Do not stash in markdown trackers.
-- Bug encountered, not fixing now — file.
-- Feature idea / tech-debt spotted — file.
-- Already covered by an open issue — comment, don't dupe.
-- Question with no clear answer — GitHub Discussions, not Issues.
-
-### How to file
-
-CLI (Claude default):
-
-```bash
-# Step 1: create issue (gh ≤ 2.92 has no --type flag)
-ISSUE_URL=$(gh issue create --repo librito-io/web \
-  --title "<imperative summary>" \
-  --label "area:<x>" \
-  --body "...")
-
-# Step 2: set Issue Type via REST API
-NUM=${ISSUE_URL##*/}
-gh api repos/librito-io/web/issues/$NUM -F type=Chore --silent
-```
-
-`--type` was not yet released in `gh` CLI as of v2.92.0 (2026-04-28); upstream work is tracked in [cli/cli#13057](https://github.com/cli/cli/pull/13057). Setting Issue Type post-create via `gh api ... -F type=<Bug|Feature|Chore|Docs>` is the only working path. Drop the post-create call once `gh issue create --type` lands and `gh ≥ <that-version>` is the local minimum.
-
-Web UI: pick a template (Web bug / Feature request / Chore). Blank issues are disabled.
-
-### Title format
-
-Imperative summary. No prefix.
-
-Type is carried in the GitHub-native **Issue Type** field (`Bug`/`Feature`/`Chore`/`Docs`); area is carried in `area:*` labels. Embedding either in the title would duplicate queryable metadata in unqueryable form.
-
-Examples:
-
-- `NYT warmup leaks API key in logs` (Type: Bug, label: `area:catalog`)
-- `Add highlight export to markdown` (Type: Feature, label: `area:feed`)
-- `Add database.ts to .prettierignore` (Type: Chore, label: `area:ci`)
-
-Conventional Commits prefixes (`feat`/`fix`/`chore`/`docs`/`test`/`perf`/`refactor`) remain canonical for **commits and PR titles** — see "PR & Commit Convention" below. They are intentionally not used on issue titles, matching established practice in major OSS repos (issue = noun/classification via label/Type; commit = verb/action via prefix).
-
-### Body sections (required for CLI-filed issues)
-
-Use these exact `##` headings, in this order:
-
-```markdown
-## Problem
-
-## Solution
-
-## Discovery
-
-## Acceptance
-```
-
-Content per section:
-
-1. **Problem** — what's wrong / what's needed
-2. **Solution** — concrete approach (mark optional / `_unknown_` for bugs without a known fix)
-3. **Discovery** — which task/PR surfaced this (link the PR)
-4. **Acceptance** — what does "done" look like
-
-Half-formed issues become ghosts. No exceptions.
-
-State (`blocked`, etc.) goes in **labels**, not body sections — do not add a 5th section for status flags.
-
-**Templates intentionally diverge** — bug/feature/chore form templates serve external contributors and have richer per-type fields (Steps to reproduce, Browser/OS, Why, Scope, etc.). The 4-section canonical above is for CLI-filed issues by maintainers / Claude — internal scaffold for quick filing with full context.
-
-### Issue type (native, org-level)
-
-Set the **Issue Type** on every issue — `Bug`, `Feature`, `Chore`, or `Docs`. Issue Types are GitHub-native, org-level (cross-repo), filterable via `type:Bug` syntax. Templates set the type automatically; CLI flow uses the two-step create-then-`gh api -F type=...` pattern (see "How to file" above) until `gh issue create --type` ships upstream.
-
-Type labels (`bug`, `feat`, `chore`, `docs`) are superseded by Issue Types. They do not exist in this repo. Do not create them.
-
-### Labels (this repo)
-
-**Area** (pick one or more): `area:sync` `area:auth` `area:catalog` `area:transfer` `area:realtime` `area:feed` `area:ui` `area:i18n` `area:docs` `area:db` `area:ci` `area:infra`
-
-**Status** (auto-applied / cross-cutting): `needs-triage`, `blocked`, `deferred`
-
-- `needs-triage` — auto-applied by `.github/workflows/triage.yml` when type or area missing. Removed manually after triage.
-- `blocked` — wants to proceed, can't. Waiting on an external dependency (upstream PR, hardware change, design decision someone else owns). Comment on the issue naming the blocker. Removed when the blocker resolves.
-- `deferred` — could proceed, choosing not to right now. No external dependency. **Issue body must document the trigger that should revive it** (e.g. "re-open when first outside contributor PR lands" or "re-evaluate at 100 active users"). Without a trigger, prefer closing — open-deferred-with-no-trigger is just clutter.
-
-**Cross-repo alignment**: `area:sync`, `area:realtime`, `area:transfer` exist in both web and reader with parallel scope — apply the same label in both repos for cross-stack work. Pairing splits: `area:auth` (web bundles device auth + browser sessions + pairing) / `area:pairing` (reader).
-
-### Triage
-
-New issues are added to Backlog and auto-labeled `needs-triage` **only if** the workflow can't see both an Issue Type and at least one `area:*` label on the opened issue (`.github/workflows/triage.yml`). CLI-filed issues that follow "How to file" already set both, so they bypass `needs-triage` and land in Backlog clean. Web-template / form-filed issues, or CLI issues missing either dimension, get stamped.
-
-Implication: absence of `needs-triage` means the issue was filed with type + area already set — it does not mean a human triaged it. Workstream assignment and "does this fit a phase?" judgement still happen at session start or when Backlog accumulates. ~30 seconds per issue when triage is needed: confirm Issue Type, set area label(s), set Workstream if it fits a phase, remove `needs-triage`.
-
-### Working an issue
-
-Branch references the issue (`feat/highlights-export-md` for #42). PR body includes `Closes #42`. Project workflows handle Status transitions automatically (PR opened → In Progress, merged → Done).
-
-### Closing without merging
-
-Always close with a comment explaining why. No `wontfix` / `duplicate` / `invalid` labels — close-comment is the durable archeology.
-
-### Cross-repo issues
-
-Two issues, one per repo, same Workstream value, cross-link in bodies. Don't combine.
-
-### Audit doc hybrid
-
-Audit docs (`docs/audits-wip/` → `docs/audits/`) keep their place for structured campaigns but their role narrows: planner, not parallel backlog.
-
-- Audit doc enumerates findings + decisions (fix / skip / defer)
-- Each "fix" finding → file a GitHub issue, link from doc by issue number
-- Skip findings stay in doc only — no issue, skip rationale = record
-- Optional: set the same Workstream value on every issue spawned from one audit, for campaign-level Project view
-
-### Naming conventions for workstreams / spec files / audit docs
-
-Descriptive titles, 2–5 words. **No opaque codes** (`WS-*`, `Phase N`, `M1`, `Q3-2026`). Title Case for display, kebab-case for filenames. If scope can't be named in 5 words, decompose. Done historical phases (`Phase 1` … `Phase 6`) keep numbered names for accuracy — rule applies forward only.
-
-`Workstream` is the custom Project field used for cross-repo phase grouping; GitHub's built-in `Milestone` field is **not** used.
-
-### Markdown follow-up trackers (deprecated)
-
-Old `docs/` root trackers (`book-catalog-follow-ups.md`, `ws-rt-follow-ups.md`, `post-launch-followups.md`) and per-task follow-up docs are deprecated. Surviving items migrate to issues. **Do not create new follow-up `.md` docs.**
-
-### Model selection (Claude-driven filing)
-
-| Operation                                | Model           |
-| ---------------------------------------- | --------------- |
-| Incidental find mid-session (1–2 issues) | Opus inline     |
-| Bulk filing from a precise brief         | Haiku subagent  |
-| Mixed decision + execution batches       | Sonnet subagent |
-| Triage migration of legacy md trackers   | **Opus**        |
-| Audit doc → issues batch                 | Sonnet subagent |
-| Crowdin / dependency-PR auto-labeling    | Haiku subagent  |
-
-Default Opus inline; escalate down only when the operation matches.
+- **File immediately** for incidental finds during a primary task. Do not stash in markdown trackers. Do not create new follow-up `.md` docs.
+- **Title**: imperative summary, no prefix. Type via Issue Type field (`Bug`/`Feature`/`Chore`/`Docs`), area via `area:*` label.
+- **CLI flow** (gh ≤ 2.92 has no `--type` flag):
+  ```bash
+  ISSUE_URL=$(gh issue create --repo librito-io/web --title "..." --label "area:<x>" --body "...")
+  gh api repos/librito-io/web/issues/${ISSUE_URL##*/} -F type=Chore --silent
+  ```
+- **Body**: four `##` sections in this order — `## Problem`, `## Solution` (mark `_unknown_` for bugs without known fix), `## Discovery` (link PR), `## Acceptance`.
+- **Areas**: `area:sync` `area:auth` `area:catalog` `area:transfer` `area:realtime` `area:feed` `area:ui` `area:i18n` `area:docs` `area:db` `area:ci` `area:infra`.
+- **Status labels**: `needs-triage` (auto, removed manually), `blocked` (external dep + comment naming blocker), `deferred` (must document revival trigger in body or close instead).
+- **Naming**: descriptive 2–5 words. No opaque codes (`WS-*`, `Phase N`, `M1`). Done historical `Phase 1`…`Phase 6` keep numbered names; rule applies forward only.
+- **Cross-repo**: two issues, one per repo, same Workstream value, cross-link in bodies. Don't combine.
+- **Default model**: Opus inline for incidental finds; escalate to subagent (Haiku/Sonnet) only for bulk filing per the table in the extracted doc.
 
 ## PR & Commit Convention
 
-Squash-merge is the default. Repo is configured with `squash_merge_commit_message: COMMIT_MESSAGES` and `squash_merge_commit_title: COMMIT_OR_PR_TITLE` — the squash commit body is auto-generated by concatenating the branch's commit messages, so commit messages **are** the durable archeology in `git log`. PR titles can become squash subjects when commit-message quality on a branch is uneven, so PR title shape is load-bearing too.
+Squash-merge default. Squash body concatenates branch commits (`squash_merge_commit_message: COMMIT_MESSAGES`), so **commit messages are the durable archeology**, not the PR body. PR title can become squash subject when commit quality is uneven.
 
-**PR title lint** (`.github/workflows/lint-pr-title.yml`): `amannn/action-semantic-pull-request` validates every PR title against:
+**Read [`docs/dev/commits.md`](docs/dev/commits.md)** for length/shape rules, what-to-omit / what-to-keep tables, and the rationale-placement heuristic (when a "why" belongs in a code comment vs. commit message). Core invariants:
 
-- **Type**: one of `feat` `fix` `bug` `chore` `docs` `test` `perf` `refactor`
-- **Scope**: optional, free-form (no allow-list)
-- **Subject**: must start lowercase, must not end with a period
-
-Failures post a sticky comment with the diagnostic. The check is not yet required-for-merge — deferred until false-positive rate is observed across a few real PRs.
-
-This implies a clean separation:
-
-| Artifact                                         | Audience                              | Lifetime  | Contents                                                                       |
-| ------------------------------------------------ | ------------------------------------- | --------- | ------------------------------------------------------------------------------ |
-| **Commit message**                               | Future `git log` / `git blame` reader | Permanent | What changed, why, non-obvious decisions, refs to spec sections                |
-| **PR body** (`.github/pull_request_template.md`) | Reviewer + ops while PR is open       | Ephemeral | 1–3 line summary, test plan checkboxes, deploy/migration notes, reviewer hints |
-
-**Rules of thumb**:
-
-- Write commit messages as if no PR existed. Conventional Commits (`feat(scope):`, `fix(scope):`, `chore(scope):`, `test(scope):`) — see `git log` for examples.
-- Do not duplicate archeology between PR body and commit messages. If something belongs in `git log`, put it in a commit message; the PR body links to "see commit messages" or summarizes in 1 line.
-- Do not put test-plan checkboxes in commit messages — they're complete by merge time and pollute history.
-- For multi-commit branches, prefer multiple small commits with focused messages over one giant commit. The squash concatenation handles the rest.
-- When commit-message quality on a branch is uneven (e.g. fixup commits), edit the squash body manually at merge time:
-  ```bash
-  gh pr merge <N> --squash \
-    --subject "<conventional-commits subject>" \
-    --body "$(cat /path/to/tidied-archeology.md)"
-  ```
-- A new `.github/pull_request_template.md` populates the PR body — keep it slim and follow its structure.
-
-### Length & shape
-
-Commit bodies should be **tight**. The standard:
-
-- **Subject**: ≤50 chars, imperative mood, conventional-commits prefix (`feat(scope):`, `fix(scope):`, etc.).
-- **Body**: 3–7 lines default. Explains WHY the change is non-obvious, not WHAT changed (the diff shows that).
-- **Up to ~15 lines** when the change has rejected alternatives worth recording, security implications, subtle constraints, or numbered design decisions that future contributors would otherwise re-litigate.
-- **Beyond 15 lines is a smell.** If the body is longer, the substance probably belongs in a spec, audit doc, plan, or code comment instead — and the commit should reference it (`See docs/audits-wip/<name>.md issue #N` / `Per spec §"Foo"`).
-
-What to omit from commit bodies:
-
-- **Verification sections** (`vitest passes, typecheck clean`) — table stakes, every commit is verified before push.
-- **File lists** — `git show --stat` produces them on demand.
-- **Restating linked archaeology** — if the audit/spec/plan already documents the rationale, link to it by issue number rather than copy-pasting.
-- **Co-Authored-By per-commit** when multiple commits in a branch share the same author — collapse to a single trailer at the end of the squash body when tidying for merge.
-
-What to keep, even if longer than 7 lines:
-
-- **Rejected alternatives** ("considered X, ruled out because Y").
-- **Cross-cutting policy decisions** that a single-file diff doesn't communicate (e.g., layered rate-limit policy, fail-OPEN vs fail-CLOSED choice).
-- **Security implications** — explicit threat-model framing future contributors must respect.
-- **Refs to commits being amended or partially reverted** — `Preserves the amend at <sha>` / `Supersedes <sha> approach`.
-
-When tidying squash bodies (per `gh pr merge --squash --body ...`), apply the same rules — strip per-commit verification sections, file lists, and redundant audit-doc restatements; preserve the load-bearing rationale.
-
-The bias is toward **"future-self skims and finds the gem fast"**, not toward exhaustive documentation. Spec docs, audit trackers, and CLAUDE.md itself carry the long-form story.
-
-### Where design rationale lives
-
-When a commit body is long because it carries design rationale, that rationale probably belongs in **code comments**, not the commit. Two different artifacts for two different audiences:
-
-- **Commit message** → answers "why is this change happening?" Frozen at write time. Read mostly at `git blame` / `git log` archeology time.
-- **Code comment** → answers "why does this code look this way?" Lives next to the code. Read every time someone modifies the affected lines.
-
-Heuristic for picking:
-
-| Rationale type                                                            | Home                                                                             |
-| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Why this algorithm or data structure                                      | Code comment at the implementation                                               |
-| Why this change is happening now                                          | Commit message                                                                   |
-| Rejected alternatives                                                     | Spec / audit doc; one-line summary in commit                                     |
-| Concurrency model, lock ordering, mutex semantics                         | Code comment AT the lock acquire/release sites                                   |
-| Subtle invariants ("array must be sorted before this call")               | Code comment at the call site                                                    |
-| Security implications                                                     | Both — code comment to stop mistakes, commit to record the threat-model decision |
-| Workarounds for external bugs                                             | Code comment WITH the condition for removal (e.g. "remove once Postgres ≥ 17.2") |
-| Cross-cutting policy (e.g. fail-OPEN vs fail-CLOSED, rate-limit layering) | Code comment at the module top of the relevant primitive; reference from commits |
-
-**Comment maintenance discipline:**
-
-- Comments answer WHY, never WHAT. WHAT is the code's job.
-- Place comments at the point of decision (call site, lock site, branch site), not buried at the top of a 500-line file.
-- If a comment becomes wrong, delete it. Wrong comments are worse than missing ones.
-- Refactors must update the comments they pass through, or remove them.
-
-If you find yourself writing the same rationale in both the commit and a code comment, drop it from the commit. The commit can say "see JSDoc on `createUpstashMutex`" or similar.
-
-## Project Structure
-
-```
-src/
-  lib/
-    server/
-      auth.ts           # Device token authentication (SHA-256 hash lookup)
-      errors.ts          # jsonError() / jsonSuccess() response helpers
-      pairing.ts         # Pairing business logic (request, poll, claim)
-      ratelimit.ts       # Upstash Redis rate limiter instances
-      supabase.ts        # Admin client factory (service_role key)
-      sync.ts            # Sync types, validation, and merge logic
-      tokens.ts          # Token generation (pairing codes, device tokens, SHA-256 hash)
-  routes/
-    api/
-      pair/
-        request/         # POST: device requests a pairing code
-        status/[pairingId]/ # GET: device polls for claim result
-        claim/           # POST: authenticated user claims a code
-      sync/              # POST: device syncs highlights
-    app/                 # Auth-guarded app pages
-      devices/           # Device management (list, rename, revoke)
-    auth/
-      login/             # Email/password login
-      signup/            # Email/password signup
-      callback/          # OAuth code exchange
-tests/
-  helpers.ts             # Mock Supabase client + mock Redis factories
-  lib/                   # Unit tests organized by module
-supabase/
-  migrations/            # Database schema (9 migration files)
-  config.toml            # Supabase project config
-  seed.sql               # Development seed data
-```
+- **Conventional Commits** for commit AND PR titles: `feat(scope):` `fix(scope):` `bug(scope):` `chore(scope):` `docs(scope):` `test(scope):` `perf(scope):` `refactor(scope):`. PR title lint (`amannn/action-semantic-pull-request`) enforces lowercase subject, no trailing period.
+- **Subject ≤50 chars**, imperative mood. **Body 3–7 lines default**, up to ~15 only for rejected alternatives / security implications / cross-cutting policy. Beyond 15 = smell; move to spec / audit doc / code comment and reference.
+- **Omit from commit bodies**: verification sections (`vitest passes`), file lists (`git show --stat` exists), restated audit-doc content (link instead), per-commit Co-Authored-By when squashing (collapse to single trailer).
+- **PR body** = ephemeral reviewer/ops doc (1–3 line summary, test plan, deploy notes). Do not duplicate archeology between PR body and commits.
+- **Manual squash body** when commit quality is uneven: `gh pr merge <N> --squash --subject "..." --body "$(cat /tmp/tidy.md)"`.
 
 ## Code Patterns
 
@@ -558,88 +209,19 @@ Supabase bootstraps every Postgres project with `ALTER DEFAULT PRIVILEGES` that 
 
 ## Book catalog (covers + metadata)
 
-Shared per-ISBN library backing the highlight viewer. Schema lives in
-`book_catalog` (renamed from `cover_cache` in `20260502000001`). Logic is
-split into:
+Shared per-ISBN `book_catalog` table backing the highlight viewer. Code in `src/lib/server/catalog/` (orchestrators in `fetcher.ts`, HTTP clients per-source, mutex in `mutex.ts`) + `src/lib/server/cover-storage.ts` (Cloudflare Images on librito.io, Supabase Storage `cover-cache` for self-hosters). **Read [`src/lib/server/catalog/README.md`](src/lib/server/catalog/README.md)** for population paths (lazy / weekly warmup cron / operator bulk-seed), RPCs, and audit-column purpose. Load-bearing invariants below.
 
-- `src/lib/server/catalog/` — pure helpers (`isbn`, `title-author`,
-  `cleanup`, `extract`), HTTP clients (`openlibrary`, `googlebooks`), and
-  the `resolveIsbn` / `resolveTitleAuthor` orchestrators (`fetcher.ts`).
-- `src/lib/server/cover-storage.ts` — backend abstraction. `librito.io`
-  uses Cloudflare Images (`COVER_STORAGE_BACKEND=cloudflare-images`).
-  Self-hosters use Supabase Storage's `cover-cache` bucket.
-- `src/lib/server/wait-until.ts` — `runInBackground(event, work)` shim
-  over `event.platform.context.waitUntil` with a local-dev fallback.
+**Rate-limit layering (3 layers, do not collapse):**
 
-Population paths:
+1. **Per-user, fail-CLOSED** (`catalogUserLimiter`, 10 req/min) at API entry — caps a single user's fan-out.
+2. **Per-ISBN / per-(title,author) mutex, fail-OPEN** (`catalog/mutex.ts`, `SETNX catalog:lock:isbn:${isbn}` / `catalog:lock:ta:${key}`, 30s TTL) — dedups concurrent resolves of same key. Loser short-circuits with `rateLimited: true`, consumes neither per-source budget nor `attempt_count`. Distinct `isbn:` vs `ta:` namespaces are intentional. Acquire failure fails OPEN to match per-source posture; `persistCover` sha dedup is the upload backstop.
+3. **Per-deployment per-source, fail-OPEN** — `catalogOpenLibraryLimiter` (80/5min), `catalogGoogleBooksLimiter` (800/day). 10/20% margin under each provider's cap.
 
-1. **Lazy on viewer first-render** — `runInBackground(event, resolveIsbn)`
-   from the book detail loader (`src/routes/app/book/[bookHash]/+page.server.ts`)
-   and `GET /api/book-catalog/[isbn]`. Cold miss returns
-   `/cover-placeholder.svg`; cover materialises on next reload.
-2. **Weekly warmup cron** — `POST /api/cron/catalog-warmup`, scheduled
-   `0 8 * * 1` in `vercel.ts`. Authenticated via `CRON_SECRET`. Gated on
-   `CATALOG_WARMUP_ENABLED=true` (default `false` for self-hosters).
-   Default candidate source: NYT bestseller lists (requires
-   `NYT_BOOKS_API_KEY`).
-3. **Bulk seed (operator-triggered)** — same cron endpoint accepts an
-   optional `{ "isbns": [...] }` JSON body to override the NYT default.
-   Operator workflow in `scripts/data/README.md` (curl with `CRON_SECRET`).
-   `MAX_PER_RUN=100` per invocation; rate-limit pacing means large lists
-   need chunked invocations.
+**Cron**: `POST /api/cron/catalog-warmup`, `0 8 * * 1` in `vercel.ts`. Gated on `CATALOG_WARMUP_ENABLED=true`. Default source NYT bestsellers (requires `NYT_BOOKS_API_KEY`); accepts `{ "isbns": [...] }` body override (operator runbook in `scripts/data/README.md`).
 
-RPCs `upsert_book_catalog_by_isbn` / `upsert_book_catalog_by_title_author`
-wrap the partial-unique-index upsert (supabase-js `.upsert()` doesn't
-thread `WHERE` predicates through). Granted to `service_role` only;
-explicitly revoked from `anon` and `authenticated`.
+**RPCs** `upsert_book_catalog_by_isbn` / `upsert_book_catalog_by_title_author` are granted to `service_role` only; explicitly revoked from `anon`/`authenticated`. (Partial-unique-index upsert; supabase-js `.upsert()` doesn't thread `WHERE` predicates.)
 
-Rate limits are layered three-deep so a misbehaving user, a healthy-but-bursty
-fleet, and an Upstash blip each have a distinct mitigation:
-
-1. **Per-user, fail-CLOSED** — `catalogUserLimiter` (10 req / min,
-   `src/lib/server/ratelimit.ts`) at the API handler / page loader entry
-   point. Caps a single user's parallel cover-resolve fan-out (e.g. 500
-   newly-synced ISBNs opened in tabs) so they cannot monopolize the
-   per-deployment budget.
-2. **Per-ISBN / per-(title,author) mutex, fail-OPEN** —
-   `src/lib/server/catalog/mutex.ts`, threaded through `ResolveDeps`.
-   `SETNX catalog:lock:isbn:${isbn}` (or `catalog:lock:ta:${key}`) with a
-   30 s TTL. Two simultaneous resolves of the same uncached ISBN dedup —
-   loser short-circuits with `rateLimited: true` and consumes neither
-   per-source budget nor an `attempt_count` increment. Distinct
-   namespaces (`isbn:` vs `ta:`) keep ISBN-keyed and title/author-keyed
-   locks for the same physical book independent. Acquire failures
-   fail-OPEN to match the per-source posture (an Upstash blip must not
-   collapse all callers to placeholder); the byte-level sha dedup in
-   `persistCover` is the remaining backstop against duplicated uploads.
-3. **Per-deployment per-source, fail-OPEN** — `catalogOpenLibraryLimiter`
-   (80 req / 5 min) and `catalogGoogleBooksLimiter` (800 req / day),
-   both in `src/lib/server/ratelimit.ts`. Protects upstreams from us
-   when Upstash is unhealthy (10 % / 20 % safety margin under each
-   provider's published cap).
-
-Self-hosters: leave `COVER_STORAGE_BACKEND` unset (defaults to `supabase`).
-The cron is opt-in (`CATALOG_WARMUP_ENABLED=false`); without it, the
-catalog populates entirely lazily as users open books.
-
-### Audit columns (plan 2026-05-18)
-
-`book_catalog` carries five audit columns populated on every resolve to
-let production SQL validate the GoogleBooks `pdf.isAvailable` filter
-(Task 8, issue #209 revised mechanism) without log scraping:
-
-- `gb_pdf_available`, `gb_viewability`, `gb_image_link_tiers` — captured
-  whenever a GoogleBooks volume is fetched during the resolve, regardless
-  of which source ends up winning. NULL when GB was not fetched.
-- `cover_aspect`, `cover_bytes_per_pixel` — computed at acceptance.
-  NULL for negative-cache rows.
-
-Query patterns + post-deploy operator runbook live in
-`scripts/data/README.md` ("Catalog cover audit").
-
-Sentry warning `catalog_cover_suspect_low_bpp` fires when an accepted
-GB cover has `cover_bytes_per_pixel < 0.05` — the false-negative signal
-for the pdf.isAvailable filter. Outlier-only; expected single-digits/day.
+**Audit columns** (5 fields on `book_catalog`, populated every resolve): `gb_pdf_available`, `gb_viewability`, `gb_image_link_tiers` (GB-fetched only), `cover_aspect`, `cover_bytes_per_pixel` (acceptance-computed). Query patterns in `scripts/data/README.md`. Sentry warning `catalog_cover_suspect_low_bpp` at `bytes_per_pixel < 0.05` — outlier signal, expected single-digits/day.
 
 ## Cron handlers
 
@@ -698,20 +280,4 @@ Vercel env vars have a per-var `type`: `encrypted` (default, decryptable via CLI
 
 ## Implementation Phases
 
-The cloud sync system is built incrementally. Each phase has a spec and plan in the reader repo at `docs/superpowers/specs/` and `docs/superpowers/plans/`.
-
-Forward-looking phases use descriptive Workstream names per the Issue tracking naming rule. Done phases (`Phase 1` … `Phase 6`) keep numbered names for historical accuracy.
-
-| Workstream                                         | Status  | Scope                                                                            |
-| -------------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
-| Phase 1                                            | Done    | Supabase setup (schema, auth, storage)                                           |
-| Phase 2                                            | Done    | Device pairing (API + web UI)                                                    |
-| Phase 3                                            | Done    | Sync API (auth middleware, merge logic)                                          |
-| Phase 4                                            | Done    | Web app highlight viewer + highlight feed                                        |
-| Phase 5                                            | Done    | Book transfer endpoints (client-side E2EE removed 2026-04-22, Identity A)        |
-| Phase 6                                            | Done    | ESP32 firmware sync client                                                       |
-| Transfer schema cleanup                            | Done    | Transfer schema consolidation + deletion hygiene + /privacy (2026-04-23)         |
-| Signed download URLs                               | Planned | Embed signed download URL + sha256 in sync response (spec ready)                 |
-| Firmware sync hardening                            | Planned | Firmware Range-resume, keep-alive, retry cadence, StatusBar + FileBrowser polish |
-| Transfer retry UI                                  | Planned | Populate `attempt_count` / `last_error`; retry UI; attempt-cap → `failed`        |
-| Realtime polish / Cover catalog / Highlight export | Planned | Decomposed from former "Phase 7" — three independent workstreams                 |
+Specs + plans live in the reader repo at `docs/superpowers/specs/` and `docs/superpowers/plans/`. Forward-looking work is tracked as Workstream values on issues (see [`docs/dev/issue-tracking.md`](docs/dev/issue-tracking.md)); Phases 1–6 are done.

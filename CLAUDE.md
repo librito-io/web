@@ -526,6 +526,36 @@ Tables (see `supabase/migrations/` for full DDL):
 
 Hand-maintained TS types that mirror DB tables derive from `Database['public']['Tables']['<name>']['Row']` (see `BookCatalogRow` in `src/lib/server/catalog/types.ts`) so a new column without a regenerated type file fails typecheck deterministically rather than drifting silently. When the generated row widens a project-specific literal union to `string | null` (e.g. `cover_storage_backend`), use `Omit<Row, '<field>'> & { <field>: <LiteralUnion> | null }` to preserve the narrow type.
 
+### Function EXECUTE grants (REVOKE pattern)
+
+Supabase bootstraps every Postgres project with `ALTER DEFAULT PRIVILEGES` that auto-grants EXECUTE on every newly-created `public.*` function to `anon`, `authenticated`, and `service_role` — this is how PostgREST exposes `/rest/v1/rpc/<name>`. Two consequences for every new function in `supabase/migrations/`:
+
+1. **`REVOKE EXECUTE ... FROM PUBLIC` is necessary but not sufficient.** It strips the Postgres-level PUBLIC grant; it does NOT touch the per-role anon/authenticated grants Supabase applies via default privileges. Both layers are independent and must be revoked separately when a function has no legitimate caller from that role.
+
+2. **The two-REVOKE template** for any new function in the `public` schema with no legitimate anon/authenticated caller:
+
+   ```sql
+   REVOKE EXECUTE ON FUNCTION public.<name>(<args>) FROM PUBLIC;
+   REVOKE EXECUTE ON FUNCTION public.<name>(<args>) FROM anon, authenticated;
+   GRANT  EXECUTE ON FUNCTION public.<name>(<args>) TO service_role;
+   ```
+
+   Reference template: [`supabase/migrations/20260521000001_pg_cron_failure_summary.sql`](supabase/migrations/20260521000001_pg_cron_failure_summary.sql). Issue #327 collected the gap and the audit migration ([`20260521000002_revoke_anon_authenticated_execute_audit.sql`](supabase/migrations/20260521000002_revoke_anon_authenticated_execute_audit.sql)) backfilled every existing function. PostgreSQL exempts triggers from EXECUTE checks, so trigger-only functions can still revoke from anon/authenticated without breaking the trigger fire — see `update_updated_at` and `devices_prevent_unrevoke` for working examples.
+
+3. **For functions that ARE intentional PostgREST RPCs for authenticated callers** (e.g. `get_highlight_feed`, `get_library_with_highlights`): keep the `GRANT EXECUTE TO authenticated` but still `REVOKE FROM PUBLIC` and `REVOKE FROM anon`. The function's `auth.uid() IS NULL` short-circuit is not load-bearing; PostgREST should deny anon at the boundary, not return empty rows.
+
+4. **Verifying** post-migration:
+
+   ```sql
+   SELECT grantee, routine_name
+     FROM information_schema.role_routine_grants
+    WHERE grantee IN ('anon', 'authenticated')
+      AND routine_schema = 'public'
+    ORDER BY routine_name;
+   ```
+
+   Only intentionally exposed RPCs (e.g. `get_highlight_feed`, `get_library_with_highlights`) should appear, and only with `authenticated`. Integration tests should assert `has_function_privilege('anon', 'public.<name>(<args>)', 'EXECUTE') = false` — never `SET LOCAL ROLE anon; SELECT fn()`, which segfaults the local Postgres 17.6 Docker image (see `tests/integration/pg-cron-health.test.ts` and `tests/integration/public-function-grants.test.ts` for the working pattern).
+
 ## Book catalog (covers + metadata)
 
 Shared per-ISBN library backing the highlight viewer. Schema lives in

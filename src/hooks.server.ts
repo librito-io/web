@@ -10,27 +10,6 @@ import * as Sentry from "@sentry/sveltekit";
 import { runWithContext, logger } from "$lib/server/log";
 import { scrubEvent } from "$lib/sentry-scrub";
 
-// Mirror Vercel-set server env vars into PUBLIC_*-prefixed equivalents at
-// SSR cold-start, BEFORE SvelteKit's $env/dynamic/public proxy first reads
-// process.env per-request. Without this, hooks.client.ts sees
-// publicEnv.PUBLIC_VERCEL_ENV / PUBLIC_VERCEL_GIT_COMMIT_SHA as undefined
-// and the Sentry init falls back to environment="development" with no
-// release tag.
-//
-// The matching vite.config.ts mirror only sets process.env at BUILD time;
-// Vercel's runtime function is a separate Node process where those build-
-// time mutations are gone. Mirroring again here at module init guarantees
-// the values are present when $env/dynamic/public snapshots them.
-if (process.env.VERCEL_ENV && !process.env.PUBLIC_VERCEL_ENV) {
-  process.env.PUBLIC_VERCEL_ENV = process.env.VERCEL_ENV;
-}
-if (
-  process.env.VERCEL_GIT_COMMIT_SHA &&
-  !process.env.PUBLIC_VERCEL_GIT_COMMIT_SHA
-) {
-  process.env.PUBLIC_VERCEL_GIT_COMMIT_SHA = process.env.VERCEL_GIT_COMMIT_SHA;
-}
-
 // Sensitive vars (SENTRY_DSN among them) are redacted by `vercel pull`,
 // so $env/static/private would inline an empty string into the prebuilt
 // bundle. $env/dynamic/private reads at runtime where the value is real.

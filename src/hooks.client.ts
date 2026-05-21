@@ -19,15 +19,34 @@
 //   - Sentry org-level "Prevent Storing of IP Addresses" toggle ON
 //     (one-time manual operator step; documented in runbook).
 import * as Sentry from "@sentry/sveltekit";
-import { env as publicEnv } from "$env/dynamic/public";
+// import.meta.env inlines PUBLIC_* values at vite build time. Vite reads
+// process.env (populated by the vite.config.ts mirror block from
+// VERCEL_ENV / VERCEL_GIT_COMMIT_SHA) and substitutes refs as string
+// constants in the browser bundle. Chosen over $env/static/public because
+// the latter requires SvelteKit's sync-time ambient type generation,
+// which needs the var declared in a .env file at build host — CI without
+// secrets fails the typecheck step. import.meta.env types are open and
+// returns undefined for unset vars, which matches our gated-init shape.
+// $env/dynamic/public was the spec's original choice but values arrived
+// empty in the browser bundle on Vercel (build-time mirror doesn't reach
+// SvelteKit's runtime dynamic-env scan).
 import type { HandleClientError } from "@sveltejs/kit";
 import { scrubEvent } from "$lib/sentry-scrub";
 
-if (publicEnv.PUBLIC_SENTRY_DSN) {
+const PUBLIC_SENTRY_DSN = import.meta.env.PUBLIC_SENTRY_DSN as
+  | string
+  | undefined;
+const PUBLIC_VERCEL_ENV = import.meta.env.PUBLIC_VERCEL_ENV as
+  | string
+  | undefined;
+const PUBLIC_VERCEL_GIT_COMMIT_SHA = import.meta.env
+  .PUBLIC_VERCEL_GIT_COMMIT_SHA as string | undefined;
+
+if (PUBLIC_SENTRY_DSN) {
   Sentry.init({
-    dsn: publicEnv.PUBLIC_SENTRY_DSN,
-    environment: publicEnv.PUBLIC_VERCEL_ENV ?? "development",
-    release: publicEnv.PUBLIC_VERCEL_GIT_COMMIT_SHA,
+    dsn: PUBLIC_SENTRY_DSN,
+    environment: PUBLIC_VERCEL_ENV || "development",
+    release: PUBLIC_VERCEL_GIT_COMMIT_SHA || undefined,
     tracesSampleRate: 0,
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 0,

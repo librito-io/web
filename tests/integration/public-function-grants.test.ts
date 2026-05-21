@@ -67,6 +67,13 @@ const fns: Fn[] = [
     allowRoles: ["authenticated", "service_role"],
     rpcSlug: "get_library_with_highlights",
   },
+  {
+    name: "ensure_realtime",
+    args: "regclass",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: null,
+  },
 ];
 
 describe.skipIf(SKIP)("public function grants (issue #327)", () => {

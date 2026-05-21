@@ -4,6 +4,7 @@ import {
   validateTransferFilename,
   validateTransferSize,
   buildStoragePath,
+  parseInitiateBody,
   MAX_FILE_SIZE,
 } from "../../src/lib/server/transfer";
 
@@ -147,5 +148,132 @@ describe("buildStoragePath", () => {
     const userId = "0e0e0e0e-0000-0000-0000-000000000000";
     const path = buildStoragePath(userId, crypto.randomUUID());
     expect(path.split("/")[0]).toBe(userId);
+  });
+});
+
+describe("parseInitiateBody", () => {
+  const validSha = "a".repeat(64);
+
+  it("returns ok with normalized fields on a valid payload", () => {
+    const result = parseInitiateBody({
+      filename: "book.epub",
+      fileSize: 100,
+      sha256: validSha,
+    });
+    expect(result).toEqual({
+      ok: true,
+      value: { safeFilename: "book.epub", fileSize: 100, sha256: validSha },
+    });
+  });
+
+  it("strips path traversal via sanitizeFilename", () => {
+    const result = parseInitiateBody({
+      filename: "../../etc/book.epub",
+      fileSize: 100,
+      sha256: validSha,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.safeFilename).toBe("book.epub");
+  });
+
+  it("rejects non-object body with 400 invalid_request", () => {
+    expect(parseInitiateBody(null)).toMatchObject({
+      ok: false,
+      status: 400,
+      code: "invalid_request",
+    });
+    expect(parseInitiateBody("foo")).toMatchObject({
+      ok: false,
+      status: 400,
+      code: "invalid_request",
+    });
+  });
+
+  it("rejects missing filename with 400 invalid_request", () => {
+    expect(parseInitiateBody({ fileSize: 10, sha256: validSha })).toMatchObject(
+      {
+        ok: false,
+        status: 400,
+        code: "invalid_request",
+        message: "filename is required",
+      },
+    );
+  });
+
+  it("rejects empty filename with 400 invalid_request", () => {
+    expect(
+      parseInitiateBody({ filename: "", fileSize: 10, sha256: validSha }),
+    ).toMatchObject({ ok: false, code: "invalid_request" });
+  });
+
+  it("rejects non-number fileSize with 400 invalid_request", () => {
+    expect(
+      parseInitiateBody({
+        filename: "a.epub",
+        fileSize: "10",
+        sha256: validSha,
+      }),
+    ).toMatchObject({
+      ok: false,
+      status: 400,
+      code: "invalid_request",
+      message: "fileSize must be a number",
+    });
+  });
+
+  it("rejects non-.epub filename with 400 invalid_filename", () => {
+    expect(
+      parseInitiateBody({
+        filename: "book.pdf",
+        fileSize: 10,
+        sha256: validSha,
+      }),
+    ).toMatchObject({ ok: false, status: 400, code: "invalid_filename" });
+  });
+
+  it("rejects oversize file with 400 file_too_large", () => {
+    expect(
+      parseInitiateBody({
+        filename: "a.epub",
+        fileSize: MAX_FILE_SIZE + 1,
+        sha256: validSha,
+      }),
+    ).toMatchObject({ ok: false, status: 400, code: "file_too_large" });
+  });
+
+  it("rejects zero-size file with 400 file_too_large", () => {
+    expect(
+      parseInitiateBody({
+        filename: "a.epub",
+        fileSize: 0,
+        sha256: validSha,
+      }),
+    ).toMatchObject({ ok: false, status: 400, code: "file_too_large" });
+  });
+
+  it("rejects missing sha256 with 400 invalid_sha256", () => {
+    expect(
+      parseInitiateBody({ filename: "a.epub", fileSize: 10 }),
+    ).toMatchObject({ ok: false, status: 400, code: "invalid_sha256" });
+  });
+
+  it("rejects malformed sha256 with 400 invalid_sha256", () => {
+    expect(
+      parseInitiateBody({
+        filename: "a.epub",
+        fileSize: 10,
+        sha256: "ZZZ",
+      }),
+    ).toMatchObject({ ok: false, status: 400, code: "invalid_sha256" });
+  });
+
+  it("rejects uppercase hex sha256 (lowercase required)", () => {
+    expect(
+      parseInitiateBody({
+        filename: "a.epub",
+        fileSize: 10,
+        sha256: "A".repeat(64),
+      }),
+    ).toMatchObject({ ok: false, status: 400, code: "invalid_sha256" });
   });
 });

@@ -19,34 +19,30 @@
 //   - Sentry org-level "Prevent Storing of IP Addresses" toggle ON
 //     (one-time manual operator step; documented in runbook).
 import * as Sentry from "@sentry/sveltekit";
-// import.meta.env inlines PUBLIC_* values at vite build time. Vite reads
-// process.env (populated by the vite.config.ts mirror block from
-// VERCEL_ENV / VERCEL_GIT_COMMIT_SHA) and substitutes refs as string
-// constants in the browser bundle. Chosen over $env/static/public because
-// the latter requires SvelteKit's sync-time ambient type generation,
-// which needs the var declared in a .env file at build host — CI without
-// secrets fails the typecheck step. import.meta.env types are open and
-// returns undefined for unset vars, which matches our gated-init shape.
-// $env/dynamic/public was the spec's original choice but values arrived
-// empty in the browser bundle on Vercel (build-time mirror doesn't reach
-// SvelteKit's runtime dynamic-env scan).
+// $env/dynamic/public reads PUBLIC_* at SSR time from process.env and
+// publishes the values to the browser via SvelteKit's injected env
+// script. Values must be set in Vercel env (not just at build time) —
+// PUBLIC_SENTRY_DSN and PUBLIC_VERCEL_ENV are set there as Encrypted
+// vars. PUBLIC_VERCEL_GIT_COMMIT_SHA is not currently wired (Vercel
+// changes VERCEL_GIT_COMMIT_SHA per build, no static value to set) —
+// the release tag is omitted; follow-up will pipe it via the layout
+// server load.
+//
+// Earlier attempts that didn't work:
+//   - vite.config.ts mirror of VERCEL_* → PUBLIC_VERCEL_*: build-time
+//     process.env mutation doesn't survive to Vercel function runtime
+//     where SvelteKit's dynamic-public scan runs.
+//   - import.meta.env.PUBLIC_*: Vite's default envPrefix is "VITE_",
+//     so PUBLIC_* refs collapsed to undefined in the browser bundle.
+import { env as publicEnv } from "$env/dynamic/public";
 import type { HandleClientError } from "@sveltejs/kit";
 import { scrubEvent } from "$lib/sentry-scrub";
 
-const PUBLIC_SENTRY_DSN = import.meta.env.PUBLIC_SENTRY_DSN as
-  | string
-  | undefined;
-const PUBLIC_VERCEL_ENV = import.meta.env.PUBLIC_VERCEL_ENV as
-  | string
-  | undefined;
-const PUBLIC_VERCEL_GIT_COMMIT_SHA = import.meta.env
-  .PUBLIC_VERCEL_GIT_COMMIT_SHA as string | undefined;
-
-if (PUBLIC_SENTRY_DSN) {
+if (publicEnv.PUBLIC_SENTRY_DSN) {
   Sentry.init({
-    dsn: PUBLIC_SENTRY_DSN,
-    environment: PUBLIC_VERCEL_ENV || "development",
-    release: PUBLIC_VERCEL_GIT_COMMIT_SHA || undefined,
+    dsn: publicEnv.PUBLIC_SENTRY_DSN,
+    environment: publicEnv.PUBLIC_VERCEL_ENV || "development",
+    release: publicEnv.PUBLIC_VERCEL_GIT_COMMIT_SHA || undefined,
     tracesSampleRate: 0,
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 0,

@@ -8,7 +8,7 @@ import {
 import { env as privateEnv } from "$env/dynamic/private";
 import * as Sentry from "@sentry/sveltekit";
 import { runWithContext, logger } from "$lib/server/log";
-import { scrubEvent } from "$lib/server/sentry-scrub";
+import { scrubEvent } from "$lib/sentry-scrub";
 
 // Sensitive vars (SENTRY_DSN among them) are redacted by `vercel pull`,
 // so $env/static/private would inline an empty string into the prebuilt

@@ -43,8 +43,14 @@ describe.skipIf(SKIP)("supabase_realtime publication membership", () => {
 
   it("sets REPLICA IDENTITY FULL on notes and book_transfers", async () => {
     // pg_class.relreplident: 'd'=default, 'n'=nothing, 'f'=full, 'i'=index.
-    // FULL is required so Realtime can emit the pre-image of UPDATEs
-    // (needed to distinguish soft-delete from edit).
+    // FULL is required for three reasons (see #106 close + migration
+    // 20260521000003 COMMENT ON TABLE book_transfers):
+    //   1. RLS eval on DELETE needs user_id in the WAL old-image.
+    //   2. Firmware subscriber filter on device_id (nullable column) needs
+    //      device_id present in UPDATE payloads — status flips don't mutate
+    //      device_id, so without FULL the filter has nothing to evaluate.
+    //   3. USING INDEX requires UNIQUE + NOT NULL columns — device_id is
+    //      nullable, so no narrower replica identity is viable.
     const rows = await sql<{ relname: string; relreplident: string }[]>`
       SELECT relname, relreplident::text AS relreplident
         FROM pg_class

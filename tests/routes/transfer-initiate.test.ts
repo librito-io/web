@@ -50,7 +50,9 @@ function buildEvent(
 
 beforeEach(() => {
   supabase._results.clear();
+  supabase._resultsQueue.clear();
   supabase._storage.clear();
+  supabase._insertCalls.length = 0;
 });
 
 describe("POST /api/transfer/initiate — Deploy 2 (sha256 required)", () => {
@@ -108,9 +110,46 @@ describe("POST /api/transfer/initiate — Deploy 2 (sha256 required)", () => {
     expect(res.status).toBe(201);
   });
 
-  it("returns 409 duplicate_transfer when a pending row with the same sha already exists (sha path)", async () => {
+  it("idempotent re-init: pending+unverified row returns existing transferId + fresh uploadUrl (no insert)", async () => {
     supabase._results.set("book_transfers.select", {
-      data: [{ id: "other" }],
+      data: [
+        {
+          id: "existing-tx-id",
+          storage_path: "u-1/existing-tx-id.epub",
+          sha256_verified: null,
+        },
+      ],
+      error: null,
+    });
+    supabase._storage.set("createSignedUploadUrl", {
+      data: { signedUrl: "https://storage/reissued" },
+      error: null,
+    });
+
+    const sha = "b".repeat(64);
+    const res = await POST(
+      buildEvent({ filename: "book.epub", fileSize: 100, sha256: sha }),
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.transferId).toBe("existing-tx-id");
+    expect(body.uploadUrl).toBe("https://storage/reissued");
+    // Idempotency invariant: no new row was inserted.
+    expect(
+      supabase._insertCalls.filter((c) => c.table === "book_transfers"),
+    ).toHaveLength(0);
+  });
+
+  it("returns 409 duplicate_transfer when the existing pending row is already sha256_verified", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: [
+        {
+          id: "verified-tx-id",
+          storage_path: "u-1/verified-tx-id.epub",
+          sha256_verified: "b".repeat(64),
+        },
+      ],
       error: null,
     });
 
@@ -124,11 +163,29 @@ describe("POST /api/transfer/initiate — Deploy 2 (sha256 required)", () => {
     expect(body.error).toBe("duplicate_transfer");
   });
 
-  it("maps Postgres 23505 on insert to 409 duplicate_transfer (sha path)", async () => {
-    supabase._results.set("book_transfers.select", { data: [], error: null });
+  it("23505 race: re-queries existing row and returns same transferId + fresh uploadUrl", async () => {
+    // Two sequential SELECTs on book_transfers: dedup lookup (empty) then
+    // post-23505 re-query (raced row).
+    supabase._resultsQueue.set("book_transfers.select", [
+      { data: [], error: null },
+      {
+        data: [
+          {
+            id: "raced-tx-id",
+            storage_path: "u-1/raced-tx-id.epub",
+            sha256_verified: null,
+          },
+        ],
+        error: null,
+      },
+    ]);
     supabase._results.set("book_transfers.insert", {
       data: null,
       error: { code: "23505", message: "duplicate key" },
+    });
+    supabase._storage.set("createSignedUploadUrl", {
+      data: { signedUrl: "https://storage/raced" },
+      error: null,
     });
 
     const sha = "c".repeat(64);
@@ -137,8 +194,43 @@ describe("POST /api/transfer/initiate — Deploy 2 (sha256 required)", () => {
     );
     const body = await res.json();
 
-    expect(res.status).toBe(409);
-    expect(body.error).toBe("duplicate_transfer");
+    expect(res.status).toBe(200);
+    expect(body.transferId).toBe("raced-tx-id");
+    expect(body.uploadUrl).toBe("https://storage/raced");
+  });
+
+  it("same filename, different sha256: not deduped (separate inserts allowed)", async () => {
+    supabase._results.set("book_transfers.select", { data: [], error: null });
+    supabase._results.set("book_transfers.insert", { data: null, error: null });
+    supabase._storage.set("createSignedUploadUrl", {
+      data: { signedUrl: "https://storage/new" },
+      error: null,
+    });
+
+    // First upload of foo.epub with sha A.
+    const resA = await POST(
+      buildEvent({
+        filename: "foo.epub",
+        fileSize: 100,
+        sha256: "a".repeat(64),
+      }),
+    );
+    expect(resA.status).toBe(201);
+
+    // Second upload, same name, different bytes (different sha) — both pass.
+    const resB = await POST(
+      buildEvent({
+        filename: "foo.epub",
+        fileSize: 200,
+        sha256: "b".repeat(64),
+      }),
+    );
+    expect(resB.status).toBe(201);
+
+    // Two new rows inserted (no dedup on filename).
+    expect(
+      supabase._insertCalls.filter((c) => c.table === "book_transfers"),
+    ).toHaveLength(2);
   });
 
   it("rejects missing sha256 with 400 invalid_sha256 (deploy 2)", async () => {

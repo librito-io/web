@@ -117,14 +117,6 @@
       return;
     }
 
-    const isDuplicate = transfers.some(
-      (t) => t.filename === file.name && t.status === "pending",
-    );
-    if (isDuplicate) {
-      updateUpload({ status: "error", error: "This file is already pending" });
-      return;
-    }
-
     try {
       const sha256 = await hashFileSha256(file);
 

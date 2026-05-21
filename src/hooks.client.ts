@@ -38,11 +38,22 @@ import { env as publicEnv } from "$env/dynamic/public";
 import type { HandleClientError } from "@sveltejs/kit";
 import { scrubEvent } from "$lib/sentry-scrub";
 
+// Release SHA injection: the Sentry Vite plugin (sentrySvelteKit in
+// vite.config.ts) bakes `globalThis.SENTRY_RELEASE = { id: <SHA> }` into
+// the browser bundle at build time using Vercel's VERCEL_GIT_COMMIT_SHA.
+// The SDK does NOT auto-read this into the event-level `release` field
+// (it only flows to the Dynamic Sampling Context), so the Tags panel
+// shows no `release` value without this explicit forward. Verified on
+// PR #329 prod event: _dsc.release was set, event.release was null.
+const sentryRelease = (
+  globalThis as unknown as { SENTRY_RELEASE?: { id?: string } }
+).SENTRY_RELEASE?.id;
+
 if (publicEnv.PUBLIC_SENTRY_DSN) {
   Sentry.init({
     dsn: publicEnv.PUBLIC_SENTRY_DSN,
     environment: publicEnv.PUBLIC_VERCEL_ENV || "development",
-    release: publicEnv.PUBLIC_VERCEL_GIT_COMMIT_SHA || undefined,
+    release: sentryRelease,
     tracesSampleRate: 0,
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 0,

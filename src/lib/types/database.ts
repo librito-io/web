@@ -221,7 +221,6 @@ export type Database = {
         Row: {
           author: string | null
           book_hash: string
-          cover_path: string | null
           created_at: string
           id: string
           isbn: string | null
@@ -234,7 +233,6 @@ export type Database = {
         Insert: {
           author?: string | null
           book_hash: string
-          cover_path?: string | null
           created_at?: string
           id?: string
           isbn?: string | null
@@ -247,7 +245,6 @@ export type Database = {
         Update: {
           author?: string | null
           book_hash?: string
-          cover_path?: string | null
           created_at?: string
           id?: string
           isbn?: string | null

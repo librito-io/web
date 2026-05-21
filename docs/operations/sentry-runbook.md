@@ -95,6 +95,59 @@ Vercel only triggers `crons[]` paths on **production** deploys. Preview deploys'
 
 For preview-deploy verification, manually curl each cron path. The deploy-time `smoke` job already exercises `?probe=1` reachability against the production deploy URL; for a real fire test on preview, omit `?probe=1` and check the Sentry dashboard in the next few minutes for the expected check-in (transfer-sweep) or alert (pg-cron-health when a failure row has been seeded — see the preview smoke procedure in `docs/superpowers/plans/2026-05-21-sentry-phase-2.md` Task 7).
 
+## Client-side error capture
+
+### Toggle
+
+- **Enable:** Set `PUBLIC_SENTRY_DSN` in Vercel production + preview env. **Type: Encrypted (NOT Sensitive).** Sensitive vars are redacted to empty strings by `vercel pull`, breaking the `PUBLIC_*` publishing path.
+- **Value:** Same DSN as the existing `SENTRY_DSN` server-side variable. The DSN is designed by Sentry to be publicly exposed in browser bundles.
+- **Disable:** Unset `PUBLIC_SENTRY_DSN` and redeploy. `src/hooks.client.ts` gates `Sentry.init` on its presence — unset → no events sent → no bundle init.
+
+### One-time dashboard setup
+
+Sentry org → **Settings** → **Security & Privacy** → enable **"Prevent Storing of IP Addresses"** toggle. Must be done once per Sentry org. Without it, Sentry stores the connecting IP on every event regardless of `sendDefaultPii: false` (which only prevents _enrichment_, not _connection metadata_).
+
+### What client events look like
+
+- **Tag `runtime: browser`** distinguishes client events from server (server events have no `runtime` tag).
+- **Release** tag = the deploy SHA. Same SHA appears on server-side events of the same deploy → use the SHA to link a client crash to a same-deploy server fault when triaging.
+- **Breadcrumbs panel** in the event detail shows the last ~50 actions: navigations, fetch calls (URL only — auth headers stripped by Sentry SDK), console messages.
+- **User context** populated with `{ id: <supabase-uuid> }` when the user is signed in. Never `email`.
+- **No `user.ip_address` field** in the event detail (Sentry strips it before storage thanks to the org-level toggle).
+
+### Triage
+
+Same flow as server-side errors:
+
+1. Open issue → check `environment` (preview vs production) and `release` tag.
+2. Read stack trace — production stacks map to TypeScript source via uploaded source maps.
+3. Inspect breadcrumbs for the fetch call / navigation sequence leading to the throw.
+4. Reproduce locally with the same browser + route.
+5. Resolve in Sentry once fixed.
+
+### Bundle-size impact
+
+`@sentry/sveltekit` browser bundle with default integrations: ~40-60 KB gzip on the initial page load. Default integrations (`BrowserApiErrors`, `Breadcrumbs`, `GlobalHandlers`, `LinkedErrors`, `HttpContext`, `Dedupe`) stay ON because they provide the high-value debug signal that justifies client capture in the first place.
+
+### Smoke test (post-deploy)
+
+In a browser DevTools console on the deployed site:
+
+```js
+setTimeout(() => {
+  throw new Error("client-smoke-test");
+}, 0);
+```
+
+Within ~30 seconds an issue appears with:
+
+- Error message: `client-smoke-test`
+- Tag: `runtime: browser`
+- No `user.ip_address` in the event detail
+- If you were signed in: `user.id` present (Supabase UUID), `user.email` absent
+
+Reproduce signed-in vs anonymous to confirm both paths.
+
 ## How to run an ad-hoc health check
 
 The smoke endpoint deliberately fires an event into the Sentry pipeline so you can verify alerts still arrive end-to-end.

@@ -4,7 +4,7 @@ import {
   scrubEvent,
   REDACTED_FIELDS,
   type ScrubableEvent,
-} from "$lib/server/sentry-scrub";
+} from "$lib/sentry-scrub";
 
 function makeEvent(overrides: Partial<ScrubableEvent> = {}): ScrubableEvent {
   return {

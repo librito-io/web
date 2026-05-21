@@ -1,6 +1,6 @@
 # Privacy
 
-_Last updated: 2026-04-23_
+_Last updated: 2026-05-21_
 
 Librito stores the minimum data required to synchronise your highlights, notes, and books between your device and the web. This document describes exactly what we store, for how long, and who can reach it. These commitments are enforced by code — the scheduled jobs and API-level constraints are part of the repository, not policy claims.
 
@@ -27,9 +27,23 @@ Before any event is sent, the following fields are stripped or redacted in code:
 - Field values named `token`, `api_token_hash`, `password`, `email`, `privateKey`, or `jwk` (at any nesting depth) are replaced with `[REDACTED]`.
 - No user IP address, no email, and no default-PII enrichment is attached. No user identifier is associated with events.
 
-End-user browser-side errors are NOT captured. The browser-side Sentry SDK is not installed. Only server-side errors leave the application.
+End-user browser-side errors ARE captured on `librito.io`. When an unhandled error occurs in your browser, the following data is sent to Sentry:
 
-Self-hosted Librito deployments do not send any events to Sentry unless the operator explicitly opts in by setting the `SENTRY_DSN` environment variable.
+- The error message and stack trace (the stack maps back to the TypeScript source on the librito.io deploy).
+- The URL path you were on at the time of the error.
+- Your browser type and version (User-Agent string).
+- The deploy version of the site (a git commit SHA).
+- A record of the last ~50 client-side actions leading up to the error: navigations between pages, network requests made (URL only, with auth headers stripped before transmission), and console messages.
+
+We do **not** send:
+
+- Your IP address (Sentry org-level "Prevent Storing of IP Addresses" is enabled).
+- Your email address.
+- Any auth tokens, cookies, or session identifiers.
+
+If you are signed in, Sentry receives your internal user ID (a Supabase UUID) but no other identifying information. This lets the operator correlate errors with users without exposing identity.
+
+Self-hosted Librito deployments do not send any data to Sentry — server-side or browser-side — unless the operator opts in by setting `SENTRY_DSN` (server) and/or `PUBLIC_SENTRY_DSN` (browser).
 
 ## Book transfer retention
 

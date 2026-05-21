@@ -61,27 +61,49 @@ async function runSweep(): Promise<SweepSummary> {
     throw new Error("Pass A select failed");
   }
 
-  // Storage remove errors are intentionally swallowed: a failed remove still
-  // nulls storage_path, which orphans the object. Pass C (future workstream,
-  // plan §14) sweeps orphans by listing the bucket and reconciling.
+  // Batched Storage.remove + bulk UPDATE — one round-trip each rather than
+  // two per row. With PASS_A_BATCH=500, this collapses ~1000 sequential
+  // hops to 2 (issue #278), keeping the cron well under Vercel's 300 s
+  // budget as the backlog grows.
+  //
+  // Type-safe null narrowing on storage_path: the SELECT filters
+  // `.not("storage_path", "is", null)`, but the generated Row type is
+  // `string | null` regardless of WHERE clause, so a regressed filter
+  // would silently pass `null` to `remove([null])`. Narrow with a type
+  // predicate instead of casting.
+  const rows = (retiredRows ?? []).filter(
+    (r): r is { id: string; storage_path: string } => r.storage_path !== null,
+  );
   let passA = 0;
-  for (const row of (retiredRows ?? []) as Array<{
-    id: string;
-    storage_path: string;
-  }>) {
-    await supabase.storage.from(BUCKET).remove([row.storage_path]);
-    // Re-apply the status filter on UPDATE to close a TOCTOU window between
-    // the SELECT above and this write — if the row transitioned out of a
-    // retired status (e.g. /retry flipped 'failed' → 'pending', though Pass
-    // A only selects 'expired'/'downloaded', a future migration could
-    // widen the candidate set), nulling storage_path would orphan the file
-    // on a live row.
-    await supabase
-      .from("book_transfers")
-      .update({ storage_path: null })
-      .eq("id", row.id)
-      .in("status", ["expired", "downloaded"]);
-    passA += 1;
+  if (rows.length > 0) {
+    const paths = rows.map((r) => r.storage_path);
+    // Storage.remove failures: the response `data` array enumerates paths
+    // actually deleted. Paths absent from `data` (transient 5xx, ACL drift)
+    // are NOT added to the UPDATE batch, so `storage_path` stays populated
+    // and the next sweep retries the remove. Matches the orphan-avoidance
+    // posture from the per-row loop, but without the silent-success
+    // counter conflation (sibling issue #277 covers explicit per-result
+    // counters).
+    const { data: removed } = await supabase.storage.from(BUCKET).remove(paths);
+    const removedSet = new Set((removed ?? []).map((f) => f.name));
+    const idsToNull = rows
+      .filter((r) => removedSet.has(r.storage_path))
+      .map((r) => r.id);
+
+    if (idsToNull.length > 0) {
+      // Re-apply the status filter on UPDATE to close a TOCTOU window
+      // between the SELECT above and this write — if a row transitioned
+      // out of a retired status (e.g. /retry flipped 'failed' → 'pending',
+      // though Pass A only selects 'expired'/'downloaded', a future
+      // migration could widen the candidate set), nulling storage_path
+      // would orphan the file on a live row.
+      await supabase
+        .from("book_transfers")
+        .update({ storage_path: null })
+        .in("id", idsToNull)
+        .in("status", ["expired", "downloaded"]);
+      passA = idsToNull.length;
+    }
   }
   const passADurationMs = Date.now() - start;
   logger().info(

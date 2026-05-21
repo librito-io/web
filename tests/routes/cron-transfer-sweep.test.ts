@@ -40,6 +40,8 @@ function buildEvent(headers: Record<string, string> = {}, query: string = "") {
 beforeEach(() => {
   supabase._results.clear();
   supabase._storage.clear();
+  supabase._updateCalls.length = 0;
+  supabase._chainCalls.length = 0;
   withMonitor.mockClear();
   // Restore default pass-through after .mockClear() drops it.
   withMonitor.mockImplementation(async (_slug, cb, _options) => cb());
@@ -137,7 +139,10 @@ describe("GET /api/cron/transfer-sweep", () => {
     supabase._results.set("book_transfers.update", { data: null, error: null });
     supabase._results.set("book_transfers.delete", { data: null, error: null });
 
-    const removeSpy = vi.fn(async () => ({ data: null, error: null }));
+    const removeSpy = vi.fn(async (paths: string[]) => ({
+      data: paths.map((name) => ({ name })),
+      error: null,
+    }));
     supabase.storage.from = () =>
       ({
         remove: removeSpy,
@@ -149,7 +154,131 @@ describe("GET /api/cron/transfer-sweep", () => {
 
     expect(res.status).toBe(200);
     expect(body.sweep.passA).toBe(2);
-    expect(removeSpy).toHaveBeenCalledTimes(2);
+    // Batched: one Storage.remove call with all paths, regardless of N rows.
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(removeSpy).toHaveBeenCalledWith(["u/t1/a.epub", "u/t2/b.epub"]);
+  });
+
+  // Issue #278: Pass A must collapse the per-row UPDATE loop into a single
+  // bulk UPDATE keyed by .in("id", [...]) so the cron stays well under the
+  // Vercel 300s budget as the backlog grows.
+  it("Pass A issues a single bulk UPDATE keyed by .in('id', [...]), not one UPDATE per row", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: [
+        { id: "t1", storage_path: "u/t1/a.epub" },
+        { id: "t2", storage_path: "u/t2/b.epub" },
+        { id: "t3", storage_path: "u/t3/c.epub" },
+      ],
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", { data: null, error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    supabase.storage.from = () =>
+      ({
+        remove: vi.fn(async (paths: string[]) => ({
+          data: paths.map((name) => ({ name })),
+          error: null,
+        })),
+        download: vi.fn(async () => ({ data: null, error: null })),
+      }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
+
+    await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+
+    const passAUpdateCalls = supabase._updateCalls.filter(
+      (u) =>
+        u.table === "book_transfers" &&
+        typeof u.payload === "object" &&
+        u.payload !== null &&
+        (u.payload as Record<string, unknown>).storage_path === null,
+    );
+    expect(passAUpdateCalls.length).toBe(1);
+
+    const updateChainCalls = supabase._chainCalls.filter(
+      (c) => c.table === "book_transfers" && c.operation === "update",
+    );
+    const idInFilter = updateChainCalls.find(
+      (c) =>
+        c.method === "in" &&
+        c.args[0] === "id" &&
+        Array.isArray(c.args[1]) &&
+        (c.args[1] as string[]).length === 3,
+    );
+    expect(idInFilter).toBeDefined();
+    expect(idInFilter!.args[1]).toEqual(["t1", "t2", "t3"]);
+  });
+
+  // Issue #278 + #277 free side-effect: paths whose Storage remove failed
+  // (absent from the response data array) must NOT be in the bulk UPDATE's
+  // id list, so storage_path stays populated for the next sweep to retry.
+  it("Pass A only nulls storage_path for IDs whose path appears in Storage.remove response", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: [
+        { id: "t1", storage_path: "u/t1/a.epub" },
+        { id: "t2", storage_path: "u/t2/b.epub" },
+        { id: "t3", storage_path: "u/t3/c.epub" },
+      ],
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", { data: null, error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    // Simulate partial Storage failure: t2's path missing from response.
+    supabase.storage.from = () =>
+      ({
+        remove: vi.fn(async () => ({
+          data: [{ name: "u/t1/a.epub" }, { name: "u/t3/c.epub" }],
+          error: null,
+        })),
+        download: vi.fn(async () => ({ data: null, error: null })),
+      }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
+
+    const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.sweep.passA).toBe(2);
+
+    const updateChainCalls = supabase._chainCalls.filter(
+      (c) => c.table === "book_transfers" && c.operation === "update",
+    );
+    const idInFilter = updateChainCalls.find(
+      (c) => c.method === "in" && c.args[0] === "id",
+    );
+    expect(idInFilter).toBeDefined();
+    expect(idInFilter!.args[1]).toEqual(["t1", "t3"]);
+  });
+
+  // Empty batch: SELECT returns zero rows. Pass A must skip both
+  // Storage.remove (no paths) and the UPDATE (no ids) — calling either
+  // with an empty array would either no-op (wasted RTT) or, for some
+  // Supabase Storage clients, behave unexpectedly.
+  it("Pass A skips Storage.remove and UPDATE when SELECT returns zero rows", async () => {
+    supabase._results.set("book_transfers.select", { data: [], error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    const removeSpy = vi.fn(async () => ({ data: [], error: null }));
+    supabase.storage.from = () =>
+      ({
+        remove: removeSpy,
+        download: vi.fn(async () => ({ data: null, error: null })),
+      }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
+
+    const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.sweep.passA).toBe(0);
+    expect(removeSpy).not.toHaveBeenCalled();
+
+    const passAUpdateCalls = supabase._updateCalls.filter(
+      (u) =>
+        u.table === "book_transfers" &&
+        typeof u.payload === "object" &&
+        u.payload !== null &&
+        (u.payload as Record<string, unknown>).storage_path === null,
+    );
+    expect(passAUpdateCalls.length).toBe(0);
   });
 
   // Pass A's UPDATE must re-apply the status filter to close the SELECT→UPDATE
@@ -165,7 +294,10 @@ describe("GET /api/cron/transfer-sweep", () => {
 
     supabase.storage.from = () =>
       ({
-        remove: vi.fn(async () => ({ data: null, error: null })),
+        remove: vi.fn(async (paths: string[]) => ({
+          data: paths.map((name) => ({ name })),
+          error: null,
+        })),
         download: vi.fn(async () => ({ data: null, error: null })),
       }) as unknown as ReturnType<(typeof supabase.storage)["from"]>;
 

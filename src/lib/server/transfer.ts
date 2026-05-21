@@ -1,7 +1,10 @@
 import { basename } from "path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { firstRow } from "./rpc";
+import { logger } from "./log";
 import type { Database } from "$lib/types/database";
+
+const TRANSFER_BUCKET = "book-transfers";
 
 type IncrementTransferAttemptRow =
   Database["public"]["Functions"]["increment_transfer_attempt"]["Returns"][number];
@@ -121,6 +124,132 @@ export function validateTransferSize(size: number): ValidationResult {
   if (size > MAX_FILE_SIZE)
     return { ok: false, error: `File exceeds ${MAX_FILE_SIZE_LABEL} limit` };
   return { ok: true };
+}
+
+const SHA256_RE = /^[0-9a-f]{64}$/;
+
+export type ParsedInitiateBody = {
+  safeFilename: string;
+  fileSize: number;
+  sha256: string;
+};
+
+export type ParseInitiateResult =
+  | { ok: true; value: ParsedInitiateBody }
+  | { ok: false; status: number; code: string; message: string };
+
+// Validates the JSON payload of POST /api/transfer/initiate and returns a
+// canonical { safeFilename, fileSize, sha256 } tuple. Mirrors the
+// validateSyncPayload discriminated-result pattern so the route handler
+// stays "auth → call helper → respond". HTTP error shape (status + code +
+// message) flows through so the caller maps directly to jsonError.
+export function parseInitiateBody(body: unknown): ParseInitiateResult {
+  if (typeof body !== "object" || body === null) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_request",
+      message: "Request body must be a JSON object",
+    };
+  }
+  const { filename, fileSize, sha256 } = body as {
+    filename?: unknown;
+    fileSize?: unknown;
+    sha256?: unknown;
+  };
+
+  if (typeof filename !== "string" || !filename) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_request",
+      message: "filename is required",
+    };
+  }
+  if (typeof fileSize !== "number") {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_request",
+      message: "fileSize must be a number",
+    };
+  }
+
+  const safeFilename = sanitizeFilename(filename);
+
+  const filenameResult = validateTransferFilename(safeFilename);
+  if (!filenameResult.ok) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_filename",
+      message: filenameResult.error,
+    };
+  }
+
+  const sizeResult = validateTransferSize(fileSize);
+  if (!sizeResult.ok) {
+    return {
+      ok: false,
+      status: 400,
+      code: "file_too_large",
+      message: sizeResult.error,
+    };
+  }
+
+  if (typeof sha256 !== "string" || !SHA256_RE.test(sha256)) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_sha256",
+      message: "sha256 must be 64 lowercase hex chars",
+    };
+  }
+
+  return { ok: true, value: { safeFilename, fileSize, sha256 } };
+}
+
+// Best-effort delete of a single object from the book-transfers bucket.
+// Orphan-tolerant by design: the transfer-sweep cron's Pass A scans for
+// retired rows whose Storage object never died (transient 5xx, ACL drift,
+// confirm-time best-effort race) and retries the remove, then NULLs
+// storage_path once Storage confirms deletion. Callers therefore do not
+// need to surface, retry, or fail on Storage errors here — the sweep is
+// the convergence point.
+//
+// supabase-js Storage operations return `{ data, error }`; they only throw
+// on transport-level exceptions (fetch failure). Earlier call sites mixed
+// "no check", "empty try/catch" (which only catches the rare throw, not
+// the returned `error`), and "documented orphan-tolerance" — the three
+// shapes converged on this helper per #125.
+export async function removeTransferStorage(
+  supabase: SupabaseClient,
+  path: string,
+): Promise<void> {
+  try {
+    const { error } = await supabase.storage
+      .from(TRANSFER_BUCKET)
+      .remove([path]);
+    if (error) {
+      logger().warn(
+        {
+          event: "transfer.storage_remove_failed",
+          path,
+          error: error.message ?? "unknown",
+        },
+        "transfer.storage_remove_failed",
+      );
+    }
+  } catch (err) {
+    logger().warn(
+      {
+        event: "transfer.storage_remove_threw",
+        path,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "transfer.storage_remove_threw",
+    );
+  }
 }
 
 // Storage path is internal addressing only — must be ASCII-safe so that

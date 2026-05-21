@@ -6,7 +6,10 @@ import {
   enforceRateLimit,
 } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
-import { recordConfirmFailure } from "$lib/server/transfer";
+import {
+  recordConfirmFailure,
+  removeTransferStorage,
+} from "$lib/server/transfer";
 import { logger } from "$lib/server/log";
 import { UUID_RE } from "$lib/server/validation";
 
@@ -167,15 +170,8 @@ export const POST: RequestHandler = async ({ request, params }) => {
     "transfer.confirm_success",
   );
 
-  // Best-effort: delete file from storage
   if (transfer.storage_path) {
-    try {
-      await supabase.storage
-        .from("book-transfers")
-        .remove([transfer.storage_path]);
-    } catch {
-      // File cleanup is not critical
-    }
+    await removeTransferStorage(supabase, transfer.storage_path);
   }
 
   return jsonSuccess({ success: true });

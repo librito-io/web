@@ -2,6 +2,7 @@ import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { transferCancelLimiter, enforceRateLimit } from "$lib/server/ratelimit";
+import { removeTransferStorage } from "$lib/server/transfer";
 import { UUID_RE } from "$lib/server/validation";
 
 export const DELETE: RequestHandler = async ({
@@ -54,11 +55,8 @@ export const DELETE: RequestHandler = async ({
     );
   }
 
-  // Best-effort delete from Storage (don't fail if file doesn't exist)
   if (transfer.storage_path) {
-    await supabase.storage
-      .from("book-transfers")
-      .remove([transfer.storage_path]);
+    await removeTransferStorage(supabase, transfer.storage_path);
   }
 
   // Self-authorizing DELETE: include user_id arm so the write defends itself

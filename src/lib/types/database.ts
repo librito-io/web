@@ -496,6 +496,7 @@ export type Database = {
           won: boolean
         }[]
       }
+      ensure_realtime: { Args: { p_table: unknown }; Returns: undefined }
       get_highlight_feed: {
         Args: {
           p_book_hash: string

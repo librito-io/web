@@ -1,6 +1,6 @@
 # Sentry Operator Runbook
 
-_Last updated: 2026-05-18_
+_Last updated: 2026-05-21_
 
 This runbook covers the librito.io deploy's use of Sentry for operator-facing error alerting. Self-hosters running their own Sentry instance can use this as a template but should substitute their own org/project names and alert destinations.
 
@@ -38,6 +38,62 @@ Body includes:
 - **Sentry "Resolve" button** on the issue page. Marks the issue resolved. If the same signature recurs in a later deploy, Sentry auto-reopens it with a `regression` tag.
 - **"Resolve in next release"** option resolves the issue contingent on a future deploy not reintroducing it — useful when you've shipped a fix and want Sentry to auto-verify by tracking the next `release` tag.
 - **"Archive"** for issues you've intentionally chosen not to fix (rare; document the reason in the issue's notes if you use it).
+
+## Cron observability
+
+### transfer-sweep monitor
+
+The daily 03:00 UTC `transfer-sweep` cron is wrapped in `Sentry.withMonitor` (see `src/routes/api/cron/transfer-sweep/+server.ts`). On the Sentry dashboard:
+
+- **Where:** Sentry project → **Crons** in the left nav → look for the `transfer-sweep` monitor. The monitor auto-creates on the first successful check-in after PR 1 deploys.
+- **Green tick** in the timeline = the sweep ran and the callback returned. **Red tick** = the callback threw.
+- **"Missed check-in" alert** fires when no check-in arrives within the configured `checkinMargin` (5 minutes) past the expected fire time. Causes: Vercel cron schedule drift, deploy with broken cron config, or the route auth/probe gate failing on every fire.
+- **"Max runtime exceeded" alert** fires when the sweep runs longer than `maxRuntime` (10 minutes). Usually means Pass C blob backlog (a flood of pending+unverified rows). Inspect with: `SELECT count(*) FROM public.book_transfers WHERE status='pending' AND sha256_verified IS NULL;`
+- **`failureIssueThreshold: 1`** = first failure creates an issue. **`recoveryThreshold: 1`** = one successful fire after a failure resolves the issue.
+
+Why Pass C per-row failures do NOT mark the monitor red: a partial Pass C run (some rows downloaded, some not) is still a successful sweep — Pass A and Pass B already completed. Only Pass A select, Pass B delete, or Pass C select failures throw and fail the monitor. Pass C per-row download/hash failures continue to log-and-continue.
+
+### pg-cron-health alerts
+
+The daily 09:00 UTC `pg-cron-health` cron (`src/routes/api/cron/pg-cron-health/+server.ts`) runs a 7-day failure scan against `cron.job_run_details` via the `pg_cron_failure_summary` SECURITY DEFINER function. If any job has failures > 0, the route fires `Sentry.captureMessage("pg_cron_failures_detected", …)`.
+
+**What an alert looks like:**
+
+- **Issue title:** `pg_cron_failures_detected`
+- **Tag:** `source: pg_cron_health`
+- **Extra:** `{ failures: [{ jobname, failures }, …], windowDays: 7 }`
+
+**Triage steps:**
+
+1. Open the issue → check the `extra.failures` array for the failing job name(s) + count(s).
+2. In Supabase Studio (or `psql`), run:
+   ```sql
+   SELECT start_time, status, return_message
+     FROM cron.job_run_details jrd
+     JOIN cron.job j ON j.jobid = jrd.jobid
+    WHERE j.jobname = '<failing-jobname>'
+      AND status != 'succeeded'
+      AND start_time > now() - interval '7 days'
+    ORDER BY start_time DESC
+    LIMIT 20;
+   ```
+3. Inspect the most recent `return_message` for the underlying error class.
+4. Resolve in Sentry once the root cause is fixed and the next cron fire succeeds.
+
+**False positives to expect:**
+
+- A migration that intentionally drops a job leaves a failure tail in `cron.job_run_details` until 7 days pass. Resolve the Sentry issue manually; it auto-archives if no new failures arrive.
+- A retried-and-succeeded pattern (1 failure followed by 1 success on next fire) still reports `failures: 1` for 7 days. Acceptable noise; the alert means "look once", not "page".
+
+**Why not Sentry.withMonitor on pg-cron-health?** Free Sentry tier provides one cron monitor slot total, allocated to `transfer-sweep` (higher-impact silent failure surface). A pg-cron-health silent failure reverts to the pre-#190 unobserved state — acceptable risk at pre-launch scale.
+
+(Optional one-time setup) Sentry dashboard → project → **Alerts** → add a per-issue rule for tag `source: pg_cron_health` to batch or mute email if the noise level becomes excessive. Without this, every distinct pg_cron failure pattern fires an email on first occurrence (usually correct behavior).
+
+### Preview deploys do NOT auto-fire Vercel crons
+
+Vercel only triggers `crons[]` paths on **production** deploys. Preview deploys' cron paths are reachable via manual `curl` for smoke verification (the auth gate still applies), but they will not fire on schedule. A broken cron handler on a preview deploy won't surface in Sentry's Crons UI until the production deploy lands.
+
+For preview-deploy verification, manually curl each cron path. The deploy-time `smoke` job already exercises `?probe=1` reachability against the production deploy URL; for a real fire test on preview, omit `?probe=1` and check the Sentry dashboard in the next few minutes for the expected check-in (transfer-sweep) or alert (pg-cron-health when a failure row has been seeded — see the preview smoke procedure in `docs/superpowers/plans/2026-05-21-sentry-phase-2.md` Task 7).
 
 ## How to run an ad-hoc health check
 

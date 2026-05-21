@@ -1,5 +1,20 @@
-import { fail, redirect } from "@sveltejs/kit";
+import { fail, redirect, type ActionFailure } from "@sveltejs/kit";
 import type { PageServerLoad, Actions } from "./$types";
+
+// Explicit per-action return shape. Without this, TS's subtype-reduction
+// of `ActionFailure<T>` unions in the `Actions: Actions` annotation
+// collapses every `fail()` data shape into the first one's `T`, losing
+// the `action`/`deviceId` echo fields the UI uses to scope error display.
+// Keeping a narrow union here also keeps the page-level `form` prop
+// type useful for `"action" in form` narrows in the template.
+type DeviceActionResult =
+  | { success: true }
+  | ActionFailure<{ error: string }>
+  | ActionFailure<{
+      action: "rename" | "unpair";
+      deviceId: string | null;
+      error: string;
+    }>;
 
 export const load: PageServerLoad = async ({
   locals: { safeGetSession, supabase },
@@ -20,21 +35,37 @@ export const load: PageServerLoad = async ({
 };
 
 export const actions: Actions = {
-  rename: async ({ request, locals: { safeGetSession, supabase } }) => {
+  rename: async ({
+    request,
+    locals: { safeGetSession, supabase },
+  }): Promise<DeviceActionResult> => {
     const { user } = await safeGetSession();
     if (!user) return fail(401, { error: "Not authenticated" });
 
     const formData = await request.formData();
-    const deviceId = formData.get("deviceId");
+    const rawDeviceId = formData.get("deviceId");
+    const deviceId = typeof rawDeviceId === "string" ? rawDeviceId : null;
     const name =
       typeof formData.get("name") === "string"
         ? (formData.get("name") as string).trim()
         : "";
 
-    if (!deviceId || typeof deviceId !== "string" || !name)
-      return fail(400, { error: "Device ID and name are required" });
+    // deviceId is echoed back in every fail() payload so the client can
+    // scope per-row error display under the matching device <li>; the
+    // page's `form` prop is page-wide, so without this the same error
+    // would render under every device's rename form on a re-render.
+    if (!deviceId || !name)
+      return fail(400, {
+        action: "rename",
+        deviceId,
+        error: "Device ID and name are required",
+      });
     if (name.length > 50)
-      return fail(400, { error: "Name must be 50 characters or less" });
+      return fail(400, {
+        action: "rename",
+        deviceId,
+        error: "Name must be 50 characters or less",
+      });
 
     // Atomic ownership UPDATE: RLS WITH CHECK enforces user_id = auth.uid();
     // the explicit .eq("user_id", user.id) predicate is kept as
@@ -52,8 +83,16 @@ export const actions: Actions = {
 
     if (error) {
       if (error.code === "PGRST116")
-        return fail(404, { error: "Device not found" });
-      return fail(500, { error: "Failed to rename device" });
+        return fail(404, {
+          action: "rename",
+          deviceId,
+          error: "Device not found",
+        });
+      return fail(500, {
+        action: "rename",
+        deviceId,
+        error: "Failed to rename device",
+      });
     }
     return { success: true };
   },
@@ -65,15 +104,23 @@ export const actions: Actions = {
   // Keeping the schema column name `revoked_at` is intentional; only
   // the user-visible action name is reconciled here. See #181/#183
   // archeology in CLAUDE.md for the design history.
-  unpair: async ({ request, locals: { safeGetSession, supabase } }) => {
+  unpair: async ({
+    request,
+    locals: { safeGetSession, supabase },
+  }): Promise<DeviceActionResult> => {
     const { user } = await safeGetSession();
     if (!user) return fail(401, { error: "Not authenticated" });
 
     const formData = await request.formData();
-    const deviceId = formData.get("deviceId");
+    const rawDeviceId = formData.get("deviceId");
+    const deviceId = typeof rawDeviceId === "string" ? rawDeviceId : null;
 
-    if (!deviceId || typeof deviceId !== "string")
-      return fail(400, { error: "Device ID is required" });
+    if (!deviceId)
+      return fail(400, {
+        action: "unpair",
+        deviceId,
+        error: "Device ID is required",
+      });
 
     // .is("revoked_at", null) collapses three cases into the same 404:
     // device id doesn't exist, device belongs to another user, or device
@@ -92,8 +139,16 @@ export const actions: Actions = {
 
     if (error) {
       if (error.code === "PGRST116")
-        return fail(404, { error: "Device not found" });
-      return fail(500, { error: "Failed to unpair device" });
+        return fail(404, {
+          action: "unpair",
+          deviceId,
+          error: "Device not found",
+        });
+      return fail(500, {
+        action: "unpair",
+        deviceId,
+        error: "Failed to unpair device",
+      });
     }
     return { success: true };
   },

@@ -2,37 +2,32 @@
   import { enhance } from "$app/forms";
   import { invalidateAll } from "$app/navigation";
   import { _ } from "$lib/i18n";
+  import { fetchWithSafariRetry, safariRetryEnhance } from "$lib/fetchRetry";
   import { formatDate } from "$lib/time/formatDate";
 
-  let { data } = $props();
+  let { data, form } = $props();
 
   let pairingCode = $state("");
   let claimError = $state("");
   let claimLoading = $state(false);
   let renamingId = $state<string | null>(null);
+  // Tracks which device's last enhance submission exhausted its Safari
+  // retry and surfaced a network-class error. `form` doesn't populate on
+  // `result.type === "error"`, so a separate per-row flag is required to
+  // render the fallback message in the right place.
+  let networkErrorDeviceId = $state<string | null>(null);
 
   async function handleClaim(e: SubmitEvent) {
     e.preventDefault();
     claimLoading = true;
     claimError = "";
 
-    const doFetch = () =>
-      fetch("/api/pair/claim", {
+    try {
+      const res = await fetchWithSafariRetry("/api/pair/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: pairingCode.trim() }),
       });
-
-    try {
-      let res: Response;
-      try {
-        res = await doFetch();
-      } catch {
-        // Safari/WebKit reuses idle HTTP keep-alive sockets the server already
-        // closed; first POST fails mid-flight with "network connection was lost".
-        // Retry once on a fresh connection.
-        res = await doFetch();
-      }
 
       const body = await res.json();
 
@@ -89,19 +84,15 @@
             <form
               method="POST"
               action="?/rename"
-              use:enhance={({ formElement }) => {
-                return async ({ result, update }) => {
-                  // Safari/WebKit stale keep-alive: retry once on a fresh socket.
-                  if (result.type === "error" && !formElement.dataset.retried) {
-                    formElement.dataset.retried = "1";
-                    formElement.requestSubmit();
-                    return;
-                  }
-                  delete formElement.dataset.retried;
+              use:enhance={safariRetryEnhance({
+                onSuccess: () => {
                   renamingId = null;
-                  await update();
-                };
-              }}
+                  networkErrorDeviceId = null;
+                },
+                onError: () => {
+                  networkErrorDeviceId = device.id;
+                },
+              })}
             >
               <input type="hidden" name="deviceId" value={device.id} />
               <input
@@ -115,6 +106,12 @@
               <button type="button" onclick={() => (renamingId = null)}
                 >Cancel</button
               >
+              {#if form && "action" in form && form.action === "rename" && form.deviceId === device.id}
+                <p style="color: red;">{form.error}</p>
+              {/if}
+              {#if networkErrorDeviceId === device.id}
+                <p style="color: red;">Network error. Please try again.</p>
+              {/if}
             </form>
           {:else}
             <strong>{device.name}</strong>
@@ -134,18 +131,14 @@
             <form
               method="POST"
               action="?/unpair"
-              use:enhance={({ formElement }) => {
-                return async ({ result, update }) => {
-                  // Safari/WebKit stale keep-alive: retry once on a fresh socket.
-                  if (result.type === "error" && !formElement.dataset.retried) {
-                    formElement.dataset.retried = "1";
-                    formElement.requestSubmit();
-                    return;
-                  }
-                  delete formElement.dataset.retried;
-                  await update();
-                };
-              }}
+              use:enhance={safariRetryEnhance({
+                onSuccess: () => {
+                  networkErrorDeviceId = null;
+                },
+                onError: () => {
+                  networkErrorDeviceId = device.id;
+                },
+              })}
               style="display: inline;"
             >
               <input type="hidden" name="deviceId" value={device.id} />
@@ -161,6 +154,12 @@
                 }}>Unpair</button
               >
             </form>
+            {#if form && "action" in form && form.action === "unpair" && form.deviceId === device.id}
+              <p style="color: red;">{form.error}</p>
+            {/if}
+            {#if networkErrorDeviceId === device.id}
+              <p style="color: red;">Network error. Please try again.</p>
+            {/if}
           {/if}
         </li>
       {/each}

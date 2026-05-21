@@ -13,6 +13,7 @@ function loadSupabaseEnv(): {
   dbUrl: string;
   apiUrl: string;
   serviceRoleKey: string;
+  anonKey: string;
 } {
   let out: string;
   try {
@@ -36,12 +37,13 @@ function loadSupabaseEnv(): {
   const dbUrl = parsed.get("DB_URL");
   const apiUrl = parsed.get("API_URL");
   const serviceRoleKey = parsed.get("SERVICE_ROLE_KEY");
-  if (!dbUrl || !apiUrl || !serviceRoleKey) {
+  const anonKey = parsed.get("ANON_KEY");
+  if (!dbUrl || !apiUrl || !serviceRoleKey || !anonKey) {
     throw new Error(
-      "supabase status did not return DB_URL / API_URL / SERVICE_ROLE_KEY",
+      "supabase status did not return DB_URL / API_URL / SERVICE_ROLE_KEY / ANON_KEY",
     );
   }
-  return { dbUrl, apiUrl, serviceRoleKey };
+  return { dbUrl, apiUrl, serviceRoleKey, anonKey };
 }
 
 let cachedEnv: ReturnType<typeof loadSupabaseEnv> | null = null;
@@ -72,6 +74,17 @@ export function getAdmin(): SupabaseClient {
     });
   }
   return cachedAdmin;
+}
+
+let cachedAnon: SupabaseClient | null = null;
+export function getAnon(): SupabaseClient {
+  if (!cachedAnon) {
+    const { apiUrl, anonKey } = env();
+    cachedAnon = createClient(apiUrl, anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+  }
+  return cachedAnon;
 }
 
 export async function shutdown() {

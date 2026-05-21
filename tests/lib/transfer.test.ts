@@ -1,10 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   sanitizeFilename,
   validateTransferFilename,
   validateTransferSize,
   buildStoragePath,
   parseInitiateBody,
+  removeTransferStorage,
   MAX_FILE_SIZE,
 } from "../../src/lib/server/transfer";
 
@@ -275,5 +277,56 @@ describe("parseInitiateBody", () => {
         sha256: "A".repeat(64),
       }),
     ).toMatchObject({ ok: false, status: 400, code: "invalid_sha256" });
+  });
+});
+
+describe("removeTransferStorage", () => {
+  function buildSupabase(removeImpl: () => Promise<unknown>) {
+    const remove = vi.fn(removeImpl);
+    const from = vi.fn(() => ({ remove }));
+    return {
+      client: { storage: { from } } as unknown as SupabaseClient,
+      remove,
+      from,
+    };
+  }
+
+  it("calls storage.from('book-transfers').remove([path])", async () => {
+    const { client, remove, from } = buildSupabase(async () => ({
+      data: null,
+      error: null,
+    }));
+    await removeTransferStorage(client, "u/123/file.epub");
+    expect(from).toHaveBeenCalledWith("book-transfers");
+    expect(remove).toHaveBeenCalledWith(["u/123/file.epub"]);
+  });
+
+  it("resolves without throwing when Storage returns an error", async () => {
+    const { client } = buildSupabase(async () => ({
+      data: null,
+      error: { message: "object_not_found" },
+    }));
+    await expect(
+      removeTransferStorage(client, "u/123/file.epub"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("resolves without throwing on transport exception", async () => {
+    const { client } = buildSupabase(async () => {
+      throw new Error("ECONNRESET");
+    });
+    await expect(
+      removeTransferStorage(client, "u/123/file.epub"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("resolves without throwing on clean delete", async () => {
+    const { client } = buildSupabase(async () => ({
+      data: [{ name: "u/123/file.epub" }],
+      error: null,
+    }));
+    await expect(
+      removeTransferStorage(client, "u/123/file.epub"),
+    ).resolves.toBeUndefined();
   });
 });

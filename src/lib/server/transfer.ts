@@ -1,7 +1,10 @@
 import { basename } from "path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { firstRow } from "./rpc";
+import { logger } from "./log";
 import type { Database } from "$lib/types/database";
+
+const TRANSFER_BUCKET = "book-transfers";
 
 type IncrementTransferAttemptRow =
   Database["public"]["Functions"]["increment_transfer_attempt"]["Returns"][number];
@@ -204,6 +207,49 @@ export function parseInitiateBody(body: unknown): ParseInitiateResult {
   }
 
   return { ok: true, value: { safeFilename, fileSize, sha256 } };
+}
+
+// Best-effort delete of a single object from the book-transfers bucket.
+// Orphan-tolerant by design: the transfer-sweep cron's Pass A scans for
+// retired rows whose Storage object never died (transient 5xx, ACL drift,
+// confirm-time best-effort race) and retries the remove, then NULLs
+// storage_path once Storage confirms deletion. Callers therefore do not
+// need to surface, retry, or fail on Storage errors here — the sweep is
+// the convergence point.
+//
+// supabase-js Storage operations return `{ data, error }`; they only throw
+// on transport-level exceptions (fetch failure). Earlier call sites mixed
+// "no check", "empty try/catch" (which only catches the rare throw, not
+// the returned `error`), and "documented orphan-tolerance" — the three
+// shapes converged on this helper per #125.
+export async function removeTransferStorage(
+  supabase: SupabaseClient,
+  path: string,
+): Promise<void> {
+  try {
+    const { error } = await supabase.storage
+      .from(TRANSFER_BUCKET)
+      .remove([path]);
+    if (error) {
+      logger().warn(
+        {
+          event: "transfer.storage_remove_failed",
+          path,
+          error: error.message ?? "unknown",
+        },
+        "transfer.storage_remove_failed",
+      );
+    }
+  } catch (err) {
+    logger().warn(
+      {
+        event: "transfer.storage_remove_threw",
+        path,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "transfer.storage_remove_threw",
+    );
+  }
 }
 
 // Storage path is internal addressing only — must be ASCII-safe so that

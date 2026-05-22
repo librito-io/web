@@ -100,12 +100,18 @@ const supabaseSetup: Handle = async ({ event, resolve }) => {
 // per-file `safeGetSession` + `if (!user) redirect/fail` blocks that
 // used to live in each loader, action, and endpoint (issues #347/#348).
 //
-// GETs redirect to /auth/login with the original path encoded as
-// `?return_to=` so the login page can navigate back to the deep link
-// after sign-in (issue #349). Non-GET requests get 401 JSON so
-// client-side JS can show a "session expired" toast and trigger a
-// soft re-auth, rather than the user losing form state to a hard
-// redirect mid-action.
+// Response policy:
+//   - Page-load GETs (anything under /app/** that is NOT /app/api/*)
+//     redirect to /auth/login with `?return_to=` so the login page can
+//     deep-link the user back after sign-in (#349).
+//   - /app/api/* are XHR/JSON endpoints by convention — they always
+//     return 401 JSON regardless of method, because `fetch()` auto-
+//     follows 303s and a redirect to HTML /auth/login crashes any
+//     downstream JSON.parse on session expiry mid-page (#351).
+//   - All other non-GET /app/** requests (form actions, etc.) also
+//     return 401 JSON so client-side JS can show a "session expired"
+//     toast and trigger a soft re-auth rather than losing form state
+//     to a hard redirect.
 //
 // Populates `event.locals.user` and `event.locals.session` as non-null
 // for downstream handlers; the App.Locals type stays nullable globally
@@ -117,7 +123,8 @@ export const appAuthGuard: Handle = async ({ event, resolve }) => {
   if (event.route.id?.startsWith("/app")) {
     const { session, user } = await event.locals.safeGetSession();
     if (!session || !user) {
-      if (event.request.method === "GET") {
+      const isXhrEndpoint = event.route.id.startsWith("/app/api/");
+      if (event.request.method === "GET" && !isXhrEndpoint) {
         const returnTo = encodeURIComponent(
           event.url.pathname + event.url.search,
         );

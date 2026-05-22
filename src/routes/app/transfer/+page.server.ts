@@ -6,7 +6,7 @@ export const load: PageServerLoad = async ({
 }) => {
   const { user } = await parent();
 
-  // .limit(100) bounds initial SSR payload — mirrors /api/transfer/list's
+  // .limit(100) bounds initial SSR payload — mirrors /app/api/transfer/list's
   // cap so the post-action refresh path agrees with the page-load path.
   const { data: transfers } = await supabase
     .from("book_transfers")

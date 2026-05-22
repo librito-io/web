@@ -414,7 +414,7 @@ export async function processSync(
     .eq("user_id", userId)
     .eq("status", "pending")
     // Server-side sha256 verification gate (#287). A pending row is only
-    // ever visible to a device after /api/transfer/[id]/finalize has
+    // ever visible to a device after /app/api/transfer/[id]/finalize has
     // recomputed the storage object's sha256 and matched it against the
     // client-claimed value at /initiate. The schema invariant
     // (verified_pair CHECK in 20260520000003) guarantees verified_at is

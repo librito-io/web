@@ -4,13 +4,11 @@ import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { transferCancelLimiter, enforceRateLimit } from "$lib/server/ratelimit";
 import { removeTransferStorage } from "$lib/server/transfer";
 import { UUID_RE } from "$lib/server/validation";
+import { requireUser } from "$lib/server/auth";
 
-export const DELETE: RequestHandler = async ({
-  params,
-  locals: { safeGetSession },
-}) => {
-  const { user } = await safeGetSession();
-  if (!user) return jsonError(401, "unauthorized", "Must be logged in");
+export const DELETE: RequestHandler = async (event) => {
+  const user = requireUser(event);
+  const { params } = event;
 
   const { id } = params;
   if (!UUID_RE.test(id)) {

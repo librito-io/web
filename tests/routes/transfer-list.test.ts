@@ -29,14 +29,14 @@ vi.mock("$lib/server/supabase", () => ({
   createAdminClient: () => supabase,
 }));
 
-const { GET } = await import("../../src/routes/api/transfer/list/+server");
+const { GET } = await import("../../src/routes/app/api/transfer/list/+server");
 
 beforeEach(() => {
   supabase._results.clear();
   supabase._chainCalls.length = 0;
 });
 
-describe("GET /api/transfer/list — WS-D projection", () => {
+describe("GET /app/api/transfer/list — WS-D projection", () => {
   it("returns attemptCount, lastError, lastAttemptAt for each transfer", async () => {
     supabase._results.set("book_transfers.select", {
       data: [
@@ -57,10 +57,7 @@ describe("GET /api/transfer/list — WS-D projection", () => {
 
     const evt = {
       locals: {
-        safeGetSession: async () => ({
-          user: { id: "u-1" },
-          session: null,
-        }),
+        user: { id: "u-1" },
       },
     } as unknown as Parameters<typeof GET>[0];
     const res = await GET(evt);
@@ -78,7 +75,7 @@ describe("GET /api/transfer/list — WS-D projection", () => {
 
     const evt = {
       locals: {
-        safeGetSession: async () => ({ user: { id: "u-1" }, session: null }),
+        user: { id: "u-1" },
       },
     } as unknown as Parameters<typeof GET>[0];
     await GET(evt);
@@ -107,7 +104,7 @@ describe("GET /api/transfer/list — WS-D projection", () => {
 
     const evt = {
       locals: {
-        safeGetSession: async () => ({ user: { id: "u-1" }, session: null }),
+        user: { id: "u-1" },
       },
     } as unknown as Parameters<typeof GET>[0];
     const res = await GET(evt);

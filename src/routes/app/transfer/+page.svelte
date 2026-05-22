@@ -121,15 +121,18 @@
       const sha256 = await hashFileSha256(file);
 
       updateUpload({ status: "initiating" });
-      const initiateRes = await fetchWithSafariRetry("/api/transfer/initiate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          fileSize: file.size,
-          sha256,
-        }),
-      });
+      const initiateRes = await fetchWithSafariRetry(
+        "/app/api/transfer/initiate",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name,
+            fileSize: file.size,
+            sha256,
+          }),
+        },
+      );
 
       if (initiateRes.status === 429) {
         updateUpload({
@@ -166,7 +169,7 @@
       // to the device until the Pass C sweep backstop catches it.
       updateUpload({ status: "verifying", progress: 100 });
       const finalizeRes = await fetchWithSafariRetry(
-        `/api/transfer/${transferId}/finalize`,
+        `/app/api/transfer/${transferId}/finalize`,
         { method: "POST" },
       );
       if (!finalizeRes.ok) {
@@ -191,7 +194,7 @@
 
   async function refreshTransfers() {
     try {
-      const res = await fetchWithSafariRetry("/api/transfer/list");
+      const res = await fetchWithSafariRetry("/app/api/transfer/list");
       if (res.ok) {
         const body = await res.json();
         transfers = body.transfers;
@@ -205,9 +208,12 @@
     if (cancellingIds.has(transferId)) return;
     cancellingIds = new Set(cancellingIds).add(transferId);
     try {
-      const res = await fetchWithSafariRetry(`/api/transfer/${transferId}`, {
-        method: "DELETE",
-      });
+      const res = await fetchWithSafariRetry(
+        `/app/api/transfer/${transferId}`,
+        {
+          method: "DELETE",
+        },
+      );
       // Treat 404 as success: row already gone, UI and server now agree.
       if (res.ok || res.status === 404) {
         await refreshTransfers();
@@ -226,7 +232,7 @@
     retryingIds = new Set(retryingIds).add(transferId);
     try {
       const res = await fetchWithSafariRetry(
-        `/api/transfer/${transferId}/retry`,
+        `/app/api/transfer/${transferId}/retry`,
         { method: "POST" },
       );
       if (res.ok) {

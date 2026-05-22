@@ -38,11 +38,15 @@ vi.mock("$lib/server/supabase", () => ({
   createAdminClient: () => supabase,
 }));
 
-vi.mock("$lib/server/auth", () => ({
-  authenticateDevice: vi.fn(async () => ({
-    device: { id: "d-1", userId: "u-1" },
-  })),
-}));
+vi.mock("$lib/server/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("$lib/server/auth")>();
+  return {
+    ...actual,
+    authenticateDevice: vi.fn(async () => ({
+      device: { id: "d-1", userId: "u-1" },
+    })),
+  };
+});
 
 beforeEach(() => {
   supabase._results.clear();
@@ -74,10 +78,10 @@ describe("transfer log catalog — defensive shape freeze", () => {
     });
 
     const { POST } =
-      await import("../../src/routes/api/transfer/initiate/+server");
+      await import("../../src/routes/app/api/transfer/initiate/+server");
     const sha = "a".repeat(64);
     const evt = {
-      request: new Request("http://x/api/transfer/initiate", {
+      request: new Request("http://x/app/api/transfer/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -86,9 +90,7 @@ describe("transfer log catalog — defensive shape freeze", () => {
           sha256: sha,
         }),
       }),
-      locals: {
-        safeGetSession: async () => ({ user: { id: "u-1" }, session: null }),
-      },
+      locals: { user: { id: "u-1" } },
     } as unknown as Parameters<typeof POST>[0];
 
     await POST(evt);
@@ -163,18 +165,16 @@ describe("transfer log catalog — defensive shape freeze", () => {
     });
 
     const { POST } =
-      await import("../../src/routes/api/transfer/[id]/retry/+server");
+      await import("../../src/routes/app/api/transfer/[id]/retry/+server");
     const evt = {
       params: { id: "11111111-1111-4111-8111-111111111111" },
       request: new Request(
-        "http://x/api/transfer/11111111-1111-4111-8111-111111111111/retry",
+        "http://x/app/api/transfer/11111111-1111-4111-8111-111111111111/retry",
         {
           method: "POST",
         },
       ),
-      locals: {
-        safeGetSession: async () => ({ user: { id: "u-1" }, session: null }),
-      },
+      locals: { user: { id: "u-1" } },
     } as unknown as Parameters<typeof POST>[0];
     await POST(evt);
 

@@ -18,6 +18,7 @@ import {
 } from "$lib/server/catalog/view";
 import { getCatalogMutex } from "$lib/server/catalog/mutex";
 import type { CoverVariant } from "$lib/server/catalog/types";
+import { requireUser } from "$lib/server/auth";
 // GOOGLE_BOOKS_API_KEY is Sensitive in Vercel; static-imported sensitive
 // vars bake empty strings into prebuilt deploys. Read at runtime via
 // dynamic/private. Anonymous Google Books quota is 0/day per project, so
@@ -35,8 +36,7 @@ const VALID_VARIANTS = new Set<CoverVariant>([
 ]);
 
 export const GET: RequestHandler = async (event) => {
-  const { user } = await event.locals.safeGetSession();
-  if (!user) return jsonError(401, "unauthorized", "Sign in required");
+  const user = requireUser(event);
 
   const isbn = canonicalizeIsbn(event.params.isbn);
   if (!isbn) return jsonError(400, "invalid_isbn", "ISBN failed validation");

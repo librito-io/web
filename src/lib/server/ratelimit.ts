@@ -328,7 +328,7 @@ export const pairStatusLimiter = createLimiter({
   failMode: "open",
 });
 
-// /api/pair/claim — 5 attempts per 5 minutes per code:IP
+// /app/api/pair/claim — 5 attempts per 5 minutes per code:IP
 export const pairClaimLimiter = createLimiter({
   window: Ratelimit.slidingWindow(5, "5m"),
   prefix: "rl:pair:claim",
@@ -429,7 +429,7 @@ export const realtimeTokenUserLimiter = createLimiter({
   failMode: "closed",
 });
 
-// Per-user budget on catalog requests. Consumed at the /api/book-catalog
+// Per-user budget on catalog requests. Consumed at the /app/api/book-catalog
 // handler entry, before any Supabase round-trip — so worst-case DB load
 // on cold-miss spam matches the limiter budget rather than the request
 // volume, and the budget that gates expensive cover-resolve fan-out

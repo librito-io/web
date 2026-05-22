@@ -32,19 +32,19 @@ vi.mock("$lib/server/supabase", () => ({
 }));
 
 // Import AFTER mocks.
-const { POST } = await import("../../src/routes/api/transfer/initiate/+server");
+const { POST } =
+  await import("../../src/routes/app/api/transfer/initiate/+server");
 
-function buildEvent(
-  body: unknown,
-  user: { id: string } | null = { id: "u-1" },
-) {
+// Signed-out 401 is enforced by appAuthGuard; per-handler tests
+// always run with locals.user populated (the hook's contract).
+function buildEvent(body: unknown, user: { id: string } = { id: "u-1" }) {
   return {
-    request: new Request("http://x/api/transfer/initiate", {
+    request: new Request("http://x/app/api/transfer/initiate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
-    locals: { safeGetSession: async () => ({ user, session: null }) },
+    locals: { user },
   } as unknown as Parameters<typeof POST>[0];
 }
 
@@ -55,22 +55,15 @@ beforeEach(() => {
   supabase._insertCalls.length = 0;
 });
 
-describe("POST /api/transfer/initiate — Deploy 2 (sha256 required)", () => {
-  it("rejects unauthenticated requests with 401", async () => {
-    const res = await POST(
-      buildEvent({ filename: "a.epub", fileSize: 10 }, null),
-    );
-    expect(res.status).toBe(401);
-  });
-
+describe("POST /app/api/transfer/initiate — Deploy 2 (sha256 required)", () => {
   it("rejects non-JSON body with 400", async () => {
     const evt = {
-      request: new Request("http://x/api/transfer/initiate", {
+      request: new Request("http://x/app/api/transfer/initiate", {
         method: "POST",
         body: "not json",
       }),
       locals: {
-        safeGetSession: async () => ({ user: { id: "u-1" }, session: null }),
+        user: { id: "u-1" },
       },
     } as unknown as Parameters<typeof POST>[0];
     const res = await POST(evt);

@@ -7,15 +7,11 @@ import {
 } from "$lib/server/ratelimit";
 import { claimPairingCode, type ClaimError } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
+import { requireUser } from "$lib/server/auth";
 
-export const POST: RequestHandler = async ({
-  request,
-  locals: { safeGetSession },
-  getClientAddress,
-}) => {
-  // Auth check — must be logged in
-  const { user } = await safeGetSession();
-  if (!user) return jsonError(401, "unauthorized", "Must be logged in");
+export const POST: RequestHandler = async (event) => {
+  const user = requireUser(event);
+  const { request, getClientAddress } = event;
 
   let body: { code?: string };
   try {

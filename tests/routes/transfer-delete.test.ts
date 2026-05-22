@@ -29,29 +29,24 @@ vi.mock("$lib/server/supabase", () => ({
   createAdminClient: () => supabase,
 }));
 
-const { DELETE } = await import("../../src/routes/api/transfer/[id]/+server");
+const { DELETE } =
+  await import("../../src/routes/app/api/transfer/[id]/+server");
 
 const VALID_ID = "11111111-1111-4111-8111-111111111111";
 
-function buildEvent(
-  transferId: string,
-  user: { id: string } | null = { id: "u-1" },
-) {
+// Signed-out 401 is enforced by appAuthGuard; per-handler tests
+// always run with locals.user populated (the hook's contract).
+function buildEvent(transferId: string, user: { id: string } = { id: "u-1" }) {
   return {
     params: { id: transferId },
-    locals: { safeGetSession: async () => ({ user, session: null }) },
+    locals: { user },
   } as unknown as Parameters<typeof DELETE>[0];
 }
 
-describe("DELETE /api/transfer/[id]", () => {
+describe("DELETE /app/api/transfer/[id]", () => {
   beforeEach(() => {
     supabase._results.clear();
     supabase._storage.clear();
-  });
-
-  it("returns 401 when no session user", async () => {
-    const res = await DELETE(buildEvent(VALID_ID, null));
-    expect(res.status).toBe(401);
   });
 
   it("returns 404 on malformed UUID, no DB call", async () => {

@@ -67,7 +67,7 @@ export type BookDetailCatalog = Pick<
 };
 
 /**
- * JSON response shape returned by `GET /api/book-catalog/[isbn]`.
+ * JSON response shape returned by `GET /app/api/book-catalog/[isbn]`.
  *
  * Deriving from CatalogView via Pick keeps the API surface in lockstep
  * with the underlying view: adding a column to CatalogView surfaces as

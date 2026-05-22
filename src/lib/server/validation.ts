@@ -1,5 +1,6 @@
-// Strict UUID v4 regex. Route params accepted by `/api/pair/*` and
-// `/api/transfer/*` are either client-supplied hardware identifiers
+// Strict UUID v4 regex. Route params accepted by `/api/pair/*`,
+// `/api/transfer/*`, and `/app/api/transfer/*` are either client-supplied
+// hardware identifiers
 // (validated against this shape) or server-generated row ids from
 // `gen_random_uuid()`, which always emits v4. Reject anything else at
 // the handler boundary so probe traffic 404s deterministically instead

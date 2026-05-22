@@ -5,7 +5,23 @@ import {
 } from "$env/static/public";
 import { logger } from "$lib/server/log";
 
-export const REALTIME_TOKEN_TTL_SECONDS = 86400;
+// 1h TTL bounds the post-revocation Realtime read-access window. Bearer
+// revocation propagates to /api/sync immediately, but outstanding Realtime
+// JWTs remain valid statelessly until `exp` — so the JWT TTL is the
+// blast-radius ceiling for a compromised device's notes / book_transfers
+// read stream after a user hits "revoke" in the web UI.
+//
+// Firmware refreshes at age > (expiresInSec - 300) on cold boot / wake /
+// reconnect. While in Phoenix `Subscribed` state, in-channel JWT refresh
+// (Phoenix `access_token` event, spec §5.6) keeps the WS open across
+// expiry without a reconnect blip — see librito-io/reader#47.
+//
+// Without the in-channel refresh, a continuous-use session past ~55 min
+// hits a server-side Realtime kick → backoff → reconnect; push events gap
+// for ~3–10s typical and `/api/sync` poll covers the gap.
+//
+// See issue librito-io/web#102.
+export const REALTIME_TOKEN_TTL_SECONDS = 3600;
 
 export type RealtimeSigningJwk = {
   kty: "EC";
@@ -92,7 +108,9 @@ async function checkKidInJwks(kid: string, supabaseUrl: string): Promise<void> {
  * Token is strictly weaker than the device Bearer it was minted from:
  * read-only, RLS-narrowed to one user, no mutation surface. Bearer
  * revocation propagates to /api/sync immediately; outstanding Realtime
- * JWTs remain valid until `exp` (≤24 h). See spec §3 + §13 risk #4.
+ * JWTs remain valid until `exp` (≤ REALTIME_TOKEN_TTL_SECONDS / 1 h).
+ * See spec §3 + §13 risk #4 and the comment on REALTIME_TOKEN_TTL_SECONDS
+ * above for the firmware-refresh interaction.
  *
  * Key material is injected (not read from `$env/dynamic/private`) so
  * vitest can exercise this function without mocking $env.

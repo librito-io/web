@@ -55,7 +55,7 @@ vi.mock("$lib/server/realtime", () => ({
   mintRealtimeToken: vi.fn(async () => {
     throw new Error("simulated jose failure");
   }),
-  REALTIME_TOKEN_TTL_SECONDS: 86400,
+  REALTIME_TOKEN_TTL_SECONDS: 3600,
 }));
 
 const supabase = createMockSupabase();

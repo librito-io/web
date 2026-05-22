@@ -412,8 +412,16 @@ export const transferListLimiter = createLimiter({
 // /api/realtime-token — two limiters layered for defense in depth.
 // Per-device: 1 mint / 60 s. Bounds firmware-bug reconnect storms.
 // Per-user: 30 mints / 1 h. Bounds re-pair-loop bypass (a logged-in user
-// re-pairs to mint a new device.id and skip the per-device cap). 30/h
-// covers a fleet of ~25 devices on one account with reconnect headroom.
+// re-pairs to mint a new device.id and skip the per-device cap).
+//
+// Sizing at REALTIME_TOKEN_TTL_SECONDS = 3600 (1 h): typical 1–3 device
+// account = ~3 mints/h baseline (one refresh per device per ~55 min,
+// either via in-channel refresh on the existing socket — reader#47 — or
+// via the disconnect-and-reconnect fallback path). 30/h carries ~10×
+// headroom for a typical user. A hypothetical 25-device fleet would peak
+// near 25–28 mints/h under reconnect-storm conditions; bump this ceiling
+// (and the per-device cadence) when single-account fleets exceed ~20
+// devices, not on per-user mint count alone.
 //
 // Both fail closed: a single Upstash blip must not collapse the
 // defense-in-depth invariant under a signed-credential mint endpoint.

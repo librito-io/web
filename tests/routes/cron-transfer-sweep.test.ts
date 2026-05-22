@@ -1,5 +1,5 @@
 // tests/routes/cron-transfer-sweep.test.ts
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockSupabase } from "../helpers";
 
 vi.mock("$env/dynamic/private", () => ({
@@ -14,9 +14,11 @@ const withMonitor = vi.fn(
   ): Promise<unknown> => cb(),
 );
 const captureMessage = vi.fn();
+const flush = vi.fn(async () => true);
 vi.mock("@sentry/sveltekit", () => ({
   withMonitor,
   captureMessage,
+  flush,
 }));
 
 const supabase = createMockSupabase();
@@ -40,6 +42,11 @@ function buildEvent(headers: Record<string, string> = {}, query: string = "") {
 }
 
 beforeEach(() => {
+  // Default tests to production env so the withMonitor wrap is active —
+  // per-test stubbing overrides this when exercising the non-prod skip
+  // path. See issue #358: handler skips Sentry.withMonitor on non-prod
+  // envs to avoid env-scoped check-in pollution from preview deploys.
+  vi.stubEnv("VERCEL_ENV", "production");
   supabase._results.clear();
   supabase._storage.clear();
   supabase._updateCalls.length = 0;
@@ -48,6 +55,11 @@ beforeEach(() => {
   // Restore default pass-through after .mockClear() drops it.
   withMonitor.mockImplementation(async (_slug, cb, _options) => cb());
   captureMessage.mockClear();
+  flush.mockClear();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("GET /api/cron/transfer-sweep", () => {
@@ -83,6 +95,44 @@ describe("GET /api/cron/transfer-sweep", () => {
   it("does NOT call Sentry.withMonitor on the ?probe=1 short-circuit", async () => {
     await GET(buildEvent({ Authorization: "Bearer test-secret" }, "?probe=1"));
     expect(withMonitor).not.toHaveBeenCalled();
+  });
+
+  // Issue #358: preview/dev/local invocations must NOT register the monitor.
+  // Once a non-prod env emits any check-in via upsertMonitorConfig, Sentry
+  // creates an env-scoped expectation against the cron schedule that fires
+  // "missed check-in" daily (Vercel cron only invokes production).
+  it("does NOT call Sentry.withMonitor on non-production envs (runs sweep directly)", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    supabase._results.set("book_transfers.select", { data: [], error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+    const body = await res.json();
+
+    expect(withMonitor).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(body.sweep.passAStorageRemoved).toBe(0);
+  });
+
+  // Issue #358: Sentry.flush(2000) must run before the success return so the
+  // SDK's async transport completes the close check-in before Vercel
+  // serverless suspends the function. Mirrors the wait-until.ts pattern.
+  it("awaits Sentry.flush(2000) before returning on the success path", async () => {
+    supabase._results.set("book_transfers.select", { data: [], error: null });
+    supabase._results.set("book_transfers.delete", { data: null, error: null });
+
+    await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+
+    expect(flush).toHaveBeenCalledWith(2000);
+  });
+
+  it("awaits Sentry.flush(2000) before returning on the error (500) path", async () => {
+    withMonitor.mockImplementationOnce(async () => {
+      throw new Error("boom");
+    });
+    const res = await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+    expect(res.status).toBe(500);
+    expect(flush).toHaveBeenCalledWith(2000);
   });
 
   it("wraps the sweep body in Sentry.withMonitor with the canonical slug and schedule", async () => {

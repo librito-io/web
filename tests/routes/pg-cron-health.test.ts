@@ -7,9 +7,11 @@ vi.mock("$env/dynamic/private", () => ({
 
 const captureMessage = vi.fn();
 const captureException = vi.fn();
+const flush = vi.fn(async () => true);
 vi.mock("@sentry/sveltekit", () => ({
   captureMessage,
   captureException,
+  flush,
 }));
 
 const supabase = createMockSupabase();
@@ -32,6 +34,7 @@ beforeEach(() => {
   supabase._results.clear();
   captureMessage.mockReset();
   captureException.mockReset();
+  flush.mockClear();
 });
 
 describe("GET /api/cron/pg-cron-health", () => {
@@ -116,6 +119,27 @@ describe("GET /api/cron/pg-cron-health", () => {
     expect(captureMessage).not.toHaveBeenCalled();
   });
 
+  // Issue #358: Sentry.flush(2000) before return on every path that emitted
+  // an event, so the SDK's async transport completes the send before Vercel
+  // serverless suspends the function.
+  it("awaits Sentry.flush(2000) when captureMessage fires", async () => {
+    supabase._results.set("rpc.pg_cron_failure_summary", {
+      data: [{ jobname: "expire-stale-transfers", failures: 3 }],
+      error: null,
+    });
+    await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+    expect(flush).toHaveBeenCalledWith(2000);
+  });
+
+  it("does NOT call Sentry.flush on the clean (no-failures) path", async () => {
+    supabase._results.set("rpc.pg_cron_failure_summary", {
+      data: [{ jobname: "expire-stale-transfers", failures: 0 }],
+      error: null,
+    });
+    await GET(buildEvent({ Authorization: "Bearer test-secret" }));
+    expect(flush).not.toHaveBeenCalled();
+  });
+
   it("captureException fires + 500 returned on RPC error", async () => {
     supabase._results.set("rpc.pg_cron_failure_summary", {
       data: null,
@@ -125,5 +149,6 @@ describe("GET /api/cron/pg-cron-health", () => {
     expect(res.status).toBe(500);
     expect(captureException).toHaveBeenCalledTimes(1);
     expect(captureMessage).not.toHaveBeenCalled();
+    expect(flush).toHaveBeenCalledWith(2000);
   });
 });

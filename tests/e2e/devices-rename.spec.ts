@@ -5,6 +5,7 @@ import {
   login,
   type E2EUser,
 } from "./helpers/auth";
+import { awaitHydration } from "./helpers/hydrate";
 import { getAdmin } from "./helpers/supabase";
 
 // Worked example for issue #346. Covers the three browser-only assertions
@@ -46,10 +47,7 @@ test.describe("devices rename flow", () => {
 
     await login(page, user);
     await page.goto("/app/devices");
-    // Wait for Svelte 5 hydration so the Rename onclick handler is wired up
-    // before we click — SSR ships the button without listeners, so a click
-    // racing hydration is a no-op.
-    await page.waitForLoadState("networkidle");
+    await awaitHydration(page);
 
     await expect(
       page.getByText("Original Device", { exact: true }),
@@ -90,7 +88,7 @@ test.describe("devices rename flow", () => {
 
     await login(page, user);
     await page.goto("/app/devices");
-    await page.waitForLoadState("networkidle");
+    await awaitHydration(page);
 
     await expect(page.getByText("Device Alpha", { exact: true })).toBeVisible();
     await expect(page.getByText("Device Bravo", { exact: true })).toBeVisible();

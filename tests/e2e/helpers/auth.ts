@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { getAdmin } from "./supabase";
+import { awaitHydration } from "./hydrate";
 
 export interface E2EUser {
   id: string;
@@ -39,10 +40,7 @@ export async function cleanupUser(id: string): Promise<void> {
 // about exercising.
 export async function login(page: Page, user: E2EUser): Promise<void> {
   await page.goto("/auth/login");
-  // Svelte 5 SSR ships the form without the onsubmit handler; a click
-  // racing hydration silently no-ops and waitForURL hangs to 30s. Wait
-  // for hydration to settle before driving the form.
-  await page.waitForLoadState("networkidle");
+  await awaitHydration(page);
   await page.getByLabel("Email").fill(user.email);
   await page.getByLabel("Password").fill(user.password);
   await page.getByRole("button", { name: /log in/i }).click();

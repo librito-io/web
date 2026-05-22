@@ -1,10 +1,10 @@
 import type { RequestHandler } from "./$types";
 import { createAdminClient } from "$lib/server/supabase";
-import { jsonError, jsonSuccess } from "$lib/server/errors";
+import { jsonSuccess } from "$lib/server/errors";
 import { parseIsbnsFromBody } from "$lib/server/catalog/parse";
 import { resolveIsbn } from "$lib/server/catalog/fetcher";
 import { fetchNytBestsellerIsbns } from "$lib/server/catalog/nyt";
-import { constantTimeEqualString } from "$lib/server/cron-auth";
+import { authorizeCronRequest } from "$lib/server/cron-auth";
 import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
@@ -87,21 +87,10 @@ async function runWarmup(
   });
 }
 
-function authorized(request: Request): boolean {
-  const secret = privateEnv.CRON_SECRET;
-  if (!secret) return false;
-  const auth = request.headers.get("authorization") ?? "";
-  return constantTimeEqualString(auth, `Bearer ${secret}`);
-}
-
 // Vercel cron invokes scheduled paths via GET (no body). See issue #187.
 export const GET: RequestHandler = async ({ request, fetch, url }) => {
-  if (!privateEnv.CRON_SECRET) {
-    return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
-  }
-  if (!authorized(request)) {
-    return jsonError(401, "unauthorized", "Cron secret mismatch");
-  }
+  const authFailure = authorizeCronRequest(request, privateEnv.CRON_SECRET);
+  if (authFailure) return authFailure;
   // ?probe=1 lets the deploy-time smoke check exercise auth + reachability
   // without triggering an actual warmup — running one per deploy would
   // burn NYT/OpenLibrary/GoogleBooks API budget and upload covers needlessly.
@@ -118,12 +107,8 @@ export const GET: RequestHandler = async ({ request, fetch, url }) => {
 // POST path retained for operator-triggered bulk seeds with explicit ISBN
 // list in the JSON body (scripts/data/README.md).
 export const POST: RequestHandler = async ({ request, fetch, url }) => {
-  if (!privateEnv.CRON_SECRET) {
-    return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
-  }
-  if (!authorized(request)) {
-    return jsonError(401, "unauthorized", "Cron secret mismatch");
-  }
+  const authFailure = authorizeCronRequest(request, privateEnv.CRON_SECRET);
+  if (authFailure) return authFailure;
   // ?probe=1 short-circuits after auth, mirroring the GET handler — keeps
   // operator smoke probes against the bulk-seed entry from burning
   // NYT/OpenLibrary/GoogleBooks budget and uploading covers needlessly.

@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { jsonError } from "$lib/server/errors";
 
 /**
  * Constant-time string equality for cron-auth comparisons.
@@ -16,4 +17,34 @@ export function constantTimeEqualString(a: string, b: string): boolean {
   const ha = createHash("sha256").update(a).digest();
   const hb = createHash("sha256").update(b).digest();
   return timingSafeEqual(ha, hb);
+}
+
+/**
+ * Canonical cron-auth gate for every cron / cron-pattern handler.
+ *
+ * Returns a `Response` to short-circuit the handler on failure, or `null`
+ * when the request is authorized and the caller should proceed (typically
+ * to the `?probe=1` short-circuit, then real work — see CLAUDE.md
+ * "Cron handlers").
+ *
+ * Two failure modes:
+ *   500 server_misconfigured — `CRON_SECRET` env var unset (config drift).
+ *                              Surfaces loudly rather than 401'ing every
+ *                              fire silently.
+ *   401 unauthorized         — `Authorization: Bearer <secret>` missing or
+ *                              mismatched. Constant-time compared via
+ *                              `constantTimeEqualString`.
+ */
+export function authorizeCronRequest(
+  request: Request,
+  secret: string | undefined,
+): Response | null {
+  if (!secret) {
+    return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
+  }
+  const auth = request.headers.get("authorization") ?? "";
+  if (!constantTimeEqualString(auth, `Bearer ${secret}`)) {
+    return jsonError(401, "unauthorized", "Cron secret mismatch");
+  }
+  return null;
 }

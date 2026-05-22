@@ -70,14 +70,19 @@ export const actions: Actions = {
     // Atomic ownership UPDATE: RLS WITH CHECK enforces user_id = auth.uid();
     // the explicit .eq("user_id", user.id) predicate is kept as
     // defense-in-depth so a future RLS regression cannot widen the blast
-    // radius on its own. PGRST116 = "no rows" from .single(), which here
-    // means the device id doesn't exist OR belongs to another user; we
-    // collapse both into a 404 to avoid leaking existence.
+    // radius on its own. .is("revoked_at", null) mirrors the load query's
+    // filter so a row revoked between page load and Save (sibling tab
+    // unpair, admin revoke) yields PGRST116 → 404 rather than silently
+    // succeeding into a row that's about to disappear from the list.
+    // PGRST116 = "no rows" from .single() collapses three cases into the
+    // same 404: device id doesn't exist, belongs to another user, or is
+    // already revoked — intentional, to avoid leaking existence.
     const { error } = await supabase
       .from("devices")
       .update({ name })
       .eq("id", deviceId)
       .eq("user_id", user.id)
+      .is("revoked_at", null)
       .select("id")
       .single();
 

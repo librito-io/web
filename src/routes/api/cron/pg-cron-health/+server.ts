@@ -2,7 +2,7 @@ import type { RequestHandler } from "./$types";
 import { env as privateEnv } from "$env/dynamic/private";
 import { createAdminClient } from "$lib/server/supabase";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
-import { constantTimeEqualString } from "$lib/server/cron-auth";
+import { authorizeCronRequest } from "$lib/server/cron-auth";
 import { logger } from "$lib/server/log";
 import * as Sentry from "@sentry/sveltekit";
 
@@ -18,14 +18,8 @@ import * as Sentry from "@sentry/sveltekit";
 // silent failure surface). pg-cron-health failure reverts to the
 // pre-#190 unobserved state — acceptable risk at pre-launch scale.
 export const GET: RequestHandler = async ({ request, url }) => {
-  const cronSecret = privateEnv.CRON_SECRET;
-  if (!cronSecret) {
-    return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
-  }
-  const auth = request.headers.get("authorization") ?? "";
-  if (!constantTimeEqualString(auth, `Bearer ${cronSecret}`)) {
-    return jsonError(401, "unauthorized", "Cron secret mismatch");
-  }
+  const authFailure = authorizeCronRequest(request, privateEnv.CRON_SECRET);
+  if (authFailure) return authFailure;
   if (url.searchParams.get("probe") === "1") {
     return jsonSuccess({ probe: true });
   }

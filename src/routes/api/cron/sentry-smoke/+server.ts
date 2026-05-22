@@ -1,7 +1,7 @@
 import type { RequestHandler } from "./$types";
 import { env as privateEnv } from "$env/dynamic/private";
-import { jsonError, jsonSuccess } from "$lib/server/errors";
-import { constantTimeEqualString } from "$lib/server/cron-auth";
+import { jsonSuccess } from "$lib/server/errors";
+import { authorizeCronRequest } from "$lib/server/cron-auth";
 import { runInBackground } from "$lib/server/wait-until";
 
 // Operator health probe for the Sentry pipeline. POST-only (avoids
@@ -14,15 +14,8 @@ import { runInBackground } from "$lib/server/wait-until";
 // that propagates into Sentry.captureException via wait-until.ts.
 export const POST: RequestHandler = async (event) => {
   const { request, url } = event;
-  const cronSecret = privateEnv.CRON_SECRET;
-  if (!cronSecret) {
-    return jsonError(500, "server_misconfigured", "CRON_SECRET unset");
-  }
-  const auth = request.headers.get("authorization") ?? "";
-  const expected = `Bearer ${cronSecret}`;
-  if (!constantTimeEqualString(auth, expected)) {
-    return jsonError(401, "unauthorized", "Sentry smoke secret mismatch");
-  }
+  const authFailure = authorizeCronRequest(request, privateEnv.CRON_SECRET);
+  if (authFailure) return authFailure;
   if (url.searchParams.get("probe") === "1") {
     return jsonSuccess({ probe: true });
   }

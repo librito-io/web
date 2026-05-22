@@ -22,3 +22,9 @@ docs/audits-wip/
 
 # Claude Code branch-review skill calibration log (per-developer, local only)
 .claude/.review-log.jsonl
+
+# Playwright e2e suite artefacts (HTML report, traces, screenshots, videos)
+test-results/
+playwright-report/
+blob-report/
+.playwright-cache/

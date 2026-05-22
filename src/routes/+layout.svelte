@@ -34,6 +34,18 @@
     // would time out unrelated to product behaviour. See issue #360.
     document.documentElement.setAttribute("data-hydrated", "true");
 
+    // Block pinch-zoom on iOS Safari. The viewport meta's user-scalable=no
+    // is honored by Android Chrome but ignored by iOS Safari ≥10 for a11y.
+    // OS-level Accessibility Zoom still works regardless.
+    const blockGesture = (e: Event): void => e.preventDefault();
+    const blockMultiTouch = (e: TouchEvent): void => {
+      if (e.touches.length > 1) e.preventDefault();
+    };
+    document.addEventListener("gesturestart", blockGesture);
+    document.addEventListener("gesturechange", blockGesture);
+    document.addEventListener("gestureend", blockGesture);
+    document.addEventListener("touchmove", blockMultiTouch, { passive: false });
+
     const {
       data: { subscription },
     } = data.supabase.auth.onAuthStateChange((_, session) => {
@@ -41,7 +53,13 @@
         invalidate("supabase:auth");
       }
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      document.removeEventListener("gesturestart", blockGesture);
+      document.removeEventListener("gesturechange", blockGesture);
+      document.removeEventListener("gestureend", blockGesture);
+      document.removeEventListener("touchmove", blockMultiTouch);
+    };
   });
 
   async function logout(): Promise<void> {

@@ -71,6 +71,10 @@ npx vitest run tests/lib/sync.test.ts
 # Behavior-level migration integration suite (requires local Supabase running)
 npm run test:integration
 
+# Headless-browser e2e suite (requires local Supabase + Chromium installed)
+npm run test:e2e
+npm run test:e2e:ui     # interactive Playwright UI mode
+
 # Supabase local
 supabase start          # Start local Supabase
 supabase db reset       # Reset and re-apply all migrations
@@ -84,6 +88,28 @@ supabase stop           # Stop local Supabase
 **Scope**: behavior-level guards unit tests can't catch — RPC tombstone filtering, `pg_cron` job presence + schedule, `supabase_realtime` publication membership, `REPLICA IDENTITY FULL` on replicated tables. Connects as superuser via `postgres-js`, impersonates via `request.jwt.claims` / `SET LOCAL ROLE authenticated` where needed. **RLS is out of scope** — separate suite. Serial: `pool: 'forks'`, `singleFork: true`, `sequence.concurrent` disabled.
 
 **Migration CI gate** (`.github/workflows/migration-smoke.yml`): runs `supabase start && supabase db reset --local` then the integration suite + `gen:types` diff on every PR / `main` push that touches `supabase/migrations/**`, `supabase/seed.sql`, `supabase/config.toml`, `src/lib/types/database.ts`, `tests/integration/**`, or `vitest.integration.config.ts`. **CLI pin ≥ v2.91.1** — earlier versions carry the [`atomic` parser bug](https://github.com/supabase/cli/pull/5064) (function names containing "atomic" trip SQLSTATE 42601 on subsequent statements; hit prod via PR #40 → hotfix #41). Bumping the pin requires a coordinated bump of every contributor's local CLI and the laptop that runs `supabase db push`. Re-run `supabase db reset --local` locally before pushing migration edits — CI is the safety net, not the primary signal.
+
+### E2E suite (`tests/e2e/`)
+
+Headless-Chromium Playwright suite for client-side behaviour HTTP smoke can't observe: `$state` mutations, native input behaviour (`maxlength`, paste), inline error rendering scoped to a row, focus management, multi-step UI flows. `playwright.config.ts` autostarts `npm run dev` via `webServer`; the suite expects local Supabase already running (helpers shell out to `supabase status -o env` like the integration suite).
+
+**Setup (one-time per machine)**: `npx playwright install chromium` after `npm i`. The ~300MB Chromium download is opt-in — contributors who never run e2e skip it. `npx playwright install --with-deps chromium` on Linux for OS-level libs.
+
+**Decision tree — when to reach for which test type**:
+
+- **Server action / API behaviour** → unit suite (`tests/lib/`, `tests/routes/`) for pure logic; HTTP smoke (`@supabase/ssr` cookie jar + `fetch` to `?/action` endpoints) for end-to-end server flows. Faster, no browser launch, cheap to author. Reference pattern: PR #344 local smoke.
+- **`$state`-driven UI, native input behaviour, multi-step flows, focus, paste, inline error rendering** → Playwright (`tests/e2e/`). Only path that observes hydrated client behaviour.
+- **Visual polish, layout, spacing, anything subjective** → human eye. Playwright screenshots help reviewers but pixel diffs are flaky and a poor substitute for taste.
+
+**Authoring rules**:
+
+- One test = one fresh user via `createE2EUser()` from `tests/e2e/helpers/auth.ts`; cleanup in `afterEach`. Cascading FKs scrub child rows on user delete.
+- Seed device/book/highlight rows via the admin Supabase client (`getAdmin()` in `helpers/supabase.ts`) rather than driving multi-step UI to set up state. Tests assert one flow, not the whole app graph.
+- Prefer `getByRole`/`getByLabel` over CSS selectors so tests track user-facing semantics, not DOM churn.
+- **Always `await page.waitForLoadState("networkidle")` after `page.goto()` before clicking handlers** — SSR ships buttons without `onclick` listeners, and Svelte 5 hydration races a fast click. Skipping this manifests as silent no-op clicks and timed-out `toBeVisible` assertions on the post-click state.
+- Login via the real form (`login()` helper drives `signInWithPassword` through the UI) — exercises the `@supabase/ssr` cookie-write codepath that real users hit.
+
+**CI gate** (`.github/workflows/e2e-smoke.yml`): runs Chromium against a freshly started local Supabase on every PR / `main` push touching `src/routes/**`, `src/lib/**/*.svelte`, `src/lib/**/*.svelte.ts`, `src/app.html`/`src/app.css`, `tests/e2e/**`, `playwright.config.ts`, lockfile, or the workflow itself. Non-UI PRs (cron handlers, migrations, server-only fixes) skip the 60s Chromium boot. **Failure blocks merge** — same posture as `migration-smoke`. Trace + screenshot + video artefacts uploaded as `playwright-report` on failure (14-day retention). Chromium binary cached across runs via `actions/cache` keyed on `package-lock.json`.
 
 ## Local dev setup — Realtime signing key
 

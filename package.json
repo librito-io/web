@@ -10,10 +10,13 @@
     "gen:types": "supabase gen types typescript --local > src/lib/types/database.ts",
     "test": "vitest run",
     "test:integration": "INTEGRATION=1 vitest run --config vitest.integration.config.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "prepare": "svelte-kit sync",
     "generate-types": "supabase gen types typescript --linked 2>/dev/null > src/lib/types/database.ts"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@sveltejs/adapter-vercel": "^6.3.3",
     "@sveltejs/kit": "^2.21.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

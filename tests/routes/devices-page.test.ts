@@ -116,11 +116,22 @@ describe("action rename /app/devices", () => {
     expect(res).toMatchObject({ status: 400 });
   });
 
-  it("returns 400 when name exceeds 50 chars", async () => {
+  it("returns 400 when name exceeds 50 chars and echoes deviceId/action so the UI can scope the error", async () => {
     const res = await actions.rename(
       buildActionEvent({ deviceId: "d-1", name: "x".repeat(51) }),
     );
-    expect(res).toMatchObject({ status: 400 });
+    // The UI scopes `form?.error` rendering by `(action, deviceId)` so
+    // the message lands under the matching device row's rename form.
+    // Dropping either field silently re-fans the error to every device's
+    // rename form during the milliseconds between submit and `update()`.
+    expect(res).toMatchObject({
+      status: 400,
+      data: {
+        action: "rename",
+        deviceId: "d-1",
+        error: expect.stringContaining("50 characters"),
+      },
+    });
   });
 
   it("returns 404 when the device row does not match user_id (RLS-filtered)", async () => {
@@ -135,7 +146,10 @@ describe("action rename /app/devices", () => {
     const res = await actions.rename(
       buildActionEvent({ deviceId: "d-other", name: "New" }),
     );
-    expect(res).toMatchObject({ status: 404 });
+    expect(res).toMatchObject({
+      status: 404,
+      data: { action: "rename", deviceId: "d-other" },
+    });
   });
 
   it("returns 404 when the device id does not exist", async () => {
@@ -190,7 +204,10 @@ describe("action rename /app/devices", () => {
     const res = await actions.rename(
       buildActionEvent({ deviceId: "d-1", name: "Reader" }),
     );
-    expect(res).toMatchObject({ status: 500 });
+    expect(res).toMatchObject({
+      status: 500,
+      data: { action: "rename", deviceId: "d-1" },
+    });
   });
 });
 
@@ -213,7 +230,10 @@ describe("action unpair /app/devices", () => {
       error: { code: "PGRST116" },
     });
     const res = await actions.unpair(buildActionEvent({ deviceId: "d-other" }));
-    expect(res).toMatchObject({ status: 404 });
+    expect(res).toMatchObject({
+      status: 404,
+      data: { action: "unpair", deviceId: "d-other" },
+    });
   });
 
   it("unpairs the device and reports success", async () => {

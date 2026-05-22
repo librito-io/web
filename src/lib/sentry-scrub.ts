@@ -37,6 +37,12 @@ export interface ScrubableEvent {
  * Base-name additions here should also be added to pino's `paths`
  * (root + `*.` form) and vice versa. Header additions are pino-only —
  * add a sibling `delete headers.<name>` in `scrubEvent` to mirror.
+ *
+ * Scope: `scrubEvent` is wired as `beforeSend` in BOTH `hooks.server.ts`
+ * and `hooks.client.ts`, so this set redacts client-originated Sentry
+ * events as well. Pino runs server-side only, so REDACTED_FIELDS is the
+ * sole redaction layer for browser-side errors — never reason "pino
+ * already covers it" when deciding whether to add an entry.
  */
 export const REDACTED_FIELDS = [
   "token",

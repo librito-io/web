@@ -175,10 +175,14 @@ describe("action rename /app/devices", () => {
     expect(supabase._updateCalls).toEqual([
       { table: "devices", payload: { name: "Reader" } },
     ]);
-    // Predicate assertions: the UPDATE must scope by id AND user_id.
-    // The .eq("user_id", user.id) clause is documented as
-    // defense-in-depth against a future RLS regression — silent removal
-    // would widen the blast radius without failing this suite otherwise.
+    // Predicate assertions: the UPDATE must scope by id AND user_id, plus
+    // the .is("revoked_at", null) guard that mirrors the load query's
+    // filter so a row revoked between page load and Save yields PGRST116
+    // → 404 rather than silently succeeding into a row that's about to
+    // disappear from the list. The .eq("user_id", user.id) clause is
+    // documented as defense-in-depth against a future RLS regression —
+    // silent removal of either predicate would widen the blast radius
+    // without failing this suite otherwise.
     const updateChain = supabase._chainCalls.filter(
       (c) => c.table === "devices" && c.operation === "update",
     );
@@ -192,8 +196,36 @@ describe("action rename /app/devices", () => {
           method: "eq",
           args: ["user_id", USER_ID],
         }),
+        expect.objectContaining({
+          method: "is",
+          args: ["revoked_at", null],
+        }),
       ]),
     );
+  });
+
+  it("returns 404 for an already-revoked device (rename rejects revoked rows)", async () => {
+    // The route adds .is("revoked_at", null) to the UPDATE chain so a
+    // row revoked between page load and Save (sibling tab unpair, admin
+    // revoke) matches no candidates and PostgREST yields PGRST116 from
+    // .single(). Without this guard the rename would silently succeed
+    // and the user would see the row vanish from the list on the next
+    // load — confusing "device went missing right after I saved" UX.
+    supabase._results.set("devices.update", {
+      data: null,
+      error: { code: "PGRST116" },
+    });
+    const res = await actions.rename(
+      buildActionEvent({ deviceId: "d-revoked", name: "New" }),
+    );
+    expect(res).toMatchObject({
+      status: 404,
+      data: {
+        action: "rename",
+        deviceId: "d-revoked",
+        error: "Device not found",
+      },
+    });
   });
 
   it("returns 500 on non-PGRST116 update error", async () => {

@@ -43,6 +43,9 @@ html {
   overflow-y: scroll;
   overflow-x: hidden;
   scrollbar-gutter: stable;
+  /* Kill double-tap-zoom delay; pinch-zoom blocked separately (viewport meta
+     for Android, gesture/touchmove handlers for iOS Safari ≥10). */
+  touch-action: manipulation;
 }
 * {
   margin: 0;

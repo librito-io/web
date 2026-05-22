@@ -107,7 +107,6 @@ export function toCatalogResponse(
   view: CatalogView | null,
   isbn: string,
 ): CatalogResponse {
-  const coldMiss = !view || view.cover_url === null;
   return {
     isbn,
     title: view?.title ?? null,
@@ -121,8 +120,8 @@ export function toCatalogResponse(
     language: view?.language ?? null,
     series_name: view?.series_name ?? null,
     series_position: view?.series_position ?? null,
-    cover_url: coldMiss ? PLACEHOLDER_COVER_URL : (view!.cover_url as string),
-    cold_miss: coldMiss,
+    cover_url: view?.cover_url ?? PLACEHOLDER_COVER_URL,
+    cold_miss: !view || view.cover_url === null,
   };
 }
 

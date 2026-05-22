@@ -80,17 +80,28 @@ type StorageRecord = {
   image_sha256: string;
 };
 
+// Tightest projection that covers every field this file reads off the
+// existing row. Hot path — runs on every viewer first-render via
+// runInBackground — so `select("*")` drags `description_raw` / `subjects` /
+// `description` over the wire on every cache-hit check for nothing.
+// ResolveResult.row is returned to callers but none of them read `.row`,
+// so widening this list requires a new in-file consumer.
+const RESOLVE_SELECT =
+  "pending_storage, storage_path, last_attempted_at, attempt_count, do_not_refetch_description";
+
 async function selectByIsbn(
   supabase: SupabaseClient,
   isbn: string,
 ): Promise<Partial<BookCatalogRowFields> | null> {
   const { data, error } = await supabase
     .from("book_catalog")
-    .select("*")
+    .select(RESOLVE_SELECT)
     .eq("isbn", isbn)
     .maybeSingle();
   if (error) throw new Error(`book_catalog select: ${error.message}`);
-  return (data as Partial<BookCatalogRowFields> | null) ?? null;
+  // Two-step `as unknown as` so the literal-union refinement on
+  // `cover_storage_backend` is explicit at the cast site (view.ts pattern).
+  return (data as unknown as Partial<BookCatalogRowFields> | null) ?? null;
 }
 
 async function selectBySha(
@@ -1033,13 +1044,14 @@ export async function resolveTitleAuthor(
 
   const { data: existingRaw, error: selErr } = await supabase
     .from("book_catalog")
-    .select("*")
+    .select(RESOLVE_SELECT)
     .is("isbn", null)
     .eq("normalized_title_author", key)
     .maybeSingle();
   if (selErr) throw new Error(`book_catalog select: ${selErr.message}`);
 
-  const existing = existingRaw as Partial<BookCatalogRowFields> | null;
+  const existing =
+    existingRaw as unknown as Partial<BookCatalogRowFields> | null;
   // pending_storage=TRUE means a prior round wrote the metadata row but
   // never finalized the storage fields (upload throw or finalize UPDATE
   // throw). Treat as miss so this round retries the upload + finalize.

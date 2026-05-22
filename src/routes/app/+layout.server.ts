@@ -1,15 +1,23 @@
-import { redirect } from "@sveltejs/kit";
 import type { LayoutServerLoad } from "./$types";
+import { requireUser } from "$lib/server/auth";
 
-export const load: LayoutServerLoad = async ({
-  locals: { safeGetSession },
-}) => {
-  const { session, user } = await safeGetSession();
-  // Narrow on both so child loaders consuming `await parent()` see
-  // `session` and `user` as non-null. Removes 4 redundant
-  // `safeGetSession` calls in child page loaders (issue #151). Note:
-  // form actions and `+server.ts` API endpoints do NOT run through this
-  // guard — they must still authenticate at their own entry points.
-  if (!session || !user) redirect(303, "/auth/login");
+// Auth-gating moved to the appAuthGuard hook in hooks.server.ts (issue
+// #348) — it runs for every /app/** request (loads, actions, +server.ts
+// endpoints) and redirects unauthenticated GETs to /auth/login with
+// ?return_to preserved. This loader is now a pass-through that exposes
+// session + user to child page loaders via `await parent()`. The hook
+// has already populated locals.user / locals.session as non-null by
+// the time this runs.
+export const load: LayoutServerLoad = async (event) => {
+  const user = requireUser(event);
+  // session is guaranteed non-null when user is — the hook narrows on
+  // both — but App.Locals types it nullable globally because anonymous
+  // routes legitimately have null. Assert via the same hook contract.
+  const session = event.locals.session;
+  if (!session) {
+    // Defense-in-depth — should never fire because the hook narrows
+    // session alongside user. Loud 500 surfaces a hook regression.
+    throw new Error("locals.session missing in /app/** guarded route");
+  }
   return { session, user };
 };

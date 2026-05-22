@@ -1,4 +1,5 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { error, type RequestEvent } from "@sveltejs/kit";
 import { hashToken } from "./tokens";
 import { jsonError } from "./errors";
 
@@ -26,8 +27,25 @@ const UUID_RE =
 // credentials all mean "you are not authenticated"). Used by every
 // authenticated device endpoint. /api/device/unpair is the one
 // exception — it treats invalid/revoked as success for idempotency.
-export function authErrorResponse(error: AuthErrorCode): Response {
-  return jsonError(401, error, AUTH_ERROR_MESSAGES[error]);
+export function authErrorResponse(code: AuthErrorCode): Response {
+  return jsonError(401, code, AUTH_ERROR_MESSAGES[code]);
+}
+
+// Narrows `event.locals.user` to non-null inside /app/** route handlers
+// (page loaders, form actions, +server.ts endpoints). The appAuthGuard
+// hook in hooks.server.ts populates locals.user before any /app/**
+// handler runs; a null read here means the hook regressed or the
+// helper is being called outside the guarded prefix.
+//
+// 500 is intentional and load-bearing — this is a server-side
+// contract violation (hook missing or misordered), not a client auth
+// failure. Surfacing as 500 fires Sentry, alerts ops, and pages
+// someone; a silent fallback to 401 would hide the bug.
+export function requireUser(event: RequestEvent): User {
+  if (!event.locals.user) {
+    error(500, "requireUser called outside /app/** guarded route");
+  }
+  return event.locals.user;
 }
 
 export async function authenticateDevice(

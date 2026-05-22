@@ -13,6 +13,13 @@ declare global {
         session: Session | null;
         user: User | null;
       }>;
+      // Populated by appAuthGuard (hooks.server.ts) on /app/** routes
+      // before any page load, form action, or +server.ts endpoint runs.
+      // Null on anonymous routes (`/`, `/auth/*`). Callers under /app/**
+      // must narrow via `requireUser(event)` — never read .user directly,
+      // and never rely on the `!` operator. Issue #348.
+      session: Session | null;
+      user: User | null;
       requestId: string;
     }
     interface PageData {

@@ -9,13 +9,11 @@ import {
   MAX_PENDING_TRANSFERS,
 } from "$lib/server/transfer";
 import { logger } from "$lib/server/log";
+import { requireUser } from "$lib/server/auth";
 
-export const POST: RequestHandler = async ({
-  request,
-  locals: { safeGetSession },
-}) => {
-  const { user } = await safeGetSession();
-  if (!user) return jsonError(401, "unauthorized", "Must be logged in");
+export const POST: RequestHandler = async (event) => {
+  const user = requireUser(event);
+  const { request } = event;
 
   let rawBody: unknown;
   try {

@@ -4,13 +4,11 @@ import { transferRetryLimiter, enforceRateLimit } from "$lib/server/ratelimit";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { logger } from "$lib/server/log";
 import { UUID_RE } from "$lib/server/validation";
+import { requireUser } from "$lib/server/auth";
 
-export const POST: RequestHandler = async ({
-  params,
-  locals: { safeGetSession },
-}) => {
-  const { user } = await safeGetSession();
-  if (!user) return jsonError(401, "unauthorized", "Must be logged in");
+export const POST: RequestHandler = async (event) => {
+  const user = requireUser(event);
+  const { params } = event;
 
   if (!UUID_RE.test(params.id)) {
     return jsonError(404, "not_found", "Transfer not found");

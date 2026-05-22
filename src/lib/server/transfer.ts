@@ -138,7 +138,7 @@ export type ParseInitiateResult =
   | { ok: true; value: ParsedInitiateBody }
   | { ok: false; status: number; code: string; message: string };
 
-// Validates the JSON payload of POST /api/transfer/initiate and returns a
+// Validates the JSON payload of POST /app/api/transfer/initiate and returns a
 // canonical { safeFilename, fileSize, sha256 } tuple. Mirrors the
 // validateSyncPayload discriminated-result pattern so the route handler
 // stays "auth → call helper → respond". HTTP error shape (status + code +

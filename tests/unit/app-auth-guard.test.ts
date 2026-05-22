@@ -168,6 +168,39 @@ describe("appAuthGuard", () => {
     expect(res.status).toBe(200);
   });
 
+  it("signed-out GET on /app/api/* → 401 JSON (XHR endpoints never 303)", async () => {
+    // /app/api/* are machine-readable endpoints — fetch() auto-follows
+    // 303s and a redirect to HTML /auth/login crashes downstream
+    // JSON.parse on mid-page session expiry. Hook returns 401 JSON for
+    // both GET and non-GET on this prefix. (#351)
+    const event = makeEvent({
+      routeId: "/app/api/transfer/list",
+      method: "GET",
+      path: "/app/api/transfer/list",
+    });
+    const resolve = vi.fn();
+    const res = await appAuthGuard({ event, resolve });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = await res.json();
+    expect(body).toMatchObject({ error: "unauthorized" });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("signed-out POST on /app/api/* → 401 JSON (no redirect, no handler call)", async () => {
+    const event = makeEvent({
+      routeId: "/app/api/pair/claim",
+      method: "POST",
+      path: "/app/api/pair/claim",
+    });
+    const resolve = vi.fn();
+    const res = await appAuthGuard({ event, resolve });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toMatchObject({ error: "unauthorized" });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
   it("signed-out non-/app POST → pass-through (not 401)", async () => {
     // Anonymous POSTs to /auth/login form action, /api/pair/request,
     // etc. must NOT get the guard's 401 — those endpoints handle their

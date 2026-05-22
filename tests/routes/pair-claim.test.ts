@@ -49,28 +49,28 @@ vi.mock("$lib/server/supabase", () => ({
   createAdminClient: () => ({}),
 }));
 
-const { POST } = await import("../../src/routes/api/pair/claim/+server");
+const { POST } = await import("../../src/routes/app/api/pair/claim/+server");
 const { claimPairingCode } = await import("$lib/server/pairing");
 const claimSpy = claimPairingCode as unknown as ReturnType<typeof vi.fn>;
 
-function buildEvent(
-  body: unknown,
-  user: { id: string; email?: string } | null,
-) {
+// Signed-out 401 is enforced by appAuthGuard in hooks.server.ts and
+// covered in tests/unit/app-auth-guard.test.ts. Per-handler tests
+// always run with locals.user populated (the hook's contract).
+function buildEvent(body: unknown, user: { id: string; email?: string }) {
   return {
-    request: new Request("http://x/api/pair/claim", {
+    request: new Request("http://x/app/api/pair/claim", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }),
     locals: {
-      safeGetSession: async () => ({ user }),
+      user,
     },
     getClientAddress: () => "203.0.113.7",
   } as unknown as Parameters<typeof POST>[0];
 }
 
-describe("POST /api/pair/claim — fail-closed under Upstash outage", () => {
+describe("POST /app/api/pair/claim — fail-closed under Upstash outage", () => {
   it("returns 503 rate_limit_unavailable when limiter throws", async () => {
     const { pairClaimLimiter } = await import("$lib/server/ratelimit");
 
@@ -89,7 +89,7 @@ describe("POST /api/pair/claim — fail-closed under Upstash outage", () => {
   });
 });
 
-describe("POST /api/pair/claim — session-email wiring", () => {
+describe("POST /app/api/pair/claim — session-email wiring", () => {
   beforeEach(() => {
     claimSpy.mockClear();
     claimSpy.mockResolvedValue({
@@ -132,12 +132,6 @@ describe("POST /api/pair/claim — session-email wiring", () => {
         code: "482901",
       },
     );
-  });
-
-  it("returns 401 when the session has no user", async () => {
-    const res = await POST(buildEvent({ code: "482901" }, null));
-    expect(res.status).toBe(401);
-    expect(claimSpy).not.toHaveBeenCalled();
   });
 
   it("returns 'Unknown pairing error' fallback for an unrecognized ClaimError code", async () => {

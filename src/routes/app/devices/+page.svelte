@@ -23,7 +23,7 @@
     claimError = "";
 
     try {
-      const res = await fetchWithSafariRetry("/api/pair/claim", {
+      const res = await fetchWithSafariRetry("/app/api/pair/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: pairingCode.trim() }),

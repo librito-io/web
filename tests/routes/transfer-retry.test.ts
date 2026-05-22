@@ -31,22 +31,21 @@ vi.mock("$lib/server/supabase", () => ({
 }));
 
 const { POST } =
-  await import("../../src/routes/api/transfer/[id]/retry/+server");
+  await import("../../src/routes/app/api/transfer/[id]/retry/+server");
 
-function buildEvent(
-  transferId: string,
-  user: { id: string } | null = { id: "u-1" },
-) {
+// Signed-out 401 is enforced by appAuthGuard; per-handler tests
+// always run with locals.user populated (the hook's contract).
+function buildEvent(transferId: string, user: { id: string } = { id: "u-1" }) {
   return {
-    request: new Request(`http://x/api/transfer/${transferId}/retry`, {
+    request: new Request(`http://x/app/api/transfer/${transferId}/retry`, {
       method: "POST",
     }),
     params: { id: transferId },
-    locals: { safeGetSession: async () => ({ user, session: null }) },
+    locals: { user },
   } as unknown as Parameters<typeof POST>[0];
 }
 
-describe("POST /api/transfer/[id]/retry", () => {
+describe("POST /app/api/transfer/[id]/retry", () => {
   let logWrites: Record<string, unknown>[];
   beforeEach(() => {
     supabase._results.clear();
@@ -55,15 +54,6 @@ describe("POST /api/transfer/[id]/retry", () => {
   });
   afterEach(() => {
     __resetTestDestination();
-  });
-
-  it("returns 401 when no session user", async () => {
-    const res = await POST(
-      buildEvent("11111111-1111-4111-8111-111111111111", null),
-    );
-    expect(res.status).toBe(401);
-    const body = await res.json();
-    expect(body.error).toBe("unauthorized");
   });
 
   it("returns 404 on malformed UUID with no DB call", async () => {

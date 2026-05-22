@@ -41,7 +41,7 @@ vi.mock("$lib/server/ratelimit", async (importOriginal) => {
 });
 
 const { GET } =
-  await import("../../src/routes/api/book-catalog/[isbn]/+server");
+  await import("../../src/routes/app/api/book-catalog/[isbn]/+server");
 
 beforeEach(() => {
   supabase._results.clear();
@@ -56,25 +56,24 @@ beforeEach(() => {
   });
 });
 
+// Signed-out 401 is enforced by appAuthGuard; per-handler tests
+// always run with locals.user populated (the hook's contract).
 function buildEvent(
   isbn: string,
-  session: unknown = { user: { id: "u1" } },
+  user: { id: string } = { id: "u1" },
   searchParams = "",
 ) {
   return {
     params: { isbn },
-    locals: { safeGetSession: async () => session },
+    locals: { user },
     platform: { context: { waitUntil: vi.fn() } },
-    url: new URL(`https://example.com/api/book-catalog/${isbn}${searchParams}`),
+    url: new URL(
+      `https://example.com/app/api/book-catalog/${isbn}${searchParams}`,
+    ),
   } as unknown as Parameters<typeof GET>[0];
 }
 
-describe("GET /api/book-catalog/[isbn]", () => {
-  it("401 when unauthenticated", async () => {
-    const res = await GET(buildEvent("9780743273565", { user: null }));
-    expect(res.status).toBe(401);
-  });
-
+describe("GET /app/api/book-catalog/[isbn]", () => {
   it("400 on invalid ISBN", async () => {
     const res = await GET(buildEvent("00000"));
     expect(res.status).toBe(400);
@@ -308,11 +307,7 @@ describe("GET /api/book-catalog/[isbn]", () => {
       error: null,
     });
     const res = await GET(
-      buildEvent(
-        "9780743273565",
-        { user: { id: "u1" } },
-        "?variant=../etc/passwd",
-      ),
+      buildEvent("9780743273565", { id: "u1" }, "?variant=../etc/passwd"),
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -337,7 +332,7 @@ describe("GET /api/book-catalog/[isbn]", () => {
     });
     for (const v of ["thumbnail", "medium", "large", "xlarge"] as const) {
       const res = await GET(
-        buildEvent("9780743273565", { user: { id: "u1" } }, `?variant=${v}`),
+        buildEvent("9780743273565", { id: "u1" }, `?variant=${v}`),
       );
       expect(res.status).toBe(200);
     }

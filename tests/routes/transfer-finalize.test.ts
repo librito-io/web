@@ -30,7 +30,7 @@ vi.mock("$lib/server/supabase", () => ({
 }));
 
 const { POST } =
-  await import("../../src/routes/api/transfer/[id]/finalize/+server");
+  await import("../../src/routes/app/api/transfer/[id]/finalize/+server");
 
 const TRANSFER_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "u-1";
@@ -41,16 +41,18 @@ const HELLO_SHA =
   "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
 const HELLO_BYTES = new TextEncoder().encode("hello");
 
+// Signed-out 401 is enforced by appAuthGuard; per-handler tests
+// always run with locals.user populated (the hook's contract).
 function buildEvent(
   transferId: string,
-  user: { id: string } | null = { id: USER_ID },
+  user: { id: string } = { id: USER_ID },
 ) {
   return {
-    request: new Request(`http://x/api/transfer/${transferId}/finalize`, {
+    request: new Request(`http://x/app/api/transfer/${transferId}/finalize`, {
       method: "POST",
     }),
     params: { id: transferId },
-    locals: { safeGetSession: async () => ({ user, session: null }) },
+    locals: { user },
   } as unknown as Parameters<typeof POST>[0];
 }
 
@@ -69,12 +71,7 @@ beforeEach(() => {
   supabase._updateCalls.length = 0;
 });
 
-describe("POST /api/transfer/[id]/finalize", () => {
-  it("returns 401 when unauthenticated", async () => {
-    const res = await POST(buildEvent(TRANSFER_ID, null));
-    expect(res.status).toBe(401);
-  });
-
+describe("POST /app/api/transfer/[id]/finalize", () => {
   it("returns 404 on malformed transfer UUID", async () => {
     const res = await POST(buildEvent("not-a-uuid"));
     expect(res.status).toBe(404);

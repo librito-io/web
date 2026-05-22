@@ -21,15 +21,15 @@ vi.mock("jose", async () => {
 const SUPABASE_URL = "https://test-proj.supabase.co";
 
 describe("mintRealtimeToken", () => {
-  it("returns expiresIn of exactly 86400 seconds", async () => {
+  it("returns expiresIn of exactly 3600 seconds (1 h)", async () => {
     const { expiresIn } = await mintRealtimeToken({
       userId: "11111111-1111-1111-1111-111111111111",
       deviceId: "22222222-2222-2222-2222-222222222222",
       privateJwk: DEV_STANDBY_JWK,
       supabaseUrl: SUPABASE_URL,
     });
-    expect(expiresIn).toBe(86400);
-    expect(REALTIME_TOKEN_TTL_SECONDS).toBe(86400);
+    expect(expiresIn).toBe(3600);
+    expect(REALTIME_TOKEN_TTL_SECONDS).toBe(3600);
   });
 
   it("signs an ES256 JWT with kid header from JWK + role/sub/aud/exp/iat/device_id claims", async () => {
@@ -64,7 +64,7 @@ describe("mintRealtimeToken", () => {
     expect(typeof payload.exp).toBe("number");
     expect(payload.iat as number).toBeGreaterThanOrEqual(before);
     expect(payload.iat as number).toBeLessThanOrEqual(after);
-    expect((payload.exp as number) - (payload.iat as number)).toBe(86400);
+    expect((payload.exp as number) - (payload.iat as number)).toBe(3600);
   });
 
   it("throws when privateJwk is missing the `d` private component", async () => {

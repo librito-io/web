@@ -164,7 +164,7 @@ describe("POST /api/realtime-token (standby-key ES256)", () => {
     expect(body.error).toBe("rate_limited");
   });
 
-  it("200 happy path returns {token, expiresIn:86400} with valid ES256 JWT claims", async () => {
+  it("200 happy path returns {token, expiresIn:3600} with valid ES256 JWT claims", async () => {
     const userId = "11111111-1111-1111-1111-111111111111";
     const deviceId = "22222222-2222-2222-2222-222222222222";
     authMock.mockResolvedValueOnce({
@@ -186,7 +186,7 @@ describe("POST /api/realtime-token (standby-key ES256)", () => {
       realtimeUrl: string;
       anonKey: string;
     };
-    expect(body.expiresIn).toBe(86400);
+    expect(body.expiresIn).toBe(3600);
     expect(typeof body.token).toBe("string");
     expect(body.realtimeUrl.startsWith("wss://")).toBe(true);
     expect(body.realtimeUrl.endsWith("/realtime/v1/websocket")).toBe(true);
@@ -210,7 +210,7 @@ describe("POST /api/realtime-token (standby-key ES256)", () => {
     expect(payload.role).toBe("authenticated");
     expect(payload.aud).toBe("authenticated");
     expect(payload.device_id).toBe(deviceId);
-    expect((payload.exp as number) - (payload.iat as number)).toBe(86400);
+    expect((payload.exp as number) - (payload.iat as number)).toBe(3600);
   });
 
   it("emits realtime.token_issued log on success", async () => {
@@ -231,7 +231,7 @@ describe("POST /api/realtime-token (standby-key ES256)", () => {
         event: "realtime.token_issued",
         userId,
         deviceId,
-        expiresIn: 86400,
+        expiresIn: 3600,
       }),
     );
   });

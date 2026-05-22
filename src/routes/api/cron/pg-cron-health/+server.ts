@@ -29,6 +29,12 @@ export const GET: RequestHandler = async ({ request, url }) => {
     "pg_cron_failure_summary" as never,
   );
 
+  // Vercel serverless suspends the function on response commit, which can
+  // abort the SDK transport's in-flight requests. Sentry's captureException
+  // / captureMessage are fire-and-forget — without an explicit flush, the
+  // event may never reach the ingest endpoint. Mirrors the pattern in
+  // src/lib/server/wait-until.ts:35-41 and the transfer-sweep handler.
+  // Issue #358.
   if (error) {
     Sentry.captureException(new Error("pg_cron_health_query_failed"), {
       extra: { dbError: error.message },
@@ -37,6 +43,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
       { event: "pg_cron_health.query_failed", error: error.message },
       "pg_cron_health.query_failed",
     );
+    await Sentry.flush(2000);
     return jsonError(500, "server_error", "pg_cron query failed");
   }
 
@@ -53,6 +60,7 @@ export const GET: RequestHandler = async ({ request, url }) => {
       { event: "pg_cron_health.failures", failures: failed },
       "pg_cron_health.failures",
     );
+    await Sentry.flush(2000);
   } else {
     logger().info(
       { event: "pg_cron_health.ok", jobsChecked: summary.length },

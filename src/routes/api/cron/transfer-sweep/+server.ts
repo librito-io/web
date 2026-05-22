@@ -32,24 +32,42 @@ export const GET: RequestHandler = async ({ request, url }) => {
     return jsonSuccess({ probe: true });
   }
 
+  // Gate withMonitor on production. Preview/dev/local invocations register
+  // env-scoped check-in expectations against the cron schedule; once a
+  // preview emits a check-in, Sentry expects continued check-ins from that
+  // env at every scheduled slot — Vercel cron only fires production, so
+  // the preview slot stays empty forever and emits daily "missed check-in"
+  // events. See issue #358.
+  const isProd = process.env.VERCEL_ENV === "production";
   try {
-    const summary = await Sentry.withMonitor(
-      "transfer-sweep",
-      () => runTransferSweep(createAdminClient()),
-      {
-        schedule: { type: "crontab", value: TRANSFER_SWEEP_SCHEDULE },
-        checkinMargin: 5, // minutes — alert if check-in late by >5 min
-        maxRuntime: 10, // minutes — alert if run takes >10 min
-        failureIssueThreshold: 1, // first failure creates an issue
-        recoveryThreshold: 1, // one success after failure resolves it
-      },
-    );
+    const summary = isProd
+      ? await Sentry.withMonitor(
+          "transfer-sweep",
+          () => runTransferSweep(createAdminClient()),
+          {
+            schedule: { type: "crontab", value: TRANSFER_SWEEP_SCHEDULE },
+            checkinMargin: 5, // minutes — alert if check-in late by >5 min
+            maxRuntime: 10, // minutes — alert if run takes >10 min
+            failureIssueThreshold: 1, // first failure creates an issue
+            recoveryThreshold: 1, // one success after failure resolves it
+          },
+        )
+      : await runTransferSweep(createAdminClient());
+    // withMonitor's close check-in is dispatched via Sentry's async
+    // transport (fire-and-forget captureCheckIn in @sentry/core). Vercel
+    // serverless suspends the function on response commit, which can abort
+    // in-flight transport requests — Sentry never receives the "ok" and
+    // emits a "timeout check-in" event after maxRuntime. Flush before
+    // return so the close lands. See src/lib/server/wait-until.ts:35-41
+    // for the codebase's existing documentation of this bug class.
+    await Sentry.flush(2000);
     return jsonSuccess({ sweep: summary });
   } catch (err) {
     // withMonitor already emitted an error check-in to Sentry. The
     // sentryHandle() wrapper in hooks.server.ts will also captureException
     // via handleErrorWithSentry — acceptable duplication; both surfaces
     // are useful (Crons UI shows failure pattern, Issues UI shows stack).
+    await Sentry.flush(2000);
     return jsonError(
       500,
       "server_error",

@@ -1,4 +1,4 @@
-import { fail, redirect, type ActionFailure } from "@sveltejs/kit";
+import { fail, type ActionFailure } from "@sveltejs/kit";
 import type { PageServerLoad, Actions } from "./$types";
 
 // Explicit per-action return shape. Without this, TS's subtype-reduction
@@ -17,11 +17,15 @@ type DeviceActionResult =
     }>;
 
 export const load: PageServerLoad = async ({
-  locals: { safeGetSession, supabase },
+  parent,
+  locals: { supabase },
 }) => {
-  const { user } = await safeGetSession();
-  if (!user) redirect(303, "/auth/login");
+  const { user } = await parent();
 
+  // .limit(50) bounds the SSR payload defensively. Typical users have a
+  // handful of devices, but no schema-level cap exists, so a runaway
+  // automation or test loop could otherwise return unbounded rows
+  // (issue #133).
   const { data: devices } = await supabase
     .from("devices")
     .select(
@@ -29,7 +33,8 @@ export const load: PageServerLoad = async ({
     )
     .eq("user_id", user.id)
     .is("revoked_at", null)
-    .order("paired_at", { ascending: false });
+    .order("paired_at", { ascending: false })
+    .limit(50);
 
   return { devices: devices ?? [] };
 };
@@ -45,10 +50,8 @@ export const actions: Actions = {
     const formData = await request.formData();
     const rawDeviceId = formData.get("deviceId");
     const deviceId = typeof rawDeviceId === "string" ? rawDeviceId : null;
-    const name =
-      typeof formData.get("name") === "string"
-        ? (formData.get("name") as string).trim()
-        : "";
+    const rawName = formData.get("name");
+    const name = typeof rawName === "string" ? rawName.trim() : "";
 
     // deviceId is echoed back in every fail() payload so the client can
     // scope per-row error display under the matching device <li>; the

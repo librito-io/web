@@ -16,13 +16,15 @@ const { load, actions } =
 
 const USER_ID = "u-1";
 
-function buildLoadEvent(user: { id: string } | null = { id: USER_ID }) {
+function buildLoadEvent(user: { id: string } = { id: USER_ID }) {
   const url = new URL("https://example.com/app/devices");
   return {
-    locals: {
-      supabase,
-      safeGetSession: async () => ({ user }),
-    },
+    // Layout guard at `/app/+layout.server.ts` populates the non-null
+    // `user` via `await parent()`. Page loader trusts that contract
+    // rather than re-calling `safeGetSession` (issue #151). Unauth-load
+    // redirect coverage lives in app-layout.test.ts.
+    parent: async () => ({ user }),
+    locals: { supabase },
     url,
     // Required by @sentry/sveltekit's wrapServerLoadWithSentry, which reads
     // event.request.method to populate the http.method span attribute.
@@ -53,13 +55,6 @@ beforeEach(() => {
 });
 
 describe("load /app/devices", () => {
-  it("redirects to /auth/login when unauthenticated", async () => {
-    await expect(load(buildLoadEvent(null))).rejects.toMatchObject({
-      status: 303,
-      location: "/auth/login",
-    });
-  });
-
   it("returns the user's non-revoked devices", async () => {
     supabase._results.set("devices.select", {
       data: [{ id: "d-1", name: "Reader", user_id: USER_ID }],
@@ -70,10 +65,11 @@ describe("load /app/devices", () => {
       devices: [{ id: "d-1", name: "Reader", user_id: USER_ID }],
     });
     // Predicate assertions: the load query must scope by user_id, hide
-    // revoked rows, and order by paired_at desc. A silent drop of any of
-    // these would leak other users' devices, surface revoked entries to
-    // the UI, or scramble the displayed order — none of which would
-    // otherwise fail this suite.
+    // revoked rows, order by paired_at desc, AND apply .limit(50) so a
+    // runaway automation or test loop can't return unbounded rows
+    // (issue #133). Silent drop of any of these would leak other users'
+    // devices, surface revoked entries to the UI, scramble the order,
+    // or remove the defensive cap — none would otherwise fail the suite.
     const selectChain = supabase._chainCalls.filter(
       (c) => c.table === "devices" && c.operation === "select",
     );
@@ -90,6 +86,10 @@ describe("load /app/devices", () => {
         expect.objectContaining({
           method: "order",
           args: ["paired_at", { ascending: false }],
+        }),
+        expect.objectContaining({
+          method: "limit",
+          args: [50],
         }),
       ]),
     );

@@ -1,11 +1,10 @@
-import { redirect } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({
-  locals: { safeGetSession, supabase },
+  parent,
+  locals: { supabase },
 }) => {
-  const { user } = await safeGetSession();
-  if (!user) redirect(303, "/auth/login");
+  const { user } = await parent();
 
   // .limit(100) bounds initial SSR payload — mirrors /api/transfer/list's
   // cap so the post-action refresh path agrees with the page-load path.

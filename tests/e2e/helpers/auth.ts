@@ -44,5 +44,23 @@ export async function login(page: Page, user: E2EUser): Promise<void> {
   await page.getByLabel("Email").fill(user.email);
   await page.getByLabel("Password").fill(user.password);
   await page.getByRole("button", { name: /log in/i }).click();
-  await page.waitForURL((url) => url.pathname.startsWith("/app"));
+
+  // Race URL transition against inline form error. On a real auth failure
+  // (wrong password, locked account) the page renders `<p style="color:
+  // red;">{error}</p>` and never navigates — without this race the helper
+  // hangs to `waitForURL`'s 30s default and fails with a generic timeout,
+  // hiding the actual auth-error text. Issue #363.
+  const errorLocator = page.locator('p[style*="color: red"]').first();
+  const navigation = page
+    .waitForURL((url) => url.pathname.startsWith("/app"))
+    .then(() => "navigated" as const);
+  const failure = errorLocator
+    .waitFor({ state: "visible" })
+    .then(() => "failed" as const);
+
+  const outcome = await Promise.race([navigation, failure]);
+  if (outcome === "failed") {
+    const message = (await errorLocator.textContent())?.trim() ?? "";
+    throw new Error(`login failed: ${message}`);
+  }
 }

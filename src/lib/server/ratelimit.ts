@@ -149,7 +149,6 @@ export async function safeLimit(
     if (isProgrammerError(err)) throw err;
     const isTimeout =
       typeof err === "object" && err !== null && "__timeout" in err;
-    const errorName = err instanceof Error ? err.name : typeof err;
     const error = err instanceof Error ? err.message : String(err);
     const stack = err instanceof Error ? err.stack : undefined;
     if (isTimeout) {
@@ -174,6 +173,7 @@ export async function safeLimit(
         "ratelimit.upstash_unreachable",
       );
     } else {
+      const errorName = err instanceof Error ? err.name : typeof err;
       logger().error(
         {
           event: "ratelimit.unexpected_throw",

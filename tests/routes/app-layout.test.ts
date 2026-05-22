@@ -1,15 +1,8 @@
-// Layout guard at `src/routes/app/+layout.server.ts` is the single
-// auth-check site for every page load under `/app/*` (issue #151).
-// Child page loaders consume `await parent()` rather than re-calling
-// `safeGetSession`, so this layout is where unauthenticated-redirect
-// behavior must be verified. Per-page redirect tests under
-// `tests/routes/*-page.test.ts` were removed in the same change.
-//
-// Scope: page **load** functions only. Form actions and `+server.ts`
-// API endpoints do NOT run through this guard — those continue to
-// authenticate at their own entry points and are covered by their own
-// test files. Follow-up planned to consolidate the remaining sites
-// into `hooks.server.ts`.
+// /app/+layout.server.ts is now a pass-through that exposes
+// session + user from event.locals to child page loaders via
+// `await parent()`. Auth-gating moved to appAuthGuard
+// (tests/unit/app-auth-guard.test.ts) — issue #348. This file's
+// role shrinks to one assertion: the layout pulls from locals.
 
 import { describe, it, expect } from "vitest";
 
@@ -18,13 +11,13 @@ const { load } = await import("../../src/routes/app/+layout.server");
 type Session = { access_token: string; user: { id: string } };
 type User = { id: string };
 
-function buildEvent(result: {
-  session: Session | null;
-  user: User | null;
-}): Parameters<typeof load>[0] {
+function buildEvent(
+  session: Session | null,
+  user: User | null,
+): Parameters<typeof load>[0] {
   const url = new URL("https://example.com/app");
   return {
-    locals: { safeGetSession: async () => result },
+    locals: { session, user },
     url,
     // Required by @sentry/sveltekit's wrapServerLoadWithSentry, which reads
     // event.request.method to populate the http.method span attribute.
@@ -32,34 +25,23 @@ function buildEvent(result: {
   } as unknown as Parameters<typeof load>[0];
 }
 
-describe("layout guard /app", () => {
-  it("redirects to /auth/login when session is missing", async () => {
-    await expect(
-      load(buildEvent({ session: null, user: null })),
-    ).rejects.toMatchObject({ status: 303, location: "/auth/login" });
-  });
-
-  it("redirects to /auth/login when user is missing despite session present", async () => {
-    // safeGetSession's invariant is paired (both null or both real), but
-    // we narrow on both anyway so child loaders consuming `await parent()`
-    // see `user` as non-null. A future regression that returned
-    // `{ session, user: null }` would otherwise leak past the guard.
-    const session: Session = {
-      access_token: "x",
-      user: { id: "u-1" },
-    };
-    await expect(
-      load(buildEvent({ session, user: null })),
-    ).rejects.toMatchObject({ status: 303, location: "/auth/login" });
-  });
-
-  it("returns non-null session + user when authenticated", async () => {
+describe("layout /app — pass-through after #348", () => {
+  it("returns session + user populated by the appAuthGuard hook", async () => {
     const session: Session = {
       access_token: "x",
       user: { id: "u-1" },
     };
     const user: User = { id: "u-1" };
-    const result = await load(buildEvent({ session, user }));
+    const result = await load(buildEvent(session, user));
     expect(result).toEqual({ session, user });
+  });
+
+  it("throws 500 when locals.user is null (hook regression backstop)", async () => {
+    // The hook should never let an unauthenticated request reach the
+    // layout — a null user here means the hook is missing or its
+    // prefix gate misfired. 500 surfaces the bug; 401 would hide it.
+    await expect(load(buildEvent(null, null))).rejects.toMatchObject({
+      status: 500,
+    });
   });
 });

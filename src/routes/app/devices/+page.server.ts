@@ -1,5 +1,6 @@
 import { fail, type ActionFailure } from "@sveltejs/kit";
 import type { PageServerLoad, Actions } from "./$types";
+import { requireUser } from "$lib/server/auth";
 
 // Explicit per-action return shape. Without this, TS's subtype-reduction
 // of `ActionFailure<T>` unions in the `Actions: Actions` annotation
@@ -9,7 +10,6 @@ import type { PageServerLoad, Actions } from "./$types";
 // type useful for `"action" in form` narrows in the template.
 type DeviceActionResult =
   | { success: true }
-  | ActionFailure<{ error: string }>
   | ActionFailure<{
       action: "rename" | "unpair";
       deviceId: string | null;
@@ -40,12 +40,10 @@ export const load: PageServerLoad = async ({
 };
 
 export const actions: Actions = {
-  rename: async ({
-    request,
-    locals: { safeGetSession, supabase },
-  }): Promise<DeviceActionResult> => {
-    const { user } = await safeGetSession();
-    if (!user) return fail(401, { error: "Not authenticated" });
+  rename: async (event): Promise<DeviceActionResult> => {
+    const user = requireUser(event);
+    const { supabase } = event.locals;
+    const { request } = event;
 
     const formData = await request.formData();
     const rawDeviceId = formData.get("deviceId");
@@ -112,12 +110,10 @@ export const actions: Actions = {
   // Keeping the schema column name `revoked_at` is intentional; only
   // the user-visible action name is reconciled here. See #181/#183
   // archeology in CLAUDE.md for the design history.
-  unpair: async ({
-    request,
-    locals: { safeGetSession, supabase },
-  }): Promise<DeviceActionResult> => {
-    const { user } = await safeGetSession();
-    if (!user) return fail(401, { error: "Not authenticated" });
+  unpair: async (event): Promise<DeviceActionResult> => {
+    const user = requireUser(event);
+    const { supabase } = event.locals;
+    const { request } = event;
 
     const formData = await request.formData();
     const rawDeviceId = formData.get("deviceId");

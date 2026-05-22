@@ -5,14 +5,12 @@ import { decodeCursor, encodeCursor } from "$lib/feed/cursor";
 import { parseFeedRows } from "$lib/feed/types";
 import { enrichFeedRowsWithCovers } from "$lib/server/catalog/feed-enrichment";
 import { logger } from "$lib/server/log";
+import { requireUser } from "$lib/server/auth";
 
 export const GET: RequestHandler = async (event) => {
-  const {
-    url,
-    locals: { supabase, safeGetSession },
-  } = event;
-  const { user } = await safeGetSession();
-  if (!user) return jsonError(401, "unauthorized", "Sign in required");
+  const user = requireUser(event);
+  const { url } = event;
+  const { supabase } = event.locals;
 
   const sort = parseSort(url.searchParams.get("sort"), "recent");
   const cursorParam = url.searchParams.get("cursor");

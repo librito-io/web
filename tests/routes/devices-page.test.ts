@@ -43,10 +43,12 @@ function buildActionEvent(
       method: "POST",
       body: formData,
     }),
-    locals: {
-      supabase,
-      safeGetSession: async () => ({ user }),
-    },
+    // Actions now read locals.user directly via requireUser(event).
+    // The appAuthGuard hook (hooks.server.ts) populates this for every
+    // /app/** request — unauth scenarios never reach the action.
+    // Tests still pass user: null to exercise requireUser's 500 path
+    // (defense-in-depth if the hook regresses).
+    locals: { supabase, user },
   } as unknown as Parameters<typeof actions.rename>[0];
 }
 
@@ -97,11 +99,15 @@ describe("load /app/devices", () => {
 });
 
 describe("action rename /app/devices", () => {
-  it("returns 401 when unauthenticated", async () => {
-    const res = await actions.rename(
-      buildActionEvent({ deviceId: "d-1", name: "New" }, null),
-    );
-    expect(res).toMatchObject({ status: 401 });
+  it("throws 500 when locals.user is missing (hook regression backstop)", async () => {
+    // Auth-gating moved to appAuthGuard
+    // (tests/unit/app-auth-guard.test.ts). Unauthenticated requests
+    // never reach this action in production. If the hook regresses,
+    // requireUser throws 500 so the bug surfaces in Sentry instead
+    // of degrading to a silent 401.
+    await expect(
+      actions.rename(buildActionEvent({ deviceId: "d-1", name: "New" }, null)),
+    ).rejects.toMatchObject({ status: 500 });
   });
 
   it("returns 400 when deviceId missing", async () => {
@@ -244,11 +250,12 @@ describe("action rename /app/devices", () => {
 });
 
 describe("action unpair /app/devices", () => {
-  it("returns 401 when unauthenticated", async () => {
-    const res = await actions.unpair(
-      buildActionEvent({ deviceId: "d-1" }, null),
-    );
-    expect(res).toMatchObject({ status: 401 });
+  it("throws 500 when locals.user is missing (hook regression backstop)", async () => {
+    // See rename's parallel test — auth-gating lives in appAuthGuard,
+    // requireUser surfaces a missing user as 500 to fire Sentry.
+    await expect(
+      actions.unpair(buildActionEvent({ deviceId: "d-1" }, null)),
+    ).rejects.toMatchObject({ status: 500 });
   });
 
   it("returns 400 when deviceId missing", async () => {

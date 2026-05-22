@@ -1,5 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { page } from "$app/state";
+  import { resolveReturnTo } from "$lib/auth/return-to";
 
   let { data } = $props();
   let email = $state("");
@@ -7,7 +9,7 @@
   let error = $state("");
   let loading = $state(false);
 
-  async function handleLogin(e: SubmitEvent) {
+  async function handleLogin(e: SubmitEvent): Promise<void> {
     e.preventDefault();
     loading = true;
     error = "";
@@ -20,7 +22,13 @@
       error = err.message;
       loading = false;
     } else {
-      goto("/app");
+      // appAuthGuard hook (hooks.server.ts) encodes the intended URL
+      // into ?return_to= when redirecting unauthenticated GETs to
+      // /auth/login. Validate against an allow-list (same-origin /app/*
+      // paths only) so a forged ?return_to=//evil.com or
+      // ?return_to=https://attacker.com cannot turn login into an
+      // open-redirect oracle. Issue #349.
+      goto(resolveReturnTo(page.url.searchParams.get("return_to")));
     }
   }
 </script>

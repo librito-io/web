@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { sequence } from "@sveltejs/kit/hooks";
-import type { Handle, HandleServerError } from "@sveltejs/kit";
+import { redirect, type Handle, type HandleServerError } from "@sveltejs/kit";
 import {
   PUBLIC_SUPABASE_URL,
   PUBLIC_SUPABASE_ANON_KEY,
@@ -9,6 +9,7 @@ import { env as privateEnv } from "$env/dynamic/private";
 import * as Sentry from "@sentry/sveltekit";
 import { runWithContext, logger } from "$lib/server/log";
 import { scrubEvent } from "$lib/sentry-scrub";
+import { jsonError } from "$lib/server/errors";
 
 // Sensitive vars (SENTRY_DSN among them) are redacted by `vercel pull`,
 // so $env/static/private would inline an empty string into the prebuilt
@@ -94,14 +95,52 @@ const supabaseSetup: Handle = async ({ event, resolve }) => {
   return resolve(event);
 };
 
+// Single auth-check site for /app/** route tree. Covers page loads,
+// form actions, and +server.ts endpoints uniformly — replaces the
+// per-file `safeGetSession` + `if (!user) redirect/fail` blocks that
+// used to live in each loader, action, and endpoint (issues #347/#348).
+//
+// GETs redirect to /auth/login with the original path encoded as
+// `?return_to=` so the login page can navigate back to the deep link
+// after sign-in (issue #349). Non-GET requests get 401 JSON so
+// client-side JS can show a "session expired" toast and trigger a
+// soft re-auth, rather than the user losing form state to a hard
+// redirect mid-action.
+//
+// Populates `event.locals.user` and `event.locals.session` as non-null
+// for downstream handlers; the App.Locals type stays nullable globally
+// because anonymous routes (`/`, `/auth/*`) genuinely have null. Use
+// `requireUser(event)` from $lib/server/auth to narrow at call sites.
+// Exported for direct unit testing (tests/unit/app-auth-guard.test.ts).
+// Production use is via `handle` below.
+export const appAuthGuard: Handle = async ({ event, resolve }) => {
+  if (event.route.id?.startsWith("/app")) {
+    const { session, user } = await event.locals.safeGetSession();
+    if (!session || !user) {
+      if (event.request.method === "GET") {
+        const returnTo = encodeURIComponent(
+          event.url.pathname + event.url.search,
+        );
+        redirect(303, `/auth/login?return_to=${returnTo}`);
+      }
+      return jsonError(401, "unauthorized", "Session required");
+    }
+    event.locals.session = session;
+    event.locals.user = user;
+  }
+  return resolve(event);
+};
+
 // Sentry's sentryHandle() tags route/method on every error and creates a
 // request scope so captureException calls inside this request inherit the
 // scope. Placed first in the sequence so all subsequent handlers' errors
-// are scoped correctly.
+// are scoped correctly. appAuthGuard runs after supabaseSetup so it can
+// call event.locals.safeGetSession().
 export const handle = sequence(
   Sentry.sentryHandle(),
   requestContext,
   supabaseSetup,
+  appAuthGuard,
 );
 
 // SvelteKit calls handleError for unhandled errors thrown anywhere in

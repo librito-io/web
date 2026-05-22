@@ -107,11 +107,11 @@ test.describe("devices rename flow", () => {
 
     // Error visible under A's row.
     const errorText = "Name must be 50 characters or less";
-    await expect(deviceA.getByText(errorText)).toBeVisible();
+    await expect(deviceA.getByText(errorText, { exact: true })).toBeVisible();
 
     // Bug class: error leaking across rows. B is in display mode (no form
     // open) — the error must not surface under its <li>.
-    await expect(deviceB.getByText(errorText)).toHaveCount(0);
+    await expect(deviceB.getByText(errorText, { exact: true })).toHaveCount(0);
 
     // Stronger guard: cancel A's rename, open B's rename. With the bug,
     // the page-wide `form` prop with deviceId=A would still match if the
@@ -120,6 +120,6 @@ test.describe("devices rename flow", () => {
     await deviceA.getByRole("button", { name: "Cancel" }).click();
     await deviceB.getByRole("button", { name: "Rename" }).click();
     await expect(deviceB.locator(`#rename-${deviceBId}-hint`)).toBeVisible();
-    await expect(deviceB.getByText(errorText)).toHaveCount(0);
+    await expect(deviceB.getByText(errorText, { exact: true })).toHaveCount(0);
   });
 });

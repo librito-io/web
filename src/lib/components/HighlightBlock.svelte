@@ -7,20 +7,14 @@
     styles: string | null;
   };
 
-  let { highlight, hasNote, onMenu } = $props<{
+  let { highlight, hasNote } = $props<{
     highlight: HighlightInput;
     hasNote: boolean;
-    onMenu: (payload: { x: number; y: number; id: string }) => void;
   }>();
 
   let runs = $derived<StyledRun[]>(
     renderStyledText(highlight.text, highlight.styles),
   );
-
-  function openMenu(e: MouseEvent): void {
-    e.stopPropagation();
-    onMenu({ x: e.clientX, y: e.clientY, id: highlight.id });
-  }
 </script>
 
 <blockquote
@@ -39,7 +33,6 @@
       <span>{run.text}</span>
     {/if}
   {/each}
-  <button class="bq-more" onclick={openMenu} aria-label="More">⋯</button>
 </blockquote>
 
 <style>

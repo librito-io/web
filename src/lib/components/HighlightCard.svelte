@@ -9,7 +9,6 @@
     item,
     supabase,
     userId,
-    onHighlightMenu,
     registerNoteEditor,
     showChapterHeading = true,
     linkBookText = true,
@@ -17,13 +16,6 @@
     item: FeedItem;
     supabase: SupabaseClient;
     userId: string;
-    onHighlightMenu: (payload: {
-      x: number;
-      y: number;
-      highlightId: string;
-      text: string;
-      hasNote: boolean;
-    }) => void;
     registerNoteEditor: (
       highlightId: string,
       handleDelete: () => Promise<void>,
@@ -139,14 +131,6 @@
         styles: item.styles,
       }}
       hasNote={!!noteText}
-      onMenu={({ x, y, id }) =>
-        onHighlightMenu({
-          x,
-          y,
-          highlightId: id,
-          text: item.text,
-          hasNote: !!noteText,
-        })}
     />
     <NoteEditor
       highlightId={item.highlight_id}

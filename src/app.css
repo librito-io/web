@@ -627,40 +627,6 @@ blockquote {
   border-radius: 4px;
   position: relative;
 }
-.bq-more {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  width: 30px;
-  height: 30px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.15s;
-  padding: 0;
-  color: #ada9a3;
-  font-family: inherit;
-  font-size: 20px;
-  line-height: 1;
-}
-@media (hover: hover) {
-  blockquote:hover .bq-more {
-    opacity: 1;
-  }
-}
-@media (hover: none) {
-  .bq-more {
-    opacity: 1;
-  }
-}
-.bq-more:focus,
-.bq-more.pinned {
-  opacity: 1;
-}
 .ctx-menu {
   position: fixed;
   z-index: 200;

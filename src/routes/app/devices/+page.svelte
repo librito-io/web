@@ -101,7 +101,9 @@
                 value={device.name}
                 required
                 maxlength="50"
+                aria-describedby="rename-{device.id}-hint"
               />
+              <small id="rename-{device.id}-hint">Max 50 characters</small>
               <button type="submit">Save</button>
               <button type="button" onclick={() => (renamingId = null)}
                 >Cancel</button

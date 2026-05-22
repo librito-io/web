@@ -24,10 +24,24 @@ export type SafariRetryEnhanceOptions = {
 /**
  * `use:enhance` callback that retries once on Safari/WebKit's stale
  * keep-alive socket bug, then routes the final result through caller
- * hooks. Caveat: never swallows the result — `update()` is always called
- * (after retry exhaustion), so server `fail()` payloads surface on the
- * page's `form` prop and the form stays open until the caller explicitly
- * closes it from `onSuccess`.
+ * hooks.
+ *
+ * Three deviations from a naive `await update()` everywhere:
+ *
+ *  - On `result.type === "error"` we skip `update()` entirely. SvelteKit's
+ *    default `applyAction` on an error result triggers the nearest
+ *    `+error.svelte` boundary, which would replace the page with a 500
+ *    screen and clobber per-form recovery state.
+ *  - On `result.type === "failure"` we call `update({ invalidateAll:
+ *    false })`. Default behavior re-runs `load`; for a per-row form
+ *    inside a list (e.g. `{#each devices as device}{#if renamingId ===
+ *    device.id}<form>...</form>{/if}{/each}`), invalidation can remove
+ *    the very row the error block is rendered inside (server returned
+ *    404 because the row was revoked concurrently) — taking the message
+ *    with it. Skipping invalidation keeps the form mounted so the user
+ *    sees the failure; a manual reload picks up the new list state.
+ *  - On `result.type === "success"` we let `update()` invalidate so the
+ *    list reflects the write.
  */
 export function safariRetryEnhance(
   opts: SafariRetryEnhanceOptions = {},
@@ -41,12 +55,19 @@ export function safariRetryEnhance(
       }
       delete formElement.dataset.retried;
 
+      if (result.type === "error") {
+        await opts.onError?.();
+        return;
+      }
+
       if (result.type === "success") {
         await opts.onSuccess?.();
-      } else if (result.type === "error") {
-        await opts.onError?.();
+        await update();
+        return;
       }
-      await update();
+
+      // result.type === "failure" (or any remaining non-success/non-error)
+      await update({ invalidateAll: false });
     };
   };
 }

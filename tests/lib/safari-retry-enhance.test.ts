@@ -52,7 +52,13 @@ describe("safariRetryEnhance", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("calls onError + update when error repeats after the retry", async () => {
+  it("calls onError and SKIPS update when error repeats after the retry", async () => {
+    // Why skip update: SvelteKit's default `applyAction` on an error
+    // result triggers the nearest `+error.svelte` boundary, swapping
+    // the page for a 500 screen and wiping any per-form recovery state
+    // the caller set in `onError`. Hit live during PR #341 smoke — the
+    // unpair-offline path rendered "500 Failed to fetch" instead of the
+    // per-row "Network error" message. Regression-guarded here.
     const onError = vi.fn();
     const callback = safariRetryEnhance({ onError });
 
@@ -70,10 +76,18 @@ describe("safariRetryEnhance", () => {
 
     expect(formElement.dataset.retried).toBeUndefined();
     expect(onError).toHaveBeenCalledTimes(1);
-    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).not.toHaveBeenCalled();
   });
 
-  it("calls update but not onSuccess on server-returned failure", async () => {
+  it("calls update with invalidateAll:false on server-returned failure", async () => {
+    // Why invalidateAll:false: for per-row forms inside a list (e.g.
+    // `{#each devices}{#if renamingId === device.id}<form>...</form>{/if}{/each}`),
+    // default invalidation re-runs `load` and can remove the very row
+    // whose error block is rendered inside the form — taking the
+    // message with it. Hit live during PR #341 smoke when a device was
+    // revoked concurrently between rename-form-open and Save: server
+    // returned 404, load re-ran without the row, form vanished, user
+    // saw nothing. Regression-guarded here.
     const onSuccess = vi.fn();
     const onError = vi.fn();
     const callback = safariRetryEnhance({ onSuccess, onError });
@@ -93,6 +107,7 @@ describe("safariRetryEnhance", () => {
     expect(onSuccess).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith({ invalidateAll: false });
   });
 
   it("calls onSuccess and update on result.type === success", async () => {

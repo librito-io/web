@@ -187,7 +187,6 @@
         {item}
         {supabase}
         {userId}
-        {onHighlightMenu}
         {registerNoteEditor}
         {...cardProps}
       />

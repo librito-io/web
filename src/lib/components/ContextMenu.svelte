@@ -58,17 +58,6 @@
     // The container has tabindex="-1" and keeps Escape/Tab working.
     menuEl?.focus({ preventScroll: true });
 
-    // Pin the ⋯ button on the targeted blockquote so it stays visible while
-    // the menu is open — without this the button fades on :hover exit and
-    // the menu hovers over nothing.
-    let pinnedBtn: HTMLElement | null = null;
-    if (targetId) {
-      pinnedBtn = document.querySelector<HTMLElement>(
-        `blockquote[data-highlight-id="${CSS.escape(targetId)}"] .bq-more`,
-      );
-      pinnedBtn?.classList.add("pinned");
-    }
-
     // Scroll lock keeps the scrollbar gutter visible; hiding the gutter
     // reflows the page and the menu would jump.
     window.addEventListener("wheel", preventScroll, { passive: false });
@@ -93,7 +82,6 @@
       window.removeEventListener("wheel", preventScroll);
       window.removeEventListener("touchmove", preventScroll);
       window.removeEventListener("scroll", onScroll, true);
-      pinnedBtn?.classList.remove("pinned");
     };
   });
 </script>

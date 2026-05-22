@@ -43,9 +43,10 @@ html {
   overflow-y: scroll;
   overflow-x: hidden;
   scrollbar-gutter: stable;
-  /* Kill double-tap-zoom delay; pinch-zoom blocked separately (viewport meta
-     for Android, gesture/touchmove handlers for iOS Safari ≥10). */
-  touch-action: manipulation;
+  /* Block pinch-zoom + double-tap-zoom at the compositor (runs before JS, so
+     mid-scroll second-finger arrivals can't slip through). Ancestor restriction
+     propagates to descendants via intersection per CSS Touch Action spec. */
+  touch-action: pan-x pan-y;
 }
 * {
   margin: 0;

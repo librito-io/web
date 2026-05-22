@@ -36,7 +36,10 @@
 
     // Block pinch-zoom on iOS Safari. The viewport meta's user-scalable=no
     // is honored by Android Chrome but ignored by iOS Safari ≥10 for a11y.
-    // OS-level Accessibility Zoom still works regardless.
+    // touchstart non-passive blocks the mid-scroll case: once iOS classifies
+    // an in-flight touch as a scroll, follow-up touchmove events become
+    // non-cancelable, so claim the multi-touch at touchstart before scroll
+    // wins the gesture race. OS-level Accessibility Zoom still works.
     const blockGesture = (e: Event): void => e.preventDefault();
     const blockMultiTouch = (e: TouchEvent): void => {
       if (e.touches.length > 1) e.preventDefault();
@@ -44,6 +47,9 @@
     document.addEventListener("gesturestart", blockGesture);
     document.addEventListener("gesturechange", blockGesture);
     document.addEventListener("gestureend", blockGesture);
+    document.addEventListener("touchstart", blockMultiTouch, {
+      passive: false,
+    });
     document.addEventListener("touchmove", blockMultiTouch, { passive: false });
 
     const {
@@ -58,6 +64,7 @@
       document.removeEventListener("gesturestart", blockGesture);
       document.removeEventListener("gesturechange", blockGesture);
       document.removeEventListener("gestureend", blockGesture);
+      document.removeEventListener("touchstart", blockMultiTouch);
       document.removeEventListener("touchmove", blockMultiTouch);
     };
   });

@@ -26,7 +26,11 @@ function loadSupabaseEnv(): {
 
   const parsed = new Map<string, string>();
   for (const line of out.split("\n")) {
-    const match = line.match(/^([A-Z0-9_]+)="(.+)"$/);
+    // Quote chars are optional; value may be empty. Accept both shapes so a
+    // future Supabase CLI format tweak (or an empty FOO="") parses cleanly
+    // rather than silently dropping the line and surfacing as a missing-key
+    // error downstream.
+    const match = line.match(/^([A-Z0-9_]+)="?(.*?)"?$/);
     if (match) parsed.set(match[1], match[2]);
   }
 
@@ -42,7 +46,7 @@ function loadSupabaseEnv(): {
 }
 
 let cachedEnv: ReturnType<typeof loadSupabaseEnv> | null = null;
-export function supabaseEnv() {
+function supabaseEnv(): ReturnType<typeof loadSupabaseEnv> {
   if (!cachedEnv) cachedEnv = loadSupabaseEnv();
   return cachedEnv;
 }

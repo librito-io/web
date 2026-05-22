@@ -24,10 +24,19 @@ export interface ScrubableEvent {
 }
 
 /**
- * Field names whose values get replaced with `[REDACTED]` anywhere they
- * appear in a Sentry event payload. Mirrors pino's redact list in
- * src/lib/server/log.ts to keep both surfaces aligned. Any addition here
- * must also be added to pino's redact paths, and vice versa.
+ * Base-name field set whose values get replaced with `[REDACTED]`
+ * anywhere they appear in a Sentry event payload via `redactDeep`'s
+ * recursive walk. Sibling to pino's redact list in
+ * src/lib/server/log.ts. Two structural differences:
+ *   - pino lists each name twice (`field` + `*.field`) to cover root +
+ *     nested; this set relies on `redactDeep` recursing into nested
+ *     objects, so one entry per name suffices.
+ *   - pino lists `req.headers.authorization` + `req.headers.cookie` as
+ *     explicit paths; this scrub deletes those headers structurally in
+ *     `scrubEvent` (see header-strip block below), not via this set.
+ * Base-name additions here should also be added to pino's `paths`
+ * (root + `*.` form) and vice versa. Header additions are pino-only —
+ * add a sibling `delete headers.<name>` in `scrubEvent` to mirror.
  */
 export const REDACTED_FIELDS = [
   "token",

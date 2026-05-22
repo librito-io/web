@@ -90,10 +90,11 @@ function buildEvent() {
   return {
     params: { bookHash: BOOK_HASH },
     cookies: { get: (_: string) => undefined },
-    locals: {
-      supabase,
-      safeGetSession: async () => ({ user: { id: USER_ID } }),
-    },
+    // Layout guard at `/app/+layout.server.ts` populates the non-null
+    // `user` via `await parent()`. Page loader now trusts that contract
+    // rather than re-calling `safeGetSession` (issue #151).
+    parent: async () => ({ user: { id: USER_ID } }),
+    locals: { supabase },
     platform: { context: { waitUntil: vi.fn() } },
     url,
     // Required by @sentry/sveltekit's wrapServerLoadWithSentry, which reads

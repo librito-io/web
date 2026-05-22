@@ -17,7 +17,7 @@
   // render the fallback message in the right place.
   let networkErrorDeviceId = $state<string | null>(null);
 
-  async function handleClaim(e: SubmitEvent) {
+  async function handleClaim(e: SubmitEvent): Promise<void> {
     e.preventDefault();
     claimLoading = true;
     claimError = "";

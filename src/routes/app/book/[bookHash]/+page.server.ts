@@ -20,11 +20,11 @@ export const load: PageServerLoad = async (event) => {
   const {
     params,
     cookies,
-    locals: { supabase, safeGetSession },
+    parent,
+    locals: { supabase },
   } = event;
 
-  const { user } = await safeGetSession();
-  if (!user) error(401, "Not authenticated");
+  const { user } = await parent();
 
   const bookHash = params.bookHash;
   const sort: Sort = parseSort(cookies.get(SORT_COOKIE), "reading");

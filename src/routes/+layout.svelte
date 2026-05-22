@@ -26,6 +26,14 @@
   });
 
   onMount(() => {
+    // Hydration probe for the Playwright e2e suite. SSR ships interactive
+    // buttons without onclick handlers; a click racing hydration silently
+    // no-ops. Tests `awaitHydration(page)` on `html[data-hydrated]` instead
+    // of the discouraged `waitForLoadState("networkidle")` — long-lived
+    // Realtime / SSE / analytics requests keep the network non-idle and
+    // would time out unrelated to product behaviour. See issue #360.
+    document.documentElement.setAttribute("data-hydrated", "true");
+
     const {
       data: { subscription },
     } = data.supabase.auth.onAuthStateChange((_, session) => {

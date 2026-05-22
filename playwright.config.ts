@@ -23,7 +23,11 @@ export default defineConfig({
     url: "http://localhost:5173",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    stdout: "ignore",
+    // CI: pipe so dev-server stdout (vite errors, missing-env crashes,
+    // port conflicts) surfaces in the Playwright report when webServer
+    // boot fails. Local: ignore to keep the suite quiet for the common
+    // case of running against an already-warm dev server. Issue #362.
+    stdout: process.env.CI ? "pipe" : "ignore",
     stderr: "pipe",
   },
 });

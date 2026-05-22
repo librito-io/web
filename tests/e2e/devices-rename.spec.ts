@@ -5,6 +5,7 @@ import {
   login,
   type E2EUser,
 } from "./helpers/auth";
+import { awaitHydration } from "./helpers/hydrate";
 import { getAdmin } from "./helpers/supabase";
 
 // Worked example for issue #346. Covers the three browser-only assertions
@@ -46,10 +47,7 @@ test.describe("devices rename flow", () => {
 
     await login(page, user);
     await page.goto("/app/devices");
-    // Wait for Svelte 5 hydration so the Rename onclick handler is wired up
-    // before we click — SSR ships the button without listeners, so a click
-    // racing hydration is a no-op.
-    await page.waitForLoadState("networkidle");
+    await awaitHydration(page);
 
     await expect(
       page.getByText("Original Device", { exact: true }),
@@ -90,7 +88,7 @@ test.describe("devices rename flow", () => {
 
     await login(page, user);
     await page.goto("/app/devices");
-    await page.waitForLoadState("networkidle");
+    await awaitHydration(page);
 
     await expect(page.getByText("Device Alpha", { exact: true })).toBeVisible();
     await expect(page.getByText("Device Bravo", { exact: true })).toBeVisible();
@@ -109,11 +107,11 @@ test.describe("devices rename flow", () => {
 
     // Error visible under A's row.
     const errorText = "Name must be 50 characters or less";
-    await expect(deviceA.getByText(errorText)).toBeVisible();
+    await expect(deviceA.getByText(errorText, { exact: true })).toBeVisible();
 
     // Bug class: error leaking across rows. B is in display mode (no form
     // open) — the error must not surface under its <li>.
-    await expect(deviceB.getByText(errorText)).toHaveCount(0);
+    await expect(deviceB.getByText(errorText, { exact: true })).toHaveCount(0);
 
     // Stronger guard: cancel A's rename, open B's rename. With the bug,
     // the page-wide `form` prop with deviceId=A would still match if the
@@ -122,6 +120,6 @@ test.describe("devices rename flow", () => {
     await deviceA.getByRole("button", { name: "Cancel" }).click();
     await deviceB.getByRole("button", { name: "Rename" }).click();
     await expect(deviceB.locator(`#rename-${deviceBId}-hint`)).toBeVisible();
-    await expect(deviceB.getByText(errorText)).toHaveCount(0);
+    await expect(deviceB.getByText(errorText, { exact: true })).toHaveCount(0);
   });
 });

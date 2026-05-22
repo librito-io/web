@@ -59,13 +59,28 @@ jobs:
       # SvelteKit's vite dev reads .env at boot; synthesise one from the
       # running local Supabase so the dev server (started by
       # playwright.config.ts webServer) has Supabase pointers + keys.
+      #
+      # LIBRITO_JWT_PRIVATE_KEY_JWK is read lazily by /api/realtime-token,
+      # so the dev server boots without it today. Provision it preemptively
+      # from the synthetic fixture so the first e2e covering the realtime
+      # path doesn't fail in CI with a misleading `server_misconfigured`
+      # 500 while passing locally where the key is provisioned. Issue #361.
+      #
+      # Upstash Redis intentionally NOT provisioned: ratelimit.ts fails-OPEN
+      # on unreachable Redis (see src/lib/server/ratelimit.ts), so dev-
+      # server boot and non-rate-limited e2e paths work without it. If a
+      # future e2e needs to assert rate-limit behaviour, provision a CI-
+      # side Upstash or mock the limiter — do not flip ratelimit to fail-
+      # CLOSED for CI.
       - name: Write .env for dev server
         run: |
           eval "$(supabase status -o env)"
+          JWK=$(npx --no-install tsx -e 'import("./tests/fixtures/dev-jwk.ts").then(m => process.stdout.write(m.DEV_STANDBY_JWK_STR))')
           {
             echo "PUBLIC_SUPABASE_URL=$API_URL"
             echo "PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY"
             echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "LIBRITO_JWT_PRIVATE_KEY_JWK=$JWK"
           } > .env
 
       - name: Cache Playwright browsers

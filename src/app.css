@@ -131,7 +131,7 @@ header h1 {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  border: 1.5px solid #555;
+  border: 1.5px solid #232629;
   background: transparent;
   cursor: pointer;
   display: flex;
@@ -139,9 +139,10 @@ header h1 {
   justify-content: center;
   flex-shrink: 0;
   margin-top: 2px;
+  transition: border-color 0.15s ease;
 }
 .menu-btn:hover {
-  border-color: #999;
+  border-color: #47494b;
 }
 .menu-icon {
   width: 18px;
@@ -272,15 +273,16 @@ header h1 {
   gap: 4px;
   padding: 0 14px 0 12px;
   height: 40px;
-  border: 1.5px solid #555;
+  border: 1.5px solid #232629;
   border-radius: 20px;
   background: transparent;
   cursor: pointer;
   flex-shrink: 0;
   margin-top: 2px;
+  transition: border-color 0.15s ease;
 }
 .lang-btn:hover {
-  border-color: #999;
+  border-color: #47494b;
 }
 .lang-btn .lang-icon {
   color: #e8e8e8;
@@ -324,7 +326,7 @@ header h1 {
   margin: 0 6px;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: 4px;
   color: #e8e8e8;
   text-decoration: none;
   font-size: 0.875rem;
@@ -334,10 +336,15 @@ header h1 {
   cursor: pointer;
 }
 .lang-dropdown button:hover {
-  background: #2a2d31;
+  background: #e6e6e6;
+  color: #16181b;
 }
 .lang-dropdown button.active {
-  background: #2a2d31;
+  font-weight: 700;
+  color: #ffffff;
+}
+.lang-dropdown button.active:hover {
+  color: #16181b;
 }
 .download-bar {
   margin: 20px 0 40px 0;
@@ -674,7 +681,7 @@ blockquote {
   width: calc(100% - 12px);
   padding: 8px 14px;
   margin: 0 6px;
-  border-radius: 8px;
+  border-radius: 4px;
   color: #e8e8e8;
   font-size: 0.875rem;
   font-weight: 500;
@@ -687,16 +694,17 @@ blockquote {
 }
 @media (hover: hover) {
   .ctx-menu button:hover {
-    background: #2a2d31;
+    background: #e6e6e6;
+    color: #16181b;
   }
 }
 .ctx-menu button.destructive {
-  color: #e8e8e8;
+  color: #e6e6e6;
 }
 @media (hover: hover) {
   .ctx-menu button.destructive:hover {
-    color: #ff5555;
-    background: #2a2d31;
+    background: #ef4444;
+    color: #e6e6e6;
   }
 }
 .ctx-menu-divider {
@@ -709,10 +717,11 @@ blockquote {
   bottom: 40px;
   left: 50%;
   transform: translateX(-50%) translateY(20px);
-  background: #363636;
-  color: #e8e8e8;
+  background: #e6e6e6;
+  color: #16181b;
   padding: 10px 20px;
   border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   font-size: 0.875rem;
   font-weight: 500;
   opacity: 0;

@@ -97,6 +97,95 @@ describe("POST /api/transfer/[id]/confirm — WS-D", () => {
     });
   });
 
+  // LIBRITO-WEB-9 regression: after a successful Storage remove, confirm
+  // MUST null storage_path so the transfer-sweep cron's Pass A no longer
+  // re-targets the now-empty path (storage-api returns empty data for
+  // already-gone paths, which Pass A treats as failure, firing a daily
+  // Sentry warning).
+  it("on Storage remove success: issues a second guarded UPDATE that nulls storage_path", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: {
+        id: "11111111-1111-4111-8111-111111111111",
+        user_id: "u-1",
+        status: "pending",
+        storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
+        attempt_count: 0,
+      },
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", {
+      data: [{ id: "11111111-1111-4111-8111-111111111111" }],
+      error: null,
+    });
+    supabase._storage.set("remove", {
+      data: [{ name: "u-1/11111111-1111-4111-8111-111111111111/book.epub" }],
+      error: null,
+    });
+
+    const updateBaseline = supabase._updateCalls.filter(
+      (c) => c.table === "book_transfers",
+    ).length;
+    const chainBaseline = supabase._chainCalls.length;
+
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
+    expect(res.status).toBe(200);
+
+    const newUpdates = supabase._updateCalls
+      .filter((c) => c.table === "book_transfers")
+      .slice(updateBaseline);
+    // First UPDATE: status flip + accounting reset.
+    // Second UPDATE: storage_path: null after Storage confirms removal.
+    expect(newUpdates.length).toBe(2);
+    expect(newUpdates[1].payload).toEqual({ storage_path: null });
+
+    const newChain = supabase._chainCalls.slice(chainBaseline);
+    const nullStatusFilter = newChain.find(
+      (c) =>
+        c.table === "book_transfers" &&
+        c.operation === "update" &&
+        c.method === "in" &&
+        c.args[0] === "status",
+    );
+    // Guarded with `.in("status", ["downloaded", "expired"])` to close the
+    // TOCTOU window between status flip and null-update.
+    expect(nullStatusFilter).toBeDefined();
+    expect(nullStatusFilter?.args[1]).toEqual(["downloaded", "expired"]);
+  });
+
+  it("on Storage remove failure: does NOT null storage_path (sweep Pass A retries)", async () => {
+    supabase._results.set("book_transfers.select", {
+      data: {
+        id: "11111111-1111-4111-8111-111111111111",
+        user_id: "u-1",
+        status: "pending",
+        storage_path: "u-1/11111111-1111-4111-8111-111111111111/book.epub",
+        attempt_count: 0,
+      },
+      error: null,
+    });
+    supabase._results.set("book_transfers.update", {
+      data: [{ id: "11111111-1111-4111-8111-111111111111" }],
+      error: null,
+    });
+    supabase._storage.set("remove", {
+      data: null,
+      error: { message: "transient_5xx" },
+    });
+
+    const updateBaseline = supabase._updateCalls.filter(
+      (c) => c.table === "book_transfers",
+    ).length;
+
+    const res = await POST(buildEvent("11111111-1111-4111-8111-111111111111"));
+    expect(res.status).toBe(200);
+
+    const newUpdates = supabase._updateCalls
+      .filter((c) => c.table === "book_transfers")
+      .slice(updateBaseline);
+    expect(newUpdates.length).toBe(1);
+    expect(newUpdates[0].payload).not.toHaveProperty("storage_path");
+  });
+
   it("on update returning zero rows (TOCTOU race): emits transfer.confirm_race, returns 409, does not delete storage or log success", async () => {
     supabase._results.set("book_transfers.select", {
       data: {

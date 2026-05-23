@@ -455,6 +455,16 @@ header h1 {
   flex-direction: column;
   gap: 32px;
 }
+@media (min-width: 900px) {
+  .content:has(.book-list) {
+    max-width: 980px;
+  }
+}
+@media (min-width: 1400px) {
+  .content:has(.book-list) {
+    max-width: 1400px;
+  }
+}
 .book-card {
   background: #0f1114;
   border: 1px solid #232629;

@@ -47,6 +47,7 @@
     "material-symbols": "^0.44.1",
     "pino": "^9.14.0",
     "resend": "^6.12.0",
+    "svelte-bricks": "^0.5.0",
     "svelte-i18n": "^4.0.1"
   },
   "overrides": {

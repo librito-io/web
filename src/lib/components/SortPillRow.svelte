@@ -38,7 +38,7 @@
     border: 1px solid #2a2a2a;
     border-radius: 999px;
     padding: 6px 14px;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     font-family: inherit;
     cursor: pointer;
     transition:

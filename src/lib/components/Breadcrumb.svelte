@@ -8,7 +8,7 @@
   .breadcrumb {
     display: inline-block;
     color: #888;
-    font-size: 0.95rem;
+    font-size: 1rem;
     text-decoration: none;
     padding: 8px 0 16px;
   }

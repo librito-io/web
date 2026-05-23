@@ -129,7 +129,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #e8e8e8;
+    color: #dedede;
     font-family: "JetBrains Mono", monospace;
     font-weight: 500;
     font-size: 2rem;

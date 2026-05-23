@@ -64,7 +64,7 @@
   }
   .retry {
     background: #2a2a2a;
-    color: #e8e8e8;
+    color: #dedede;
     border: 1px solid #3a3a3a;
     border-radius: 999px;
     padding: 6px 16px;

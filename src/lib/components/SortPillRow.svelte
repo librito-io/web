@@ -52,7 +52,7 @@
   }
   .pill.active {
     background: #2a2a2a;
-    color: #e8e8e8;
+    color: #dedede;
     border-color: #3a3a3a;
   }
 </style>

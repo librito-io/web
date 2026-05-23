@@ -455,14 +455,9 @@ header h1 {
   flex-direction: column;
   gap: 32px;
 }
-@media (min-width: 900px) {
+@media (min-width: 912px) {
   .content:has(.book-list) {
-    max-width: calc(100vw - 80px);
-  }
-}
-@media (min-width: 1400px) {
-  .content:has(.book-list) {
-    max-width: 1400px;
+    max-width: min(1400px, calc(100% - 40px));
   }
 }
 .book-card {

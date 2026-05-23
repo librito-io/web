@@ -18,6 +18,9 @@ export default defineConfig({
     }),
     sveltekit(),
   ],
+  ssr: {
+    noExternal: ["svelte-bricks"],
+  },
   test: {
     include: ["tests/**/*.test.ts"],
     exclude: ["tests/integration/**", "node_modules/**"],

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SupabaseClient } from "@supabase/supabase-js";
   import { untrack } from "svelte";
+  import Masonry from "svelte-bricks";
   import { _ } from "$lib/i18n";
   import HighlightCard from "./HighlightCard.svelte";
   import SortPillRow from "./SortPillRow.svelte";
@@ -182,15 +183,24 @@
   {#if items.length === 0}
     <div class="empty">{emptyMessage}</div>
   {:else}
-    {#each items as item (item.highlight_id)}
-      <HighlightCard
-        {item}
-        {supabase}
-        {userId}
-        {registerNoteEditor}
-        {...cardProps}
-      />
-    {/each}
+    <Masonry
+      {items}
+      idKey="highlight_id"
+      minColWidth={400}
+      maxColWidth={680}
+      gap={32}
+      order="row-first"
+    >
+      {#snippet children({ item }: { item: (typeof items)[number] })}
+        <HighlightCard
+          {item}
+          {supabase}
+          {userId}
+          {registerNoteEditor}
+          {...cardProps}
+        />
+      {/snippet}
+    </Masonry>
   {/if}
 </div>
 

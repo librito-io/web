@@ -72,7 +72,7 @@ header {
   z-index: 60;
 }
 .header-inner {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 20px 32px;
   display: flex;
@@ -457,7 +457,7 @@ header h1 {
 }
 @media (min-width: 900px) {
   .content:has(.book-list) {
-    max-width: 980px;
+    max-width: calc(100vw - 80px);
   }
 }
 @media (min-width: 1400px) {

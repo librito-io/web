@@ -210,12 +210,17 @@ export function parseInitiateBody(body: unknown): ParseInitiateResult {
 }
 
 // Best-effort delete of a single object from the book-transfers bucket.
-// Orphan-tolerant by design: the transfer-sweep cron's Pass A scans for
-// retired rows whose Storage object never died (transient 5xx, ACL drift,
-// confirm-time best-effort race) and retries the remove, then NULLs
-// storage_path once Storage confirms deletion. Callers therefore do not
-// need to surface, retry, or fail on Storage errors here — the sweep is
-// the convergence point.
+// Returns `{ ok }` so callers can null `storage_path` only on confirmed
+// removal; on failure they leave the path populated for the transfer-sweep
+// cron's Pass A to retry.
+//
+// `ok` is true in two distinct shapes: Storage echoes the path in `data`
+// (it deleted), OR Storage returns empty `data` and no error (object was
+// already gone — storage-api silently omits missing paths from the
+// response). Both states equate to "ensured gone". Treating empty-data as
+// failure caused LIBRITO-WEB-9: confirm pre-deleted Storage, never nulled
+// storage_path, and Pass A's daily retry saw empty data on already-gone
+// objects and emitted a Sentry warning every fire.
 //
 // supabase-js Storage operations return `{ data, error }`; they only throw
 // on transport-level exceptions (fetch failure). Earlier call sites mixed
@@ -225,7 +230,7 @@ export function parseInitiateBody(body: unknown): ParseInitiateResult {
 export async function removeTransferStorage(
   supabase: SupabaseClient,
   path: string,
-): Promise<void> {
+): Promise<{ ok: boolean }> {
   try {
     const { error } = await supabase.storage
       .from(TRANSFER_BUCKET)
@@ -239,7 +244,9 @@ export async function removeTransferStorage(
         },
         "transfer.storage_remove_failed",
       );
+      return { ok: false };
     }
+    return { ok: true };
   } catch (err) {
     logger().warn(
       {
@@ -249,6 +256,7 @@ export async function removeTransferStorage(
       },
       "transfer.storage_remove_threw",
     );
+    return { ok: false };
   }
 }
 

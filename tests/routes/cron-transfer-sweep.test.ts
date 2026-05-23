@@ -342,6 +342,9 @@ describe("GET /api/cron/transfer-sweep", () => {
           passAStorageFailed: 1,
           passAPathNulled: 1,
           batchSize: 2,
+          // Partial failure has no top-level Storage error message —
+          // distinguishable in Sentry from a batch-level error.
+          removeErrorMessage: "",
         }),
       }),
     );
@@ -408,6 +411,21 @@ describe("GET /api/cron/transfer-sweep", () => {
         (u.payload as Record<string, unknown>).storage_path === null,
     );
     expect(passAUpdateCalls.length).toBe(0);
+
+    // Top-level error message propagates to the Sentry warning extra so
+    // operators see WHAT failed, not just counts. LIBRITO-WEB-9: the
+    // pre-fix warning carried counts only, leaving the trace logs empty.
+    const captureCall = captureMessage.mock.calls.find(
+      ([m]) => m === "transfer_sweep_pass_a_storage_failure",
+    );
+    expect(captureCall).toBeDefined();
+    expect(captureCall![1]).toEqual(
+      expect.objectContaining({
+        extra: expect.objectContaining({
+          removeErrorMessage: "storage_unavailable",
+        }),
+      }),
+    );
   });
 
   // Empty batch: SELECT returns zero rows. Pass A must skip both

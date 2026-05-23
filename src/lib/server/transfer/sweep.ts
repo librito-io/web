@@ -73,6 +73,12 @@ async function runPassA(
   let passAStorageRemoved = 0;
   let passAStorageFailed = 0;
   let passAPathNulled = 0;
+  // Propagated to Sentry `extra` and the structured log. Without this the
+  // Sentry warning carried counts only — LIBRITO-WEB-9's trace had zero
+  // log entries, so the actual Storage error (or lack thereof) was
+  // invisible. Empty string when the failure was per-path (no top-level
+  // error) rather than a batch-level Storage failure.
+  let removeErrorMessage = "";
 
   if (rows.length > 0) {
     const paths = rows.map((r) => r.storage_path);
@@ -87,6 +93,15 @@ async function runPassA(
       // Top-level error: assume the entire batch failed. Do NOT null
       // storage_path for any row; next sweep retries the whole batch.
       passAStorageFailed = rows.length;
+      removeErrorMessage = removeError.message ?? "unknown";
+      logger().error(
+        {
+          event: "cron.transfer_sweep.pass_a_remove_failed",
+          batchSize: rows.length,
+          error: removeErrorMessage,
+        },
+        "cron.transfer_sweep.pass_a_remove_failed",
+      );
     } else {
       // Per-path: paths absent from `data` (partial failure) stay
       // populated for the next sweep to retry. Set ensures we only null
@@ -125,6 +140,15 @@ async function runPassA(
         passAStorageFailed,
         passAPathNulled,
         batchSize: rows.length,
+        // Empty string when the failure was per-path (Storage returned
+        // success at the batch level but omitted some paths from `data`).
+        // Per-path failure is no longer expected post-LIBRITO-WEB-9 — the
+        // confirm endpoint now nulls storage_path on successful remove,
+        // so Pass A only re-targets paths that confirm's best-effort
+        // remove genuinely missed. If you see this firing with an empty
+        // removeErrorMessage, suspect a new writer that's not nulling
+        // storage_path.
+        removeErrorMessage,
       },
     });
   }

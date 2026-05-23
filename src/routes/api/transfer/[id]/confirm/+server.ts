@@ -171,7 +171,30 @@ export const POST: RequestHandler = async ({ request, params }) => {
   );
 
   if (transfer.storage_path) {
-    await removeTransferStorage(supabase, transfer.storage_path);
+    // Two-step: status flip (above) marks the row "downloaded" for the
+    // device; this nulls `storage_path` only after Storage confirms the
+    // object is gone. Reverse order would orphan on a Storage failure
+    // (sweep Pass A selects WHERE storage_path IS NOT NULL).
+    //
+    // Without this null, Pass A re-targets the already-gone object every
+    // fire — storage-api returns empty `data` for missing paths (no
+    // top-level error), which the sweep counts as a failed remove,
+    // emitting a daily Sentry warning per zombie row. LIBRITO-WEB-9.
+    const removal = await removeTransferStorage(
+      supabase,
+      transfer.storage_path,
+    );
+    if (removal.ok) {
+      // Guarded with `.in("status", ["downloaded", "expired"])` to close
+      // a TOCTOU window between the status flip above and this write:
+      // if the row left a retired status (e.g. operator backfill), this
+      // matches zero rows rather than nulling a live path.
+      await supabase
+        .from("book_transfers")
+        .update({ storage_path: null })
+        .eq("id", transfer.id)
+        .in("status", ["downloaded", "expired"]);
+    }
   }
 
   return jsonSuccess({ success: true });

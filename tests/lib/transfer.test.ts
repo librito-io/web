@@ -293,7 +293,7 @@ describe("removeTransferStorage", () => {
 
   it("calls storage.from('book-transfers').remove([path])", async () => {
     const { client, remove, from } = buildSupabase(async () => ({
-      data: null,
+      data: [{ name: "u/123/file.epub" }],
       error: null,
     }));
     await removeTransferStorage(client, "u/123/file.epub");
@@ -301,32 +301,44 @@ describe("removeTransferStorage", () => {
     expect(remove).toHaveBeenCalledWith(["u/123/file.epub"]);
   });
 
-  it("resolves without throwing when Storage returns an error", async () => {
+  it("returns { ok: false } when Storage returns a top-level error", async () => {
     const { client } = buildSupabase(async () => ({
       data: null,
       error: { message: "object_not_found" },
     }));
     await expect(
       removeTransferStorage(client, "u/123/file.epub"),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ ok: false });
   });
 
-  it("resolves without throwing on transport exception", async () => {
+  it("returns { ok: false } on transport exception", async () => {
     const { client } = buildSupabase(async () => {
       throw new Error("ECONNRESET");
     });
     await expect(
       removeTransferStorage(client, "u/123/file.epub"),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ ok: false });
   });
 
-  it("resolves without throwing on clean delete", async () => {
+  it("returns { ok: true } when Storage echoes the path in data", async () => {
     const { client } = buildSupabase(async () => ({
       data: [{ name: "u/123/file.epub" }],
       error: null,
     }));
     await expect(
       removeTransferStorage(client, "u/123/file.epub"),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ ok: true });
+  });
+
+  // storage-api silently omits already-deleted paths from `data` (no
+  // top-level error, just an empty array). LIBRITO-WEB-9: confirm pre-
+  // deletes Storage on first call; on retry / Pass A convergence the second
+  // remove returns this shape. Treat as success — gone is gone, no caller
+  // should keep retrying or leave `storage_path` populated. Issue #XXXX.
+  it("returns { ok: true } when Storage returns empty data and no error (object already gone)", async () => {
+    const { client } = buildSupabase(async () => ({ data: [], error: null }));
+    await expect(
+      removeTransferStorage(client, "u/123/file.epub"),
+    ).resolves.toEqual({ ok: true });
   });
 });

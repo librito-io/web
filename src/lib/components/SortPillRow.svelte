@@ -38,7 +38,7 @@
     border: 1px solid #2a2a2a;
     border-radius: 999px;
     padding: 6px 14px;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     font-family: inherit;
     cursor: pointer;
     transition:
@@ -52,7 +52,7 @@
   }
   .pill.active {
     background: #2a2a2a;
-    color: #e8e8e8;
+    color: #dedede;
     border-color: #3a3a3a;
   }
 </style>

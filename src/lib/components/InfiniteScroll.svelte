@@ -57,14 +57,14 @@
     text-align: center;
     padding: 24px 0;
     color: #888;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
   }
   .loading-text {
     opacity: 0.7;
   }
   .retry {
     background: #2a2a2a;
-    color: #e8e8e8;
+    color: #dedede;
     border: 1px solid #3a3a3a;
     border-radius: 999px;
     padding: 6px 16px;

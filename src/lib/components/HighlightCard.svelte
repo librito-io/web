@@ -69,25 +69,15 @@
 </script>
 
 <div class="book-card expanded">
+  {#if linkBookText}
+    <a
+      href={bookHref}
+      class="card-link"
+      aria-label={item.book_title || $_("untitled")}
+    ></a>
+  {/if}
   <div class="book-header">
-    {#if linkBookText}
-      <a href={bookHref} class="book-cover-link" aria-hidden="true">
-        {#if item.coverUrl}
-          <img
-            class="book-cover"
-            src={item.coverUrl}
-            alt=""
-            width="67"
-            height="100"
-            loading="lazy"
-          />
-        {:else}
-          <div class="book-cover book-cover-placeholder">
-            {initial}
-          </div>
-        {/if}
-      </a>
-    {:else if item.coverUrl}
+    {#if item.coverUrl}
       <img
         class="book-cover"
         src={item.coverUrl}
@@ -102,21 +92,12 @@
       </div>
     {/if}
     <div class="book-info">
-      {#if linkBookText}
-        <a href={bookHref} class="book-title book-link" dir="auto">
-          {item.book_title || $_("untitled")}
-        </a>
-        <a href={bookHref} class="book-author book-link" dir="auto">
-          {item.book_author || $_("unknownAuthor")}
-        </a>
-      {:else}
-        <div class="book-title" dir="auto">
-          {item.book_title || $_("untitled")}
-        </div>
-        <div class="book-author" dir="auto">
-          {item.book_author || $_("unknownAuthor")}
-        </div>
-      {/if}
+      <div class="book-title" dir="auto">
+        {item.book_title || $_("untitled")}
+      </div>
+      <div class="book-author" dir="auto">
+        {item.book_author || $_("unknownAuthor")}
+      </div>
     </div>
   </div>
 
@@ -148,19 +129,22 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #e8e8e8;
+    color: #dedede;
     font-family: "JetBrains Mono", monospace;
     font-weight: 500;
     font-size: 2rem;
     background: #2a2a2a;
     text-decoration: none;
   }
-  .book-link {
-    display: block;
+  .card-link {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
     text-decoration: none;
-    color: inherit;
   }
-  .book-link:hover {
-    text-decoration: underline;
+  .card-link:focus-visible {
+    outline: 2px solid #2883de;
+    outline-offset: 2px;
   }
 </style>

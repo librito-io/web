@@ -59,14 +59,19 @@ const REDACTED = "[REDACTED]";
 
 /**
  * Recursively replaces values of REDACTED_FIELDS keys with [REDACTED].
- * Assumes acyclic, bounded-depth input (Sentry SDK builds these from
- * serialized error data). No cycle guard or depth cap; if a future
- * caller passes adversarial graphs, add one then.
+ * Assumes acyclic, bounded-depth input. No cycle guard or depth cap; if
+ * a future caller passes adversarial graphs, add one then.
+ *
+ * Non-plain objects (Date, RegExp, Map, Set, class instances) are returned
+ * as-is. Iterating them via Object.entries would silently collapse them
+ * to `{}` — e.g. `Sentry.setExtra("at", new Date())` would lose the Date.
  */
 function redactDeep(value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(redactDeep);
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return value;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value)) {
     if (REDACTED_SET.has(k)) {

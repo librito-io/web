@@ -180,6 +180,42 @@ describe("scrubEvent", () => {
     expect(() => scrubEvent(event)).not.toThrow();
   });
 
+  it("preserves non-plain objects (Date, RegExp, Map, class instances)", () => {
+    // Regression guard: a prior version recursed into any typeof === "object"
+    // value via Object.entries, silently collapsing Date/RegExp/Map/class
+    // instances to `{}`. redactDeep now short-circuits on non-plain protos.
+    class Custom {
+      constructor(public label = "x") {}
+    }
+    const date = new Date("2026-01-01T00:00:00Z");
+    const regex = /secret/g;
+    const map = new Map([["k", "v"]]);
+    const custom = new Custom("preserved");
+    const event = makeEvent({
+      extra: { date, regex, map, custom, note: "plain" },
+    });
+    const out = scrubEvent(event)!;
+    const extra = out.extra as Record<string, unknown>;
+    expect(extra.date).toBe(date);
+    expect(extra.regex).toBe(regex);
+    expect(extra.map).toBe(map);
+    expect(extra.custom).toBe(custom);
+    expect(extra.note).toBe("plain");
+  });
+
+  it("redacts inside Object.create(null) maps (null prototype)", () => {
+    // Some serializers emit prototype-less maps; redactDeep should still
+    // walk them, since null is a valid plain-object prototype.
+    const bag = Object.create(null) as Record<string, unknown>;
+    bag.token = "leak";
+    bag.route = "/api/sync";
+    const event = makeEvent({ extra: { bag } });
+    const out = scrubEvent(event)!;
+    const scrubbed = (out.extra as Record<string, Record<string, unknown>>).bag;
+    expect(scrubbed.token).toBe("[REDACTED]");
+    expect(scrubbed.route).toBe("/api/sync");
+  });
+
   it("every REDACTED_FIELDS entry appears in pino's redact list (sync guard)", () => {
     const logSrc = readFileSync(
       new URL("../../src/lib/server/log.ts", import.meta.url),

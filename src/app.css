@@ -457,7 +457,7 @@ header h1 {
 }
 @media (min-width: 900px) {
   .content:has(.book-list) {
-    max-width: 980px;
+    max-width: calc(100vw - 80px);
   }
 }
 @media (min-width: 1400px) {

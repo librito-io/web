@@ -271,6 +271,19 @@ Cron paths are declared in `vercel.ts` (`crons[]`) and live under `src/routes/ap
 
 If you add a new cron path: update `vercel.ts`, follow these three rules, and the smoke job picks it up automatically without a workflow edit.
 
+### Tier constraints (Vercel Hobby + Sentry Free)
+
+Two platform tiers cap what cron configuration is viable at pre-launch scale:
+
+- **Vercel Hobby — daily-only, ±59 min precision.** Hobby rejects any cron expression that would fire more than once per day (`0 * * * *`, `*/30 * * * *` fail deploy with `Hobby accounts are limited to daily cron jobs`). The 100-crons-per-project cap applies on every plan; not the constraint here. Timing precision is "Hourly (±59 min)": `0 3 * * *` may fire anywhere from 03:00 to 03:59 UTC. Per-minute precision requires Pro. Source: [Vercel cron-jobs/usage-and-pricing](https://vercel.com/docs/cron-jobs/usage-and-pricing).
+- **Sentry Free — one cron monitor slot.** Only one `Sentry.withMonitor` wrap in the codebase at a time. Currently allocated to `transfer-sweep` (highest-impact silent failure surface — Storage orphans + DB scrub). Other crons use `captureMessage` / `captureException` for ad-hoc surfacing but cannot register a scheduled check-in expectation.
+
+Implications for handler config:
+
+- **`checkinMargin` must be `>= 60`** on any Vercel Hobby cron wrapped in `Sentry.withMonitor`, because the ±59 min jitter means a check-in past the `checkinMargin` window is a Vercel scheduling reality, not a handler failure. Setting it to `5` (the natural default) produces guaranteed false-positive "missed check-in" alerts on any fire after the 5-minute mark — issue #385, LIBRITO-WEB-B.
+- **Drop `checkinMargin` back to `5`** when upgrading to Vercel Pro (per-minute precision). Tracking the change to one line keeps it easy to revert.
+- **No second `withMonitor` until Sentry paid tier.** Adding a second wrap on Free silently fails to register one of the two monitors.
+
 ## Environment Variables
 
 See `.env.example`. Required:

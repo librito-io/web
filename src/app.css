@@ -460,6 +460,33 @@ header h1 {
     max-width: min(1400px, calc(100% - 40px));
   }
 }
+/* svelte-bricks SSR shim. The lib auto-generates @container queries in
+   <svelte:head> (Masonry.svelte:248-259) to hide excess columns during
+   the parse-to-hydrate window — its stated "CLS-free SSR" strategy.
+   But every .col carries inline `style:display="grid"` (Masonry.svelte:419)
+   that beats the stylesheet `display: none` in the CSS cascade, so all 4
+   SSR-rendered cols stay visible and the feed flashes a cramped 4-col
+   layout before hydration recomputes nCols against real masonryWidth.
+   Mirror the lib's generated rules with !important so they actually win.
+   Breakpoint formula `(minColWidth + gap) * n - gap - 1` derives from
+   minColWidth=400, gap=32 in HighlightFeed.svelte — keep in sync if those
+   props change. Remove this block once janosh/svelte-bricks ships the
+   upstream `!important` fix. */
+@container masonry (max-width: 831px) {
+  .masonry > .col:nth-child(n + 2) {
+    display: none !important;
+  }
+}
+@container masonry (min-width: 832px) and (max-width: 1263px) {
+  .masonry > .col:nth-child(n + 3) {
+    display: none !important;
+  }
+}
+@container masonry (min-width: 1264px) and (max-width: 1695px) {
+  .masonry > .col:nth-child(n + 4) {
+    display: none !important;
+  }
+}
 .book-card {
   background: #0f1114;
   border: 1px solid #232629;

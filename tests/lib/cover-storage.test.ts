@@ -85,6 +85,56 @@ describe("uploadCover (cloudflare-images backend)", () => {
     );
     expect(init.method).toBe("POST");
   });
+
+  it("falls back to sha when Cloudflare returns an empty body shape", async () => {
+    process.env.COVER_STORAGE_BACKEND = "cloudflare-images";
+    const fetchFn = vi.fn(
+      async () => new Response(JSON.stringify({}), { status: 200 }),
+    );
+    const { uploadCover } = await import("../../src/lib/server/cover-storage");
+    const r = await uploadCover(
+      new Uint8Array([0xff, 0xd8, 0xff]),
+      "image/jpeg",
+      { fetchFn },
+    );
+    expect(r.backend).toBe("cloudflare-images");
+    expect(r.storage_path).toBe(r.image_sha256);
+    expect(r.storage_path).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("falls back to sha when result is not an object", async () => {
+    process.env.COVER_STORAGE_BACKEND = "cloudflare-images";
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ result: "wrong-shape" }), {
+          status: 200,
+        }),
+    );
+    const { uploadCover } = await import("../../src/lib/server/cover-storage");
+    const r = await uploadCover(
+      new Uint8Array([0xff, 0xd8, 0xff]),
+      "image/jpeg",
+      { fetchFn },
+    );
+    expect(r.storage_path).toBe(r.image_sha256);
+  });
+
+  it("falls back to sha when result.id is not a string", async () => {
+    process.env.COVER_STORAGE_BACKEND = "cloudflare-images";
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ result: { id: 12345 } }), {
+          status: 200,
+        }),
+    );
+    const { uploadCover } = await import("../../src/lib/server/cover-storage");
+    const r = await uploadCover(
+      new Uint8Array([0xff, 0xd8, 0xff]),
+      "image/jpeg",
+      { fetchFn },
+    );
+    expect(r.storage_path).toBe(r.image_sha256);
+  });
 });
 
 describe("resolveVariant", () => {
@@ -149,47 +199,27 @@ describe("coverUrl with cover_max_width", () => {
   it("constructs xlarge URL when source >= 1200", async () => {
     process.env.COVER_STORAGE_BACKEND = "cloudflare-images";
     const { coverUrl } = await import("../../src/lib/server/cover-storage");
-    const url = coverUrl(
-      "ab/cd",
-      "cloudflare-images",
-      "xlarge",
-      1500,
-    );
+    const url = coverUrl("ab/cd", "cloudflare-images", "xlarge", 1500);
     expect(url).toBe("https://imagedelivery.net/hashabc/ab/cd/xlarge");
   });
 
   it("downgrades to large URL when source < 1200", async () => {
     process.env.COVER_STORAGE_BACKEND = "cloudflare-images";
     const { coverUrl } = await import("../../src/lib/server/cover-storage");
-    const url = coverUrl(
-      "ab/cd",
-      "cloudflare-images",
-      "xlarge",
-      800,
-    );
+    const url = coverUrl("ab/cd", "cloudflare-images", "xlarge", 800);
     expect(url).toBe("https://imagedelivery.net/hashabc/ab/cd/large");
   });
 
   it("trusts caller (uses requested variant) when cover_max_width unknown", async () => {
     process.env.COVER_STORAGE_BACKEND = "cloudflare-images";
     const { coverUrl } = await import("../../src/lib/server/cover-storage");
-    const url = coverUrl(
-      "ab/cd",
-      "cloudflare-images",
-      "xlarge",
-      null,
-    );
+    const url = coverUrl("ab/cd", "cloudflare-images", "xlarge", null);
     expect(url).toBe("https://imagedelivery.net/hashabc/ab/cd/xlarge");
   });
 
   it("supabase backend ignores variant entirely (full-size only)", async () => {
     const { coverUrl } = await import("../../src/lib/server/cover-storage");
-    const url = coverUrl(
-      "ab/cd.jpg",
-      "supabase",
-      "xlarge",
-      800,
-    );
+    const url = coverUrl("ab/cd.jpg", "supabase", "xlarge", 800);
     expect(url).toBe(
       "https://supabase.example.co/storage/v1/object/public/cover-cache/ab/cd.jpg",
     );

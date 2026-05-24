@@ -310,17 +310,15 @@ export async function processSync(
     const { data: upsertedBooks, error: bookError } = await supabase
       .from("books")
       .upsert(bookRows, { onConflict: "user_id,book_hash" })
-      .select("id, book_hash");
+      .select("id, book_hash")
+      .overrideTypes<{ id: string; book_hash: string }[], { merge: false }>();
 
     if (bookError || !upsertedBooks) {
       throw new Error(`Failed to upsert books: ${bookError?.message}`);
     }
 
     const hashToId = new Map<string, string>(
-      (upsertedBooks as { id: string; book_hash: string }[]).map((r) => [
-        r.book_hash,
-        r.id,
-      ]),
+      upsertedBooks.map((r) => [r.book_hash, r.id]),
     );
 
     // Batch-upsert all highlights across all books

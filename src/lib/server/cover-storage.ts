@@ -147,9 +147,20 @@ async function uploadCloudflare(
     }
     throw new Error(`cover-storage cloudflare upload: ${res.status}`);
   }
-  const body = (await res.json()) as { result?: { id?: string } };
-  const id = body.result?.id ?? sha;
+  const id = parseCloudflareImageId(await res.json()) ?? sha;
   return { storage_path: id, backend: "cloudflare-images", image_sha256: sha };
+}
+
+function parseCloudflareImageId(body: unknown): string | null {
+  if (typeof body !== "object" || body === null || !("result" in body)) {
+    return null;
+  }
+  const result = (body as { result: unknown }).result;
+  if (typeof result !== "object" || result === null || !("id" in result)) {
+    return null;
+  }
+  const id = (result as { id: unknown }).id;
+  return typeof id === "string" ? id : null;
 }
 
 export async function uploadCover(

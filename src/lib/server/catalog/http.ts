@@ -36,6 +36,17 @@ export function redactSecretParams(url: string): string {
 const DEFAULT_JSON_TIMEOUT_MS = 8000;
 const DEFAULT_COVER_TIMEOUT_MS = 15000;
 
+// Free the underlying TCP socket on every early-return after a successful
+// fetch. Undici holds the socket open until the body stream is consumed or
+// cancelled; warmup fan-out otherwise leaks connection-pool capacity under
+// Fluid Compute (issue #254). The `.catch()` swallows the rare rejection
+// WHATWG Streams §4.2.4 permits when the stream is already in an errored
+// state — without it, the un-awaited Promise would surface as an unhandled
+// rejection on the warmup hot path.
+function cancelBody(res: Response): void {
+  void res.body?.cancel().catch(() => {});
+}
+
 export interface FetchCatalogJsonDeps {
   fetchFn?: typeof fetch;
   timeoutMs?: number;
@@ -62,9 +73,14 @@ export async function fetchCatalogJson<T>(
       headers: { "user-agent": LIBRITO_UA, accept: "application/json" },
       signal: controller.signal,
     });
-    if (res.status === 404) return null;
-    if (!res.ok)
+    if (res.status === 404) {
+      cancelBody(res);
+      return null;
+    }
+    if (!res.ok) {
+      cancelBody(res);
       throw new Error(`${source} ${res.status} ${redactSecretParams(url)}`);
+    }
     return (await res.json()) as T;
   } finally {
     clearTimeout(timer);
@@ -127,18 +143,14 @@ export async function downloadCover(
       headers: { "user-agent": LIBRITO_UA },
       signal: controller.signal,
     });
-    // Cancel the body stream on every early-return after a successful fetch.
-    // Undici keeps the underlying TCP socket open until the body is consumed
-    // or cancelled; warmup fan-out + frequent OL ISBN-direct 404s would
-    // otherwise leak connection-pool capacity under Fluid Compute (issue #254).
     if (!res.ok) {
-      res.body?.cancel();
+      cancelBody(res);
       return null;
     }
     // Layer 1: Content-Length pre-check (no buffering on oversize).
     const contentLength = res.headers.get("content-length");
     if (contentLength && Number(contentLength) > opts.maxBytes) {
-      res.body?.cancel();
+      cancelBody(res);
       return null;
     }
     // Layer 2: Post-buffer backstop.

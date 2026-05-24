@@ -127,10 +127,20 @@ export async function downloadCover(
       headers: { "user-agent": LIBRITO_UA },
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    // Cancel the body stream on every early-return after a successful fetch.
+    // Undici keeps the underlying TCP socket open until the body is consumed
+    // or cancelled; warmup fan-out + frequent OL ISBN-direct 404s would
+    // otherwise leak connection-pool capacity under Fluid Compute (issue #254).
+    if (!res.ok) {
+      res.body?.cancel();
+      return null;
+    }
     // Layer 1: Content-Length pre-check (no buffering on oversize).
     const contentLength = res.headers.get("content-length");
-    if (contentLength && Number(contentLength) > opts.maxBytes) return null;
+    if (contentLength && Number(contentLength) > opts.maxBytes) {
+      res.body?.cancel();
+      return null;
+    }
     // Layer 2: Post-buffer backstop.
     const buf = new Uint8Array(await res.arrayBuffer());
     if (buf.byteLength < opts.minBytes) return null;

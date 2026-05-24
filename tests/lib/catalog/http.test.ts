@@ -209,6 +209,47 @@ describe("downloadCover", () => {
     expect(r).toBeNull();
   });
 
+  it("cancels the response body on the !res.ok early-return path", async () => {
+    // Undici holds the underlying TCP socket open until the body stream
+    // is consumed or cancelled. Catalog warmup fan-out + OL ISBN-direct
+    // 404s exercise this path frequently; leaks accumulate under Fluid
+    // Compute instance reuse before GC (issue #254).
+    const cancel = vi.fn(async () => undefined);
+    const res = new Response(new Uint8Array(0), { status: 404 });
+    // Replace the body getter with a stream stub that exposes cancel.
+    Object.defineProperty(res, "body", {
+      value: { cancel } as unknown as ReadableStream,
+    });
+    const fetchFn = vi.fn(async () => res);
+    const r = await downloadCover("https://example.com/cover.jpg", {
+      ...baseOpts,
+      fetchFn,
+    });
+    expect(r).toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the response body when Content-Length exceeds maxBytes (pre-check)", async () => {
+    const cancel = vi.fn(async () => undefined);
+    const res = new Response(new Uint8Array(1024).fill(0xff), {
+      status: 200,
+      headers: {
+        "content-type": "image/jpeg",
+        "content-length": "6000000",
+      },
+    });
+    Object.defineProperty(res, "body", {
+      value: { cancel } as unknown as ReadableStream,
+    });
+    const fetchFn = vi.fn(async () => res);
+    const r = await downloadCover("https://example.com/cover.jpg", {
+      ...baseOpts,
+      fetchFn,
+    });
+    expect(r).toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects when Content-Length exceeds maxBytes without buffering (pre-check)", async () => {
     // The Response body would pass the min check, but Content-Length is over the cap.
     const fetchFn = vi.fn(

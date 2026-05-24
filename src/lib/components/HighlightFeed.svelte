@@ -143,6 +143,11 @@
     if (next === sort) return;
     writeSortCookie(next);
     sort = next;
+    // Clear items atomically with cursor reset. If the replace fetch fails
+    // and InfiniteScroll later fires a non-replace loadMore, the concat
+    // would otherwise mix old-sort items with new-sort page 1 and produce
+    // duplicate highlight_ids (Masonry idKey) → each_key_duplicate crash.
+    items = [];
     cursor = null;
     done = false;
     await loadMore({ replace: true });
@@ -170,6 +175,10 @@
       if (!cursor || payload.items.length === 0) done = true;
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
+      // Replace-fetch failure: stop InfiniteScroll so it can't auto-retry
+      // and append a successful page onto an empty/stale list. User has to
+      // click a pill to retry, which clears state again via onSortChange.
+      if (opts.replace) done = true;
       throw err;
     } finally {
       if (abortController === ac) abortController = null;

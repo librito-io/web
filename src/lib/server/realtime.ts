@@ -63,7 +63,22 @@ let jwksKidConfirmed: string | null = null;
 // kid-keyed; rotation propagates by missing the cache and re-importing.
 const importedKeys = new Map<string, CryptoKey>();
 
-async function checkKidInJwks(kid: string, supabaseUrl: string): Promise<void> {
+function parseJwksKeys(body: unknown): Array<{ kid: string }> {
+  if (typeof body !== "object" || body === null || !("keys" in body)) return [];
+  const raw = (body as { keys: unknown }).keys;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (k): k is { kid: string } =>
+      typeof k === "object" &&
+      k !== null &&
+      typeof (k as { kid?: unknown }).kid === "string",
+  );
+}
+
+export async function checkKidInJwks(
+  kid: string,
+  supabaseUrl: string,
+): Promise<void> {
   if (jwksKidConfirmed === kid) return;
   try {
     const res = await fetch(`${supabaseUrl}/auth/v1/.well-known/jwks.json`);
@@ -77,8 +92,7 @@ async function checkKidInJwks(kid: string, supabaseUrl: string): Promise<void> {
       );
       return;
     }
-    const body = (await res.json()) as { keys?: Array<{ kid: string }> };
-    const keys = body.keys ?? [];
+    const keys = parseJwksKeys(await res.json());
     if (keys.some((k) => k.kid === kid)) {
       jwksKidConfirmed = kid;
     } else {

@@ -1,9 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { jwtVerify, importJWK } from "jose";
 import {
   mintRealtimeToken,
+  checkKidInJwks,
   REALTIME_TOKEN_TTL_SECONDS,
 } from "$lib/server/realtime";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 import { DEV_STANDBY_JWK, DEV_KID } from "../fixtures/dev-jwk";
 
 // Spy on importJWK while delegating to the real implementation. The
@@ -114,5 +116,110 @@ describe("mintRealtimeToken", () => {
     await expect(
       jwtVerify(token, otherKey, { audience: "authenticated" }),
     ).rejects.toThrow();
+  });
+});
+
+describe("checkKidInJwks", () => {
+  let writes: Record<string, unknown>[];
+
+  beforeEach(() => {
+    writes = [];
+    __setTestDestination((line) => {
+      writes.push(JSON.parse(line));
+    });
+  });
+
+  afterEach(() => {
+    __resetTestDestination();
+    vi.unstubAllGlobals();
+  });
+
+  it("ignores malformed body where keys is a non-array (logs kid_not_in_jwks, does not throw)", async () => {
+    const kid = "kid-malformed-keys-not-array";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ keys: "not-an-array" }), {
+            status: 200,
+          }),
+      ),
+    );
+
+    await expect(checkKidInJwks(kid, SUPABASE_URL)).resolves.toBeUndefined();
+
+    const kidNotInJwks = writes.find(
+      (w) => w.event === "realtime.kid_not_in_jwks",
+    );
+    expect(kidNotInJwks).toBeDefined();
+    expect(kidNotInJwks).toMatchObject({ kid, knownKids: [] });
+  });
+
+  it("ignores malformed body where keys array has non-object elements", async () => {
+    const kid = "kid-malformed-keys-mixed";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ keys: ["string", 42, null] }), {
+            status: 200,
+          }),
+      ),
+    );
+
+    await expect(checkKidInJwks(kid, SUPABASE_URL)).resolves.toBeUndefined();
+    expect(
+      writes.find((w) => w.event === "realtime.kid_not_in_jwks"),
+    ).toMatchObject({ kid, knownKids: [] });
+  });
+
+  it("ignores body that is not an object", async () => {
+    const kid = "kid-body-is-string";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify("not an object"), { status: 200 }),
+      ),
+    );
+
+    await expect(checkKidInJwks(kid, SUPABASE_URL)).resolves.toBeUndefined();
+    expect(
+      writes.find((w) => w.event === "realtime.kid_not_in_jwks"),
+    ).toBeDefined();
+  });
+
+  it("logs jwks_fetch_non_ok on non-200 response", async () => {
+    const kid = "kid-fetch-non-ok";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("Service Unavailable", { status: 503 })),
+    );
+
+    await checkKidInJwks(kid, SUPABASE_URL);
+    expect(
+      writes.find((w) => w.event === "realtime.jwks_fetch_non_ok"),
+    ).toMatchObject({ kid, status: 503 });
+  });
+
+  it("returns silently when our kid appears in a valid JWKS response", async () => {
+    const kid = "kid-valid-match";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kid: "other-kid" }, { kid }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    await checkKidInJwks(kid, SUPABASE_URL);
+    expect(
+      writes.find((w) => w.event === "realtime.kid_not_in_jwks"),
+    ).toBeUndefined();
   });
 });

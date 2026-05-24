@@ -147,7 +147,7 @@ describe("GET /api/cron/transfer-sweep", () => {
     expect(options).toEqual(
       expect.objectContaining({
         schedule: { type: "crontab", value: "0 3 * * *" },
-        checkinMargin: 5,
+        checkinMargin: 60,
         maxRuntime: 10,
         failureIssueThreshold: 1,
         recoveryThreshold: 1,

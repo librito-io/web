@@ -39,6 +39,11 @@ import { logger } from "$lib/server/log";
 import { fetchItunesByIsbn, fetchItunesCoverBytes } from "./itunes";
 import { decodeImageDimensions } from "./dimensions";
 
+// Canonical shape of an OpenLibrary work ID — e.g. OL12345W. Used as a
+// defense-in-depth guard before interpolating the ID into a fetch URL.
+// Mirrors the `SHA256_RE` precedent in `src/lib/server/transfer.ts`.
+const OL_WORK_ID_RE = /^OL\d+W$/;
+
 export class InvalidIsbnError extends Error {
   constructor(raw: string) {
     super(`InvalidIsbn: ${raw}`);
@@ -819,7 +824,11 @@ async function loadOpenLibraryData(
   let olWork: OpenLibraryWork | null = null;
   const workKey = olData?.works?.[0]?.key;
   const id = workKey?.replace(/^\/works\//, "");
-  if (id) {
+  // OL work IDs are interpolated into the work-fetch URL; while the host is
+  // fixed to openlibrary.org today, validating the shape at the boundary keeps
+  // the pattern safe under a future host-configurable / self-host refactor
+  // (issue #253). See `OL_WORK_ID_RE` at module top.
+  if (id && OL_WORK_ID_RE.test(id)) {
     try {
       olWork = await fetchOpenLibraryWork(id, { fetchFn: deps.fetchFn });
     } catch {

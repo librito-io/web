@@ -28,8 +28,28 @@ export function redactSecretParams(url: string): string {
   }
 }
 
+// Default per-call timeouts. Stalled upstream CDNs (mzstatic, lh3.googleusercontent,
+// covers.openlibrary) would otherwise hold the Vercel function alive until the
+// 300s function-level timeout; one stalled fetch occupies an instance + delays
+// subsequent resolves under Fluid Compute (issue #251). JSON metadata is small
+// and cap-friendly; cover bytes warrant a larger budget for slower image CDNs.
+const DEFAULT_JSON_TIMEOUT_MS = 8000;
+const DEFAULT_COVER_TIMEOUT_MS = 15000;
+
+// Free the underlying TCP socket on every early-return after a successful
+// fetch. Undici holds the socket open until the body stream is consumed or
+// cancelled; warmup fan-out otherwise leaks connection-pool capacity under
+// Fluid Compute (issue #254). The `.catch()` swallows the rare rejection
+// WHATWG Streams §4.2.4 permits when the stream is already in an errored
+// state — without it, the un-awaited Promise would surface as an unhandled
+// rejection on the warmup hot path.
+function cancelBody(res: Response): void {
+  void res.body?.cancel().catch(() => {});
+}
+
 export interface FetchCatalogJsonDeps {
   fetchFn?: typeof fetch;
+  timeoutMs?: number;
 }
 
 /**
@@ -43,13 +63,28 @@ export async function fetchCatalogJson<T>(
   source: string,
 ): Promise<T | null> {
   const f = deps.fetchFn ?? fetch;
-  const res = await f(url, {
-    headers: { "user-agent": LIBRITO_UA, accept: "application/json" },
-  });
-  if (res.status === 404) return null;
-  if (!res.ok)
-    throw new Error(`${source} ${res.status} ${redactSecretParams(url)}`);
-  return (await res.json()) as T;
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    deps.timeoutMs ?? DEFAULT_JSON_TIMEOUT_MS,
+  );
+  try {
+    const res = await f(url, {
+      headers: { "user-agent": LIBRITO_UA, accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (res.status === 404) {
+      cancelBody(res);
+      return null;
+    }
+    if (!res.ok) {
+      cancelBody(res);
+      throw new Error(`${source} ${res.status} ${redactSecretParams(url)}`);
+    }
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface DownloadCoverOptions {
@@ -59,6 +94,9 @@ export interface DownloadCoverOptions {
   /** Reject (return null) if the decoded image width is below this threshold.
    * Falsy = no floor. Composed with the byte-size guard; both must pass. */
   minWidth?: number;
+  /** Abort the fetch after this many ms. Defaults to 15s — binary downloads
+   * tolerate more latency than JSON metadata. */
+  timeoutMs?: number;
   source: string;
   // SSRF guard: only hosts in this list (lowercase) are allowed.
   // Checked before fetch so a spoofed/MitM upstream URL never reaches the network.
@@ -95,18 +133,39 @@ export async function downloadCover(
   if (!opts.allowedHosts.includes(parsed.hostname.toLowerCase())) return null;
 
   const f = opts.fetchFn ?? fetch;
-  const res = await f(url, { headers: { "user-agent": LIBRITO_UA } });
-  if (!res.ok) return null;
-  // Layer 1: Content-Length pre-check (no buffering on oversize).
-  const contentLength = res.headers.get("content-length");
-  if (contentLength && Number(contentLength) > opts.maxBytes) return null;
-  // Layer 2: Post-buffer backstop.
-  const buf = new Uint8Array(await res.arrayBuffer());
-  if (buf.byteLength < opts.minBytes) return null;
-  if (buf.byteLength > opts.maxBytes) return null;
-  if (opts.minWidth) {
-    const dims = decodeImageDimensions(buf);
-    if (!dims || dims.width < opts.minWidth) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    opts.timeoutMs ?? DEFAULT_COVER_TIMEOUT_MS,
+  );
+  try {
+    const res = await f(url, {
+      headers: { "user-agent": LIBRITO_UA },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      cancelBody(res);
+      return null;
+    }
+    // Layer 1: Content-Length pre-check (no buffering on oversize).
+    const contentLength = res.headers.get("content-length");
+    if (contentLength && Number(contentLength) > opts.maxBytes) {
+      cancelBody(res);
+      return null;
+    }
+    // Layer 2: Post-buffer backstop.
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (buf.byteLength < opts.minBytes) return null;
+    if (buf.byteLength > opts.maxBytes) return null;
+    if (opts.minWidth) {
+      const dims = decodeImageDimensions(buf);
+      if (!dims || dims.width < opts.minWidth) return null;
+    }
+    return {
+      bytes: buf,
+      mime: res.headers.get("content-type") ?? "image/jpeg",
+    };
+  } finally {
+    clearTimeout(timer);
   }
-  return { bytes: buf, mime: res.headers.get("content-type") ?? "image/jpeg" };
 }

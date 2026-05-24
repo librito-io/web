@@ -6,6 +6,67 @@ import {
   redactSecretParams,
 } from "../../../src/lib/server/catalog/http";
 
+/**
+ * Build a fetchFn whose promise never resolves but rejects on AbortSignal.
+ * Mirrors how real `fetch()` reacts to an aborted controller.
+ */
+function stalledFetch(): typeof fetch {
+  return vi.fn(
+    (_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return; // never resolves at all
+        if (signal.aborted) {
+          reject(new DOMException("Aborted", "AbortError"));
+          return;
+        }
+        signal.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      }),
+  ) as unknown as typeof fetch;
+}
+
+/**
+ * Build a Response whose `body` stream exposes a stubbed `cancel()` spy.
+ * The default body of `new Response(...)` is a real ReadableStream; replace
+ * it so tests can assert cancellation behaviour without a live stream.
+ */
+function responseWithCancellableBody(
+  init: { status: number; headers?: Record<string, string> },
+  cancelImpl: () => Promise<void> = async () => undefined,
+): { res: Response; cancel: ReturnType<typeof vi.fn> } {
+  const cancel = vi.fn(cancelImpl);
+  const res = new Response(new Uint8Array(0), init);
+  Object.defineProperty(res, "body", {
+    value: { cancel } as unknown as ReadableStream,
+  });
+  return { res, cancel };
+}
+
+/**
+ * Capture `unhandledRejection` events for the duration of `fn`. Returns the
+ * collected reasons. Tests use this to assert a swallowed cancel-rejection
+ * never surfaces as a process-level unhandled rejection — the guard that
+ * prevents Sentry noise on the catalog warmup hot path.
+ */
+async function recordUnhandledRejections(
+  fn: () => Promise<void>,
+): Promise<unknown[]> {
+  const captured: unknown[] = [];
+  const handler = (reason: unknown) => captured.push(reason);
+  process.on("unhandledRejection", handler);
+  try {
+    await fn();
+    // Flush pending microtasks + the next macrotask so any late rejection
+    // has a chance to land on the bus before we read it.
+    await new Promise((resolve) => setImmediate(resolve));
+    return captured;
+  } finally {
+    process.off("unhandledRejection", handler);
+  }
+}
+
 const JPEG_143x218 = new Uint8Array(
   readFileSync("tests/fixtures/catalog/143x218.jpg"),
 );
@@ -59,6 +120,85 @@ describe("fetchCatalogJson", () => {
     await expect(
       fetchCatalogJson("https://example.com/book", { fetchFn }, "mylib"),
     ).rejects.toThrow("mylib 503");
+  });
+
+  it("aborts a stalled fetch after the configured timeoutMs (default 8s)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = stalledFetch();
+      const p = fetchCatalogJson(
+        "https://example.com/slow",
+        { fetchFn },
+        "testprovider",
+      );
+      // Attach rejection handler BEFORE advancing the timer, otherwise the
+      // rejection lands on the unhandled-rejection bus before `expect.rejects`
+      // subscribes and vitest flags it as an error.
+      const assertion = expect(p).rejects.toThrow(/abort/i);
+      // Default JSON timeout is 8000ms. Advance just past the boundary.
+      await vi.advanceTimersByTimeAsync(8001);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("honours an explicit timeoutMs override", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = stalledFetch();
+      const p = fetchCatalogJson(
+        "https://example.com/slow",
+        { fetchFn, timeoutMs: 100 },
+        "testprovider",
+      );
+      const assertion = expect(p).rejects.toThrow(/abort/i);
+      await vi.advanceTimersByTimeAsync(150);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the response body on the 404 early-return path", async () => {
+    const { res, cancel } = responseWithCancellableBody({ status: 404 });
+    const fetchFn = vi.fn(async () => res);
+    const result = await fetchCatalogJson(
+      "https://example.com/missing",
+      { fetchFn },
+      "testprovider",
+    );
+    expect(result).toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the response body on the non-2xx throw path", async () => {
+    const { res, cancel } = responseWithCancellableBody({ status: 500 });
+    const fetchFn = vi.fn(async () => res);
+    await expect(
+      fetchCatalogJson("https://example.com/boom", { fetchFn }, "testprovider"),
+    ).rejects.toThrow(/testprovider 500/);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("swallows a rejecting body.cancel() on the 404 path without unhandled rejection", async () => {
+    const unhandled = await recordUnhandledRejections(async () => {
+      const { res, cancel } = responseWithCancellableBody(
+        { status: 404 },
+        async () => {
+          throw new Error("stream already errored");
+        },
+      );
+      const fetchFn = vi.fn(async () => res);
+      const result = await fetchCatalogJson(
+        "https://example.com/missing",
+        { fetchFn },
+        "testprovider",
+      );
+      expect(result).toBeNull();
+      expect(cancel).toHaveBeenCalledTimes(1);
+    });
+    expect(unhandled).toEqual([]);
   });
 
   it("redacts known secret query params from a thrown error message", async () => {
@@ -148,6 +288,82 @@ describe("downloadCover", () => {
       fetchFn,
     });
     expect(r).toBeNull();
+  });
+
+  it("cancels the response body on the !res.ok early-return path", async () => {
+    // Undici holds the underlying TCP socket open until the body stream
+    // is consumed or cancelled. Catalog warmup fan-out + OL ISBN-direct
+    // 404s exercise this path frequently; leaks accumulate under Fluid
+    // Compute instance reuse before GC (issue #254).
+    const { res, cancel } = responseWithCancellableBody({ status: 404 });
+    const fetchFn = vi.fn(async () => res);
+    const r = await downloadCover("https://example.com/cover.jpg", {
+      ...baseOpts,
+      fetchFn,
+    });
+    expect(r).toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the response body when Content-Length exceeds maxBytes (pre-check)", async () => {
+    const { res, cancel } = responseWithCancellableBody({
+      status: 200,
+      headers: {
+        "content-type": "image/jpeg",
+        "content-length": "6000000",
+      },
+    });
+    const fetchFn = vi.fn(async () => res);
+    const r = await downloadCover("https://example.com/cover.jpg", {
+      ...baseOpts,
+      fetchFn,
+    });
+    expect(r).toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("swallows a rejecting body.cancel() on the !res.ok path without unhandled rejection", async () => {
+    const unhandled = await recordUnhandledRejections(async () => {
+      const { res, cancel } = responseWithCancellableBody(
+        { status: 404 },
+        async () => {
+          throw new Error("stream already errored");
+        },
+      );
+      const fetchFn = vi.fn(async () => res);
+      const r = await downloadCover("https://example.com/cover.jpg", {
+        ...baseOpts,
+        fetchFn,
+      });
+      expect(r).toBeNull();
+      expect(cancel).toHaveBeenCalledTimes(1);
+    });
+    expect(unhandled).toEqual([]);
+  });
+
+  it("swallows a rejecting body.cancel() on the Content-Length pre-check path", async () => {
+    const unhandled = await recordUnhandledRejections(async () => {
+      const { res, cancel } = responseWithCancellableBody(
+        {
+          status: 200,
+          headers: {
+            "content-type": "image/jpeg",
+            "content-length": "6000000",
+          },
+        },
+        async () => {
+          throw new Error("stream already errored");
+        },
+      );
+      const fetchFn = vi.fn(async () => res);
+      const r = await downloadCover("https://example.com/cover.jpg", {
+        ...baseOpts,
+        fetchFn,
+      });
+      expect(r).toBeNull();
+      expect(cancel).toHaveBeenCalledTimes(1);
+    });
+    expect(unhandled).toEqual([]);
   });
 
   it("rejects when Content-Length exceeds maxBytes without buffering (pre-check)", async () => {
@@ -314,6 +530,40 @@ describe("downloadCover", () => {
     );
     expect(result).not.toBeNull();
     expect(result?.bytes.byteLength).toBe(JPEG_600x900.byteLength);
+  });
+
+  it("aborts a stalled cover fetch after the configured timeoutMs (default 15s)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = stalledFetch();
+      const p = downloadCover("https://example.com/cover.jpg", {
+        ...baseOpts,
+        fetchFn,
+      });
+      const assertion = expect(p).rejects.toThrow(/abort/i);
+      // Default cover timeout is 15000ms.
+      await vi.advanceTimersByTimeAsync(15001);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("honours an explicit timeoutMs override on downloadCover", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = stalledFetch();
+      const p = downloadCover("https://example.com/cover.jpg", {
+        ...baseOpts,
+        fetchFn,
+        timeoutMs: 200,
+      });
+      const assertion = expect(p).rejects.toThrow(/abort/i);
+      await vi.advanceTimersByTimeAsync(250);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ignores minWidth when option absent", async () => {

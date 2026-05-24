@@ -138,6 +138,7 @@
   // InfiniteScroll already guards against concurrent scroll triggers
   // via its own `loading` flag.
   let abortController: AbortController | null = null;
+  let replacing = $state(false);
 
   async function onSortChange(next: Sort): Promise<void> {
     if (next === sort) return;
@@ -157,6 +158,7 @@
     abortController?.abort();
     const ac = new AbortController();
     abortController = ac;
+    if (opts.replace) replacing = true;
     try {
       const url = fetchUrl({
         sort,
@@ -182,6 +184,7 @@
       throw err;
     } finally {
       if (abortController === ac) abortController = null;
+      if (opts.replace) replacing = false;
     }
   }
 </script>
@@ -190,7 +193,11 @@
 
 <div class="book-list">
   {#if items.length === 0}
-    <div class="empty">{emptyMessage}</div>
+    {#if replacing}
+      <div class="empty" aria-busy="true">{$_("loading")}</div>
+    {:else}
+      <div class="empty">{emptyMessage}</div>
+    {/if}
   {:else}
     <Masonry
       {items}

@@ -3,8 +3,8 @@ import { jwtVerify, importJWK } from "jose";
 import {
   mintRealtimeToken,
   checkKidInJwks,
-  __resetJwksKidCache,
   REALTIME_TOKEN_TTL_SECONDS,
+  type JwksKidCache,
 } from "$lib/server/realtime";
 import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 import { DEV_STANDBY_JWK, DEV_KID } from "../fixtures/dev-jwk";
@@ -122,9 +122,10 @@ describe("mintRealtimeToken", () => {
 
 describe("checkKidInJwks", () => {
   let writes: Record<string, unknown>[];
+  let cache: JwksKidCache;
 
   beforeEach(() => {
-    __resetJwksKidCache();
+    cache = { confirmed: null };
     writes = [];
     __setTestDestination((line) => {
       writes.push(JSON.parse(line));
@@ -148,13 +149,16 @@ describe("checkKidInJwks", () => {
       ),
     );
 
-    await expect(checkKidInJwks(kid, SUPABASE_URL)).resolves.toBeUndefined();
+    await expect(
+      checkKidInJwks(kid, SUPABASE_URL, cache),
+    ).resolves.toBeUndefined();
 
     const kidNotInJwks = writes.find(
       (w) => w.event === "realtime.kid_not_in_jwks",
     );
     expect(kidNotInJwks).toBeDefined();
     expect(kidNotInJwks).toMatchObject({ kid, knownKids: [] });
+    expect(cache.confirmed).toBeNull();
   });
 
   it("ignores malformed body where keys array has non-object elements", async () => {
@@ -169,7 +173,9 @@ describe("checkKidInJwks", () => {
       ),
     );
 
-    await expect(checkKidInJwks(kid, SUPABASE_URL)).resolves.toBeUndefined();
+    await expect(
+      checkKidInJwks(kid, SUPABASE_URL, cache),
+    ).resolves.toBeUndefined();
     expect(
       writes.find((w) => w.event === "realtime.kid_not_in_jwks"),
     ).toMatchObject({ kid, knownKids: [] });
@@ -185,7 +191,9 @@ describe("checkKidInJwks", () => {
       ),
     );
 
-    await expect(checkKidInJwks(kid, SUPABASE_URL)).resolves.toBeUndefined();
+    await expect(
+      checkKidInJwks(kid, SUPABASE_URL, cache),
+    ).resolves.toBeUndefined();
     expect(
       writes.find((w) => w.event === "realtime.kid_not_in_jwks"),
     ).toBeDefined();
@@ -198,7 +206,7 @@ describe("checkKidInJwks", () => {
       vi.fn(async () => new Response("Service Unavailable", { status: 503 })),
     );
 
-    await checkKidInJwks(kid, SUPABASE_URL);
+    await checkKidInJwks(kid, SUPABASE_URL, cache);
     expect(
       writes.find((w) => w.event === "realtime.jwks_fetch_non_ok"),
     ).toMatchObject({ kid, status: 503 });
@@ -219,10 +227,24 @@ describe("checkKidInJwks", () => {
       ),
     );
 
-    await checkKidInJwks(kid, SUPABASE_URL);
+    await checkKidInJwks(kid, SUPABASE_URL, cache);
     expect(
       writes.find((w) => w.event === "realtime.kid_not_in_jwks"),
     ).toBeUndefined();
+    expect(cache.confirmed).toBe(kid);
+  });
+
+  it("short-circuits on subsequent calls when cache already holds the kid", async () => {
+    const kid = "kid-short-circuit";
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ keys: [{ kid }] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await checkKidInJwks(kid, SUPABASE_URL, cache);
+    await checkKidInJwks(kid, SUPABASE_URL, cache);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -232,10 +254,6 @@ describe("mintRealtimeToken — JWKS-check contract", () => {
   // never break mint. If a future refactor accidentally changes
   // `void checkKidInJwks(...)` to `await checkKidInJwks(...)` or otherwise
   // ties the mint return value to JWKS health, this test fails.
-  beforeEach(() => {
-    __resetJwksKidCache();
-  });
-
   afterEach(() => {
     vi.unstubAllGlobals();
   });

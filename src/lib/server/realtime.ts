@@ -55,24 +55,19 @@ export function getRealtimeConnectionInfo(): {
   return { realtimeUrl, anonKey: PUBLIC_SUPABASE_ANON_KEY };
 }
 
-// Module-scope cache: once we've confirmed our kid is in the project's
-// JWKS, don't refetch on every mint. Caching only the success branch lets
-// us recover automatically after a rotation propagates.
-let jwksKidConfirmed: string | null = null;
+// Mutable cell holding the last kid confirmed against the project's JWKS.
+// Threading the cache as an argument (instead of module-scope state) keeps
+// production callers and tests on isolated instances at the type level —
+// see issue librito-io/web#392 for the surface-widening rationale.
+export type JwksKidCache = { confirmed: string | null };
+
+// Single process-scope cache instance threaded through every production
+// mint. Caching only the success branch lets us recover automatically
+// after a rotation propagates.
+const productionJwksKidCache: JwksKidCache = { confirmed: null };
 
 // kid-keyed; rotation propagates by missing the cache and re-importing.
 const importedKeys = new Map<string, CryptoKey>();
-
-/**
- * @internal — test-only. Resets the `jwksKidConfirmed` cache. Tests that
- * touch the JWKS-check happy path (which writes the cache) call this in
- * `beforeEach` to keep the file's tests deterministic regardless of order.
- * Production code must not call this. Mirrors the pattern at
- * `src/lib/server/log.ts:__setTestDestination`.
- */
-export function __resetJwksKidCache(): void {
-  jwksKidConfirmed = null;
-}
 
 function parseJwksKeys(body: unknown): Array<{ kid: string }> {
   if (typeof body !== "object" || body === null || !("keys" in body)) return [];
@@ -86,21 +81,12 @@ function parseJwksKeys(body: unknown): Array<{ kid: string }> {
   );
 }
 
-/**
- * @internal — exported for direct unit testing of the malformed-JWKS branches.
- * Production callers should reach this only via the `void checkKidInJwks(...)`
- * fire-and-forget call site inside `mintRealtimeToken`. Calling this from
- * another module mutates the shared `jwksKidConfirmed` cache (low impact:
- * the cache only gates a warn log, no auth/mint behaviour) and is not part
- * of the module's intended surface. Follow-up: librito-io/web#392 tracks
- * refactoring the cache to a constructor-injected parameter so this caveat
- * goes away at the type level.
- */
 export async function checkKidInJwks(
   kid: string,
   supabaseUrl: string,
+  cache: JwksKidCache,
 ): Promise<void> {
-  if (jwksKidConfirmed === kid) return;
+  if (cache.confirmed === kid) return;
   try {
     const res = await fetch(`${supabaseUrl}/auth/v1/.well-known/jwks.json`);
     if (!res.ok) {
@@ -115,7 +101,7 @@ export async function checkKidInJwks(
     }
     const keys = parseJwksKeys(await res.json());
     if (keys.some((k) => k.kid === kid)) {
-      jwksKidConfirmed = kid;
+      cache.confirmed = kid;
     } else {
       logger().warn(
         {
@@ -192,7 +178,11 @@ export async function mintRealtimeToken(opts: {
   // Fire-and-forget JWKS sanity check. Warns if our kid isn't published —
   // catches misconfig (wrong key in env) or rotation propagation lag.
   // Doesn't block the mint.
-  void checkKidInJwks(opts.privateJwk.kid, opts.supabaseUrl);
+  void checkKidInJwks(
+    opts.privateJwk.kid,
+    opts.supabaseUrl,
+    productionJwksKidCache,
+  );
 
   return { token, expiresIn: REALTIME_TOKEN_TTL_SECONDS };
 }

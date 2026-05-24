@@ -46,6 +46,18 @@
     document.addEventListener("gestureend", blockGesture);
     document.addEventListener("touchmove", blockMultiTouch, { passive: false });
 
+    // Disarm iOS Safari compositor pinch-during-inertia race. iOS commits to
+    // pinch interpretation before JS handlers fire when a 2nd finger lands
+    // during in-flight inertia, so preventDefault is too late. Killing inertia
+    // at touchstart means no fling state remains for the gesture interpreter
+    // to race with. window.scrollTo(scrollX, scrollY) is a programmatic-scroll
+    // no-op that preempts user-initiated fling. See PR #370 (stationary pinch)
+    // and #371 (closed — preventDefault-only attempt failed mid-inertia).
+    const killInertia = (): void => {
+      window.scrollTo(window.scrollX, window.scrollY);
+    };
+    document.addEventListener("touchstart", killInertia, { passive: true });
+
     const {
       data: { subscription },
     } = data.supabase.auth.onAuthStateChange((_, session) => {
@@ -59,6 +71,7 @@
       document.removeEventListener("gesturechange", blockGesture);
       document.removeEventListener("gestureend", blockGesture);
       document.removeEventListener("touchmove", blockMultiTouch);
+      document.removeEventListener("touchstart", killInertia);
     };
   });
 

@@ -63,6 +63,17 @@ let jwksKidConfirmed: string | null = null;
 // kid-keyed; rotation propagates by missing the cache and re-importing.
 const importedKeys = new Map<string, CryptoKey>();
 
+/**
+ * @internal — test-only. Resets the `jwksKidConfirmed` cache. Tests that
+ * touch the JWKS-check happy path (which writes the cache) call this in
+ * `beforeEach` to keep the file's tests deterministic regardless of order.
+ * Production code must not call this. Mirrors the pattern at
+ * `src/lib/server/log.ts:__setTestDestination`.
+ */
+export function __resetJwksKidCache(): void {
+  jwksKidConfirmed = null;
+}
+
 function parseJwksKeys(body: unknown): Array<{ kid: string }> {
   if (typeof body !== "object" || body === null || !("keys" in body)) return [];
   const raw = (body as { keys: unknown }).keys;
@@ -75,6 +86,16 @@ function parseJwksKeys(body: unknown): Array<{ kid: string }> {
   );
 }
 
+/**
+ * @internal — exported for direct unit testing of the malformed-JWKS branches.
+ * Production callers should reach this only via the `void checkKidInJwks(...)`
+ * fire-and-forget call site inside `mintRealtimeToken`. Calling this from
+ * another module mutates the shared `jwksKidConfirmed` cache (low impact:
+ * the cache only gates a warn log, no auth/mint behaviour) and is not part
+ * of the module's intended surface. Follow-up: librito-io/web#392 tracks
+ * refactoring the cache to a constructor-injected parameter so this caveat
+ * goes away at the type level.
+ */
 export async function checkKidInJwks(
   kid: string,
   supabaseUrl: string,

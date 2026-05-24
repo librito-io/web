@@ -3,6 +3,7 @@ import { jwtVerify, importJWK } from "jose";
 import {
   mintRealtimeToken,
   checkKidInJwks,
+  __resetJwksKidCache,
   REALTIME_TOKEN_TTL_SECONDS,
 } from "$lib/server/realtime";
 import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
@@ -123,6 +124,7 @@ describe("checkKidInJwks", () => {
   let writes: Record<string, unknown>[];
 
   beforeEach(() => {
+    __resetJwksKidCache();
     writes = [];
     __setTestDestination((line) => {
       writes.push(JSON.parse(line));
@@ -221,5 +223,78 @@ describe("checkKidInJwks", () => {
     expect(
       writes.find((w) => w.event === "realtime.kid_not_in_jwks"),
     ).toBeUndefined();
+  });
+});
+
+describe("mintRealtimeToken — JWKS-check contract", () => {
+  // Guards the user-visible invariant: JWKS confirmation is fire-and-forget,
+  // so a degraded JWKS endpoint (garbage body, non-200, network throw) can
+  // never break mint. If a future refactor accidentally changes
+  // `void checkKidInJwks(...)` to `await checkKidInJwks(...)` or otherwise
+  // ties the mint return value to JWKS health, this test fails.
+  beforeEach(() => {
+    __resetJwksKidCache();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("succeeds even when the JWKS endpoint returns a non-JSON body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response("<html>maintenance</html>", { status: 200 }),
+      ),
+    );
+
+    const { token, expiresIn } = await mintRealtimeToken({
+      userId: "11111111-1111-1111-1111-111111111111",
+      deviceId: "22222222-2222-2222-2222-222222222222",
+      privateJwk: DEV_STANDBY_JWK,
+      supabaseUrl: SUPABASE_URL,
+    });
+
+    expect(token).toBeTruthy();
+    expect(expiresIn).toBe(REALTIME_TOKEN_TTL_SECONDS);
+  });
+
+  it("succeeds even when the JWKS body is structurally garbage", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ keys: "not-an-array" }), {
+            status: 200,
+          }),
+      ),
+    );
+
+    const { token } = await mintRealtimeToken({
+      userId: "11111111-1111-1111-1111-111111111111",
+      deviceId: "22222222-2222-2222-2222-222222222222",
+      privateJwk: DEV_STANDBY_JWK,
+      supabaseUrl: SUPABASE_URL,
+    });
+
+    expect(token).toBeTruthy();
+  });
+
+  it("succeeds even when the JWKS endpoint is unreachable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("ECONNREFUSED");
+      }),
+    );
+
+    const { token } = await mintRealtimeToken({
+      userId: "11111111-1111-1111-1111-111111111111",
+      deviceId: "22222222-2222-2222-2222-222222222222",
+      privateJwk: DEV_STANDBY_JWK,
+      supabaseUrl: SUPABASE_URL,
+    });
+
+    expect(token).toBeTruthy();
   });
 });

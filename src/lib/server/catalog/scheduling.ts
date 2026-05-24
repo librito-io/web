@@ -57,26 +57,14 @@ export async function scheduleCatalogResolveIfAllowed(
   for (const item of work) {
     const outcome = await safeLimit(catalogUserLimiter, userId);
     if (outcome.kind !== "ok" || !outcome.result.success) break;
-    if (item.kind === "isbn") {
-      const isbn = item.isbn;
-      runInBackground(async () => {
-        const mutex = await mutexPromise;
-        await resolveIsbn(admin, isbn, {
-          rateLimiters,
-          mutex,
-          googleBooksApiKey,
-        });
-      });
-    } else {
-      const { title, author } = item;
-      runInBackground(async () => {
-        const mutex = await mutexPromise;
-        await resolveTitleAuthor(admin, title, author, {
-          rateLimiters,
-          mutex,
-          googleBooksApiKey,
-        });
-      });
-    }
+    runInBackground(async () => {
+      const mutex = await mutexPromise;
+      const innerDeps = { rateLimiters, mutex, googleBooksApiKey };
+      if (item.kind === "isbn") {
+        await resolveIsbn(admin, item.isbn, innerDeps);
+      } else {
+        await resolveTitleAuthor(admin, item.title, item.author, innerDeps);
+      }
+    });
   }
 }

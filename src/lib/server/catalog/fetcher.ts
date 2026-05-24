@@ -78,6 +78,10 @@ export interface ResolveResult {
   row: Partial<BookCatalogRowFields>;
 }
 
+function currentTime(deps: Pick<ResolveDeps, "now">): Date {
+  return deps.now ? deps.now() : new Date();
+}
+
 type CoverBytes = { bytes: Uint8Array; mime: string };
 type StorageRecord = {
   storage_path: string;
@@ -846,7 +850,7 @@ export async function resolveIsbn(
   const isbn = canonicalizeIsbn(rawIsbn);
   if (!isbn) throw new InvalidIsbnError(rawIsbn);
 
-  const now = (deps.now ?? (() => new Date()))();
+  const now = currentTime(deps);
   const upload = deps.coverStorage?.uploadCover ?? defaultUploadCover;
   const mutex = deps.mutex ?? noopMutex;
 
@@ -1047,7 +1051,7 @@ export async function resolveTitleAuthor(
 ): Promise<ResolveResult> {
   const key = normalizeTitleAuthor(title, author);
   if (!key) throw new InvalidTitleAuthorError();
-  const now = (deps.now ?? (() => new Date()))();
+  const now = currentTime(deps);
   const upload = deps.coverStorage?.uploadCover ?? defaultUploadCover;
   const mutex = deps.mutex ?? noopMutex;
 

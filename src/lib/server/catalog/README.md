@@ -10,12 +10,15 @@ split into:
 - `src/lib/server/cover-storage.ts` — backend abstraction. `librito.io`
   uses Cloudflare Images (`COVER_STORAGE_BACKEND=cloudflare-images`).
   Self-hosters use Supabase Storage's `cover-cache` bucket.
-- `src/lib/server/wait-until.ts` — `runInBackground(event, work)` shim
-  over `event.platform.context.waitUntil` with a local-dev fallback.
+- `src/lib/server/wait-until.ts` — `runInBackground(work)` shim that
+  reads `waitUntil` directly from `@vercel/functions` with a local-dev
+  fallback. SvelteKit `adapter-vercel` serverless does not wire
+  `event.platform.context.waitUntil`, so the shim no longer takes an
+  `event` parameter (see PR #231 / issue #226).
 
 ## Population paths
 
-1. **Lazy on viewer first-render** — `runInBackground(event, resolveIsbn)`
+1. **Lazy on viewer first-render** — `runInBackground(resolveIsbn)`
    from the book detail loader (`src/routes/app/book/[bookHash]/+page.server.ts`)
    and `GET /api/book-catalog/[isbn]`. Cold miss returns
    `/cover-placeholder.svg`; cover materialises on next reload.

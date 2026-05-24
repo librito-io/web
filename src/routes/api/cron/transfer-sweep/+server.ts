@@ -46,7 +46,12 @@ export const GET: RequestHandler = async ({ request, url }) => {
           () => runTransferSweep(createAdminClient()),
           {
             schedule: { type: "crontab", value: TRANSFER_SWEEP_SCHEDULE },
-            checkinMargin: 5, // minutes — alert if check-in late by >5 min
+            // Vercel Hobby cron precision is ±59 min — `0 3 * * *` may fire
+            // anywhere in 03:00–03:59 UTC. Margin must cover the full window
+            // or Sentry emits a false-positive "missed check-in" before
+            // Vercel invokes the handler (issue #385, LIBRITO-WEB-B).
+            // Drop back to 5 when upgrading to Vercel Pro (per-minute jitter).
+            checkinMargin: 60, // minutes — alert if check-in late by >60 min
             maxRuntime: 10, // minutes — alert if run takes >10 min
             failureIssueThreshold: 1, // first failure creates an issue
             recoveryThreshold: 1, // one success after failure resolves it

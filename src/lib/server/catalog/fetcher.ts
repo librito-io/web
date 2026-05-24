@@ -819,7 +819,12 @@ async function loadOpenLibraryData(
   let olWork: OpenLibraryWork | null = null;
   const workKey = olData?.works?.[0]?.key;
   const id = workKey?.replace(/^\/works\//, "");
-  if (id) {
+  // OpenLibrary work IDs canonicalise to `OL\d+W` (e.g. OL12345W). The ID is
+  // interpolated into the work-fetch URL; while the host is fixed to
+  // openlibrary.org today, validating the shape at the boundary keeps the
+  // pattern safe under a future host-configurable / self-host refactor and
+  // documents the expected format inline for OSS contributors (issue #253).
+  if (id && /^OL\d+W$/.test(id)) {
     try {
       olWork = await fetchOpenLibraryWork(id, { fetchFn: deps.fetchFn });
     } catch {

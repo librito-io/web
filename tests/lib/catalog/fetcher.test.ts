@@ -1718,6 +1718,61 @@ describe("resolveIsbn – resolver chain cover", () => {
     // UPDATE was attempted exactly once (upload succeeded, finalize threw).
     expect(supabase._updateCalls).toHaveLength(1);
   });
+
+  // Defense-in-depth: OpenLibrary work IDs returned by the upstream JSON
+  // response are interpolated directly into the work-fetch URL. The expected
+  // shape is `OL\d+W`. A malformed value (path-traversal-like or anything
+  // outside the canonical shape) must skip the work fetch entirely — not
+  // hit the URL with sanitisation-by-luck (issue #253).
+  it("skips fetchOpenLibraryWork when OL returns a malformed works[0].key", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/api/books")) {
+        // ISBN lookup returns a work key that fails the OL\d+W shape check.
+        // Without the guard this would be interpolated into
+        // /works/garbage%2F..%2Fadmin.json verbatim.
+        return new Response(
+          JSON.stringify({
+            "ISBN:9780743273565": {
+              title: "Foo",
+              works: [{ key: "/works/garbage/..%2F..%2Fadmin" }],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(gbVolumesResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("itunes.apple.com")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array(0), { status: 404 });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const fetchedUrls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls.map(
+      (args: unknown[]) => String(args[0]),
+    );
+    // The malformed work key must NOT have triggered a /works/<id>.json call.
+    expect(fetchedUrls.some((u) => u.includes("openlibrary.org/works/"))).toBe(
+      false,
+    );
+  });
 });
 
 describe("resolveTitleAuthor – resolver chain", () => {

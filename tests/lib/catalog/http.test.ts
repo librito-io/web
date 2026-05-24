@@ -1,5 +1,26 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect, vi } from "vitest";
+
+/**
+ * Build a fetchFn whose promise never resolves but rejects on AbortSignal.
+ * Mirrors how real `fetch()` reacts to an aborted controller.
+ */
+function stalledFetch(): typeof fetch {
+  return vi.fn(
+    (_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return; // never resolves at all
+        if (signal.aborted) {
+          reject(new DOMException("Aborted", "AbortError"));
+          return;
+        }
+        signal.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      }),
+  ) as unknown as typeof fetch;
+}
 import {
   fetchCatalogJson,
   downloadCover,
@@ -59,6 +80,44 @@ describe("fetchCatalogJson", () => {
     await expect(
       fetchCatalogJson("https://example.com/book", { fetchFn }, "mylib"),
     ).rejects.toThrow("mylib 503");
+  });
+
+  it("aborts a stalled fetch after the configured timeoutMs (default 8s)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = stalledFetch();
+      const p = fetchCatalogJson(
+        "https://example.com/slow",
+        { fetchFn },
+        "testprovider",
+      );
+      // Attach rejection handler BEFORE advancing the timer, otherwise the
+      // rejection lands on the unhandled-rejection bus before `expect.rejects`
+      // subscribes and vitest flags it as an error.
+      const assertion = expect(p).rejects.toThrow(/abort/i);
+      // Default JSON timeout is 8000ms. Advance just past the boundary.
+      await vi.advanceTimersByTimeAsync(8001);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("honours an explicit timeoutMs override", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = stalledFetch();
+      const p = fetchCatalogJson(
+        "https://example.com/slow",
+        { fetchFn, timeoutMs: 100 },
+        "testprovider",
+      );
+      const assertion = expect(p).rejects.toThrow(/abort/i);
+      await vi.advanceTimersByTimeAsync(150);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("redacts known secret query params from a thrown error message", async () => {
@@ -314,6 +373,40 @@ describe("downloadCover", () => {
     );
     expect(result).not.toBeNull();
     expect(result?.bytes.byteLength).toBe(JPEG_600x900.byteLength);
+  });
+
+  it("aborts a stalled cover fetch after the configured timeoutMs (default 15s)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = stalledFetch();
+      const p = downloadCover("https://example.com/cover.jpg", {
+        ...baseOpts,
+        fetchFn,
+      });
+      const assertion = expect(p).rejects.toThrow(/abort/i);
+      // Default cover timeout is 15000ms.
+      await vi.advanceTimersByTimeAsync(15001);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("honours an explicit timeoutMs override on downloadCover", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = stalledFetch();
+      const p = downloadCover("https://example.com/cover.jpg", {
+        ...baseOpts,
+        fetchFn,
+        timeoutMs: 200,
+      });
+      const assertion = expect(p).rejects.toThrow(/abort/i);
+      await vi.advanceTimersByTimeAsync(250);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ignores minWidth when option absent", async () => {

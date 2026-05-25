@@ -137,3 +137,60 @@ export function scrubEvent(
 
   return event;
 }
+
+/**
+ * Drops SvelteKit-routed fetch-abort noise before it reaches Sentry.
+ *
+ * Hover-preload races nav click: SvelteKit's `_preload_data` fires a fetch
+ * for `__data.json` on link hover/touchstart; if the user clicks before the
+ * preload resolves, SvelteKit aborts the in-flight fetch and the native
+ * AbortError surfaces as `TypeError: Load failed` (Safari) or
+ * `TypeError: Failed to fetch` (Chromium/Firefox). SvelteKit catches the
+ * throw and routes it through the `handleError` hook, where Sentry's
+ * SDK integration captures it with `mechanism.type` set to
+ * `auto.function.sveltekit.handle_error`. The actual navigation succeeds —
+ * the aborted preload is benign noise.
+ *
+ * Discriminator deliberately uses `mechanism.type` rather than a
+ * `_preload_data` stack-frame match: minified production bundles do not
+ * preserve the function name in `error.stack`, and Sentry source maps are
+ * applied server-side at ingestion (after `beforeSend` runs). The
+ * mechanism field is set by the SvelteKit/Sentry integration and survives
+ * minification.
+ *
+ * Scope: also drops genuine network failures that surface through the
+ * same path (real offline, DNS failure during nav). Trade-off: SvelteKit
+ * retries the fetch on the actual click, and any downstream broken-page
+ * consequence would surface as a separate event from render code. The
+ * preload-abort path has no actionable signal on its own.
+ *
+ * See issue #412 and Sentry signatures LIBRITO-WEB-8 / D / E.
+ */
+export function isSvelteKitFetchNoise(event: ScrubableEvent): boolean {
+  const exception = (event as { exception?: unknown }).exception;
+  if (!exception || typeof exception !== "object") return false;
+  const values = (exception as { values?: unknown }).values;
+  if (!Array.isArray(values) || values.length === 0) return false;
+  const first = values[0] as
+    | {
+        type?: unknown;
+        value?: unknown;
+        mechanism?: { type?: unknown };
+      }
+    | undefined;
+  if (!first) return false;
+  if (first.type !== "TypeError") return false;
+  if (first.mechanism?.type !== "auto.function.sveltekit.handle_error") {
+    return false;
+  }
+  const value = typeof first.value === "string" ? first.value : "";
+  // Safari emits "Load failed"; Chromium/Firefox emit "Failed to fetch".
+  // Sentry's issue-title rendering sometimes appends the host as a suffix
+  // (e.g. "Load failed (example.vercel.app)"), so match prefixes.
+  return (
+    value === "Load failed" ||
+    value.startsWith("Load failed ") ||
+    value === "Failed to fetch" ||
+    value.startsWith("Failed to fetch ")
+  );
+}

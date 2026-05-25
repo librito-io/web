@@ -36,7 +36,8 @@ import * as Sentry from "@sentry/sveltekit";
 //     so PUBLIC_* refs collapsed to undefined in the browser bundle.
 import { env as publicEnv } from "$env/dynamic/public";
 import type { HandleClientError } from "@sveltejs/kit";
-import { scrubEvent } from "$lib/sentry-scrub";
+import { scrubEvent, isSvelteKitFetchNoise } from "$lib/sentry-scrub";
+import type { ScrubableEvent } from "$lib/sentry-scrub";
 
 // Release SHA injection: the Sentry Vite plugin (sentrySvelteKit in
 // vite.config.ts) bakes `globalThis.SENTRY_RELEASE = { id: <SHA> }` into
@@ -61,7 +62,15 @@ if (publicEnv.PUBLIC_SENTRY_DSN) {
     // Cast mirrors hooks.server.ts: scrubEvent uses a minimal
     // ScrubableEvent shape rather than Sentry's internal ErrorEvent
     // type. Runtime shape is structurally compatible.
-    beforeSend: scrubEvent as unknown as NonNullable<
+    //
+    // Pipeline: drop SvelteKit hover-preload AbortError noise first
+    // (see isSvelteKitFetchNoise — issue #412), then scrub the rest.
+    // Filter is browser-only; server-side scrubEvent in hooks.server.ts
+    // stays unchanged because preload aborts originate client-side.
+    beforeSend: ((event: ScrubableEvent, hint: unknown) => {
+      if (isSvelteKitFetchNoise(event)) return null;
+      return scrubEvent(event, hint);
+    }) as unknown as NonNullable<
       Parameters<typeof Sentry.init>[0]
     >["beforeSend"],
   });

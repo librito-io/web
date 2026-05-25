@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   scrubEvent,
+  isSvelteKitFetchNoise,
   REDACTED_FIELDS,
   type ScrubableEvent,
 } from "$lib/sentry-scrub";
@@ -232,5 +233,120 @@ describe("scrubEvent", () => {
         `${field} missing from pino redact paths in log.ts`,
       ).toBe(true);
     }
+  });
+});
+
+describe("isSvelteKitFetchNoise", () => {
+  type ExceptionEvent = ScrubableEvent & {
+    exception?: {
+      values?: Array<{
+        type?: string;
+        value?: string;
+        mechanism?: { type?: string };
+      }>;
+    };
+  };
+
+  function makeFetchEvent(overrides: {
+    type?: string;
+    value?: string;
+    mechanismType?: string;
+  }): ExceptionEvent {
+    return {
+      event_id: "evt-noise",
+      exception: {
+        values: [
+          {
+            type: overrides.type ?? "TypeError",
+            value: overrides.value ?? "Load failed",
+            mechanism: {
+              type:
+                overrides.mechanismType ??
+                "auto.function.sveltekit.handle_error",
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  it("drops Safari preload-abort: TypeError 'Load failed' via SvelteKit handle_error", () => {
+    expect(
+      isSvelteKitFetchNoise(makeFetchEvent({ value: "Load failed" })),
+    ).toBe(true);
+  });
+
+  it("drops Chromium preload-abort: TypeError 'Failed to fetch' via SvelteKit handle_error", () => {
+    expect(
+      isSvelteKitFetchNoise(makeFetchEvent({ value: "Failed to fetch" })),
+    ).toBe(true);
+  });
+
+  it("drops Sentry-suffixed forms: 'Load failed (host.example)' and 'Failed to fetch (...)'", () => {
+    expect(
+      isSvelteKitFetchNoise(
+        makeFetchEvent({ value: "Load failed (web-xyz.vercel.app)" }),
+      ),
+    ).toBe(true);
+    expect(
+      isSvelteKitFetchNoise(
+        makeFetchEvent({ value: "Failed to fetch (web-xyz.vercel.app)" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("passes through matching mechanism but non-matching message", () => {
+    // Real bugs that happen to be routed through handleError must still
+    // reach Sentry — only the specific fetch-abort messages are dropped.
+    expect(
+      isSvelteKitFetchNoise(
+        makeFetchEvent({ value: "Cannot read properties of undefined" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("passes through matching message but non-matching mechanism", () => {
+    // A genuine TypeError: Load failed surfaced through a different path
+    // (e.g. user code fetch wrapped in their own try/catch then re-thrown)
+    // should still reach Sentry — the SvelteKit-routed discriminator is
+    // load-bearing.
+    expect(
+      isSvelteKitFetchNoise(
+        makeFetchEvent({
+          value: "Load failed",
+          mechanismType: "generic",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("passes through non-TypeError exceptions with matching mechanism + message", () => {
+    expect(
+      isSvelteKitFetchNoise(
+        makeFetchEvent({ type: "Error", value: "Load failed" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("passes through events with no exception block", () => {
+    expect(isSvelteKitFetchNoise({ event_id: "msg-only" })).toBe(false);
+  });
+
+  it("passes through events with empty exception.values", () => {
+    const event: ExceptionEvent = {
+      event_id: "evt-empty",
+      exception: { values: [] },
+    };
+    expect(isSvelteKitFetchNoise(event)).toBe(false);
+  });
+
+  it("passes through events whose first exception value lacks a mechanism", () => {
+    const event = {
+      event_id: "evt-no-mech",
+      exception: {
+        values: [{ type: "TypeError", value: "Load failed" }],
+      },
+    } as ExceptionEvent;
+    expect(isSvelteKitFetchNoise(event)).toBe(false);
   });
 });

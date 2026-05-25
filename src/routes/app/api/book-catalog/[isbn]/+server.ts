@@ -55,6 +55,14 @@ export const GET: RequestHandler = async (event) => {
   );
   if (limited) return limited;
 
+  // SERVICE_ROLE NOTE: `book_catalog` is per-ISBN shared data (not user-scoped),
+  // so bypassing RLS is correct here — there is no user-row boundary to
+  // enforce. The admin client is also load-bearing for the background
+  // `resolveIsbn` call below: it writes via `upsert_book_catalog_by_isbn`,
+  // which is granted to `service_role` only. One client serves both legs.
+  // Do NOT copy this pattern into an endpoint that reads user-owned rows;
+  // use the SSR anon client + `safeGetSession()` instead so RLS enforces
+  // user_id scoping.
   const supabase = createAdminClient();
   const rawVariant = event.url.searchParams.get("variant");
   const variant: CoverVariant = VALID_VARIANTS.has(rawVariant as CoverVariant)

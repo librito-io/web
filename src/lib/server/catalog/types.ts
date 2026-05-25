@@ -130,6 +130,11 @@ export interface CatalogMetadata {
 // `string | null`; we override those three fields back to their literal
 // unions so call sites keep narrow types.
 //
+// Considered + rejected: converting these three columns to Postgres
+// enums (#98). Kept text+CHECK for schema flexibility on the two
+// data-source columns (`description_provider`, `cover_source`); see
+// the closed issue for full reasoning.
+//
 // The row is then split into a discriminated union mirroring the DB-level
 // CHECK constraint `book_catalog_storage_consistency` (migration
 // `20260503000001`): either both `storage_path` and `cover_storage_backend`

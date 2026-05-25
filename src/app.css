@@ -803,10 +803,12 @@ blockquote {
   color: #dedede;
   margin-bottom: 4px;
 }
-.note-label .note-time {
+.note-time {
+  font-family: inherit;
+  font-size: 0.75rem;
   font-weight: 500;
   color: #9b9ca0;
-  margin-left: 8px;
+  margin-top: 8px;
 }
 .note-display {
   font-family: inherit;

@@ -19,6 +19,7 @@ export const POST: RequestHandler = async (event) => {
   try {
     rawBody = await request.json();
   } catch {
+    // Malformed client JSON → 400, not a server fault.
     return jsonError(400, "invalid_request", "Request body must be JSON");
   }
 

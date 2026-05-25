@@ -43,6 +43,7 @@ function safeSiteUrl(url: string): string {
     }
     return parsed.origin;
   } catch {
+    // Malformed siteUrl (invalid URL / non-http(s) scheme) → safe canonical default.
     return "https://librito.io";
   }
 }

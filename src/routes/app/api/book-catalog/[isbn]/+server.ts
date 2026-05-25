@@ -24,6 +24,7 @@ import { requireUser } from "$lib/server/auth";
 // dynamic/private. Anonymous Google Books quota is 0/day per project, so
 // missing key silently degrades the entire premium-cover + description path.
 import { env as privateEnv } from "$env/dynamic/private";
+import * as Sentry from "@sentry/sveltekit";
 
 // Allowlist for the `variant` query param. The cloudflare-images backend
 // interpolates the variant into a URL path segment, so an unvalidated `as`
@@ -72,7 +73,9 @@ export const GET: RequestHandler = async (event) => {
   let catalogView: CatalogView | null;
   try {
     catalogView = await getCatalogForBrowser(supabase, isbn, variant);
-  } catch {
+  } catch (err) {
+    Sentry.captureException(err, { extra: { isbn, variant } });
+    await Sentry.flush(2000);
     return jsonError(500, "server_error", "catalog lookup failed");
   }
 

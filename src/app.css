@@ -796,13 +796,6 @@ blockquote {
 .note-placeholder:hover {
   color: #ccc;
 }
-.note-label {
-  font-family: inherit;
-  font-size: 0.875rem;
-  font-weight: 700;
-  color: #dedede;
-  margin-bottom: 4px;
-}
 .note-time {
   font-family: inherit;
   font-size: 0.75rem;

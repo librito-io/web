@@ -173,7 +173,6 @@
       {$_("addNote")}
     </div>
   {:else if mode === "display"}
-    <div class="note-label">{$_("noteLabel")}:</div>
     <div
       bind:this={displayEl}
       class="note-display"

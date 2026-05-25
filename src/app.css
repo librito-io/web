@@ -788,7 +788,7 @@ blockquote {
 .note-placeholder {
   font-family: inherit;
   font-size: 0.875rem;
-  color: #b0b2b5;
+  color: #939497;
   cursor: pointer;
   padding: 4px 0;
   user-select: none;
@@ -800,13 +800,13 @@ blockquote {
   font-family: inherit;
   font-size: 0.75rem;
   font-weight: 500;
-  color: #8a8c90;
+  color: #939497;
   margin-top: 8px;
 }
 .note-display {
   font-family: inherit;
   font-size: 0.875rem;
-  color: #b0b2b5;
+  color: #939497;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -834,7 +834,7 @@ blockquote {
 .note-editor {
   font-family: inherit;
   font-size: 0.875rem;
-  color: #b0b2b5;
+  color: #939497;
   line-height: 1.6;
   background: transparent;
   border: none;

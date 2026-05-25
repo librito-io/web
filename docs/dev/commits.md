@@ -31,14 +31,38 @@ This implies a clean separation:
   ```
 - A new `.github/pull_request_template.md` populates the PR body — keep it slim and follow its structure.
 
-## Length & shape
+## Enforcement
 
-Commit bodies should be **tight**. The standard:
+Mechanical rules are gated locally by a `commit-msg` git hook (husky + commitlint, wired automatically by `npm install` via the `prepare` script) and backstopped on every PR by `.github/workflows/commitlint.yml`. Rule values live in `commitlint.config.js`; the convention itself is this doc. PR title shape is validated by the separate `.github/workflows/lint-pr-title.yml` (amannn/action-semantic-pull-request).
 
-- **Subject**: ≤50 chars, imperative mood, conventional-commits prefix (`feat(scope):`, `fix(scope):`, etc.).
-- **Body**: 3–7 lines default. Explains WHY the change is non-obvious, not WHAT changed (the diff shows that).
-- **Up to ~15 lines** when the change has rejected alternatives worth recording, security implications, subtle constraints, or numbered design decisions that future contributors would otherwise re-litigate.
-- **Beyond 15 lines is a smell.** If the body is longer, the substance probably belongs in a spec, audit doc, plan, or code comment instead — and the commit should reference it (`See docs/audits-wip/<name>.md issue #N` / `Per spec §"Foo"`).
+What the hook enforces (hard-fail at commit time):
+
+- Conventional Commits prefix from the allowed type list (`feat` `fix` `bug` `chore` `docs` `test` `perf` `refactor`).
+- Subject starts lowercase, does not end with a period, is not empty.
+- Subject ≤ **100 chars** (hard ceiling — catches genuine runaways like accidentally-pasted bodies; permissive enough to keep substantive conjunctive subjects like `"replace X with Y"` intact).
+
+What the hook deliberately does **not** enforce:
+
+- Per-line body wrap (`body-max-line-length` is disabled). Modern consumers (GitHub UI, `gh` CLI, mobile readers, IDE diff viewers) soft-wrap; hard-wrap at any fixed width bakes the author's terminal into commit data and renders worse on narrower screens. Librito has no mailing-list (`git format-patch`) workflow that would need fixed-width.
+- Body line count. No production OSS project enforces this; substantive bodies (rejected alternatives, security framing, cross-cutting policy) are exactly what `git log` is for.
+
+## Length & shape (taste guidance, not enforced)
+
+Subject length sits on a soft scale, not a single cliff:
+
+| Target                    | Why                                                                                                                                                                   |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **≤50 chars (ideal)**     | Tim Pope's original recommendation — keeps `git log --oneline`, `git shortlog`, gitk, GitHub UI, and `git format-patch` email subjects displaying without truncation. |
+| **≤72 chars (preferred)** | Kernel documentation's documented ceiling. Matches Tim Pope's 80-col-terminal math (80 − 4 indent − 4 right padding).                                                 |
+| **≤100 chars (hard cap)** | The point at which the hook rejects. Matches `@commitlint/config-conventional`'s default — broad ecosystem convention for "definitely too long."                      |
+
+Aim for 50, accept up to 72 without flinching, treat 72–100 as "tighten if you can." The 50/72 targets are a taste signal that compresses commits well; the 100 cap is mechanical hygiene.
+
+Body shape:
+
+- **3–7 lines default**. Explains WHY the change is non-obvious, not WHAT changed (the diff shows that).
+- **Longer is fine** when the body carries rejected alternatives, security implications, subtle constraints, or numbered design decisions that future contributors would otherwise re-litigate.
+- **If running long**, ask whether the substance belongs in a spec, audit doc, plan, or code comment instead — and have the commit reference it (`See docs/audits-wip/<name>.md issue #N` / `Per spec §"Foo"`). Move substance out only when it has a better home; never truncate at the cost of losing the rationale.
 
 What to omit from commit bodies:
 

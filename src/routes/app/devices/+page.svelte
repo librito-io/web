@@ -39,6 +39,7 @@
       pairingCode = "";
       await invalidateAll();
     } catch {
+      // Network error → user-visible inline error; not a server fault.
       claimError = "Network error. Please try again.";
     } finally {
       claimLoading = false;

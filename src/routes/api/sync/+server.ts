@@ -30,6 +30,7 @@ export const POST: RequestHandler = async ({ request }) => {
   try {
     rawBody = await request.text();
   } catch {
+    // Bad client transport (truncated body / aborted upload) → 400, not a server fault.
     return jsonError(400, "invalid_request", "Failed to read request body");
   }
 
@@ -46,6 +47,7 @@ export const POST: RequestHandler = async ({ request }) => {
   try {
     body = JSON.parse(rawBody);
   } catch {
+    // Malformed client JSON → 400, not a server fault.
     return jsonError(400, "invalid_request", "Request body must be JSON");
   }
 

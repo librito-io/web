@@ -243,6 +243,7 @@
         if (res.status === 409) await refreshTransfers();
       }
     } catch {
+      // Network error → user-visible inline retry error; not a server fault.
       setRetryError(transferId, "Network error — try again");
     } finally {
       const next = new Set(retryingIds);

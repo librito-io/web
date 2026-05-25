@@ -1,5 +1,6 @@
 import type { RequestHandler } from "./$types";
 import { env } from "$env/dynamic/private";
+import * as Sentry from "@sentry/sveltekit";
 
 // Public JWKS endpoint. Supabase Auth (third-party JWT issuer config) fetches
 // this URL to verify ES256 tokens minted by /api/realtime-token. Must remain
@@ -9,7 +10,7 @@ import { env } from "$env/dynamic/private";
 // Dynamic env (vs static) lets self-hosters deploy without configuring the
 // Realtime keypair; the endpoint returns 503 until LIBRITO_JWT_PUBLIC_KEY_JWK
 // is set, instead of failing the build.
-export const GET: RequestHandler = () => {
+export const GET: RequestHandler = async () => {
   const raw = env.LIBRITO_JWT_PUBLIC_KEY_JWK;
   if (!raw) {
     return new Response(
@@ -27,7 +28,9 @@ export const GET: RequestHandler = () => {
   let jwk: unknown;
   try {
     jwk = JSON.parse(raw);
-  } catch {
+  } catch (err) {
+    Sentry.captureException(err);
+    await Sentry.flush(2000);
     return new Response(
       JSON.stringify({ error: "server_error", message: "JWKS misconfigured" }),
       {

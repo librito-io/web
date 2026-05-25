@@ -204,6 +204,7 @@ function memoizeGoogleBooksVolume(
         if (v) cached = v;
         return v;
       } catch {
+        // Per-leg GB fetch fail → fall through to next consumer / source.
         return null;
       }
     },
@@ -447,6 +448,7 @@ async function decodeCoverBytes(
   try {
     bytes = await fetcher();
   } catch {
+    // Per-source cover-bytes fetch fail → fall through to next source in chain.
     return null;
   }
   if (!bytes) return null;
@@ -525,6 +527,7 @@ async function tryGoogleBooksExtraLarge(
       minWidth,
     });
   } catch {
+    // GB cover-bytes fetch fail → fall through to next source in chain.
     return null;
   }
   if (!bytes) return null;
@@ -574,6 +577,7 @@ async function tryItunes(
   try {
     lookup = await fetchItunesByIsbn(ctx.isbn, { fetchFn: deps.fetchFn });
   } catch {
+    // iTunes ISBN lookup fail → fall through to next source in chain.
     return null;
   }
   const artworkUrl = lookup?.artworkUrl100;

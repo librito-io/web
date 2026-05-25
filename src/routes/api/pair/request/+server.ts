@@ -8,6 +8,7 @@ import {
 import { requestPairingCode } from "$lib/server/pairing";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { UUID_RE } from "$lib/server/validation";
+import * as Sentry from "@sentry/sveltekit";
 
 export const POST: RequestHandler = async ({ request, getClientAddress }) => {
   // Layer 1: per-IP. Cheap; bounds body-parsing cost for IP-bound floods.
@@ -23,6 +24,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
   try {
     body = await request.json();
   } catch {
+    // Malformed client JSON → 400, not a server fault.
     return jsonError(400, "invalid_request", "Request body must be JSON");
   }
 
@@ -53,7 +55,9 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     const supabase = createAdminClient();
     const result = await requestPairingCode(supabase, body.hardwareId);
     return jsonSuccess(result);
-  } catch {
+  } catch (err) {
+    Sentry.captureException(err);
+    await Sentry.flush(2000);
     return jsonError(500, "server_error", "Failed to generate pairing code");
   }
 };

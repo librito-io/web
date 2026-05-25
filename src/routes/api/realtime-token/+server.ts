@@ -15,6 +15,7 @@ import {
 } from "$lib/server/realtime";
 import { jsonError, jsonSuccess } from "$lib/server/errors";
 import { logger } from "$lib/server/log";
+import * as Sentry from "@sentry/sveltekit";
 
 export const POST: RequestHandler = async ({ request }) => {
   const supabase = createAdminClient();
@@ -45,11 +46,16 @@ export const POST: RequestHandler = async ({ request }) => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawJwk);
-  } catch {
+  } catch (err) {
     logger().error(
-      { event: "realtime.jwk_parse_failed" },
+      {
+        event: "realtime.jwk_parse_failed",
+        error: err instanceof Error ? err.message : String(err),
+      },
       "realtime.jwk_parse_failed",
     );
+    Sentry.captureException(err);
+    await Sentry.flush(2000);
     return jsonError(500, "server_error", "Failed to mint Realtime token");
   }
 

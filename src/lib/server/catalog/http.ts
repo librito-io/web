@@ -24,6 +24,7 @@ export function redactSecretParams(url: string): string {
     }
     return u.toString();
   } catch {
+    // Malformed URL → placeholder string; redactor is for log/error decoration, not control flow.
     return "(unparseable url)";
   }
 }
@@ -128,6 +129,7 @@ export async function downloadCover(
   try {
     parsed = new URL(url);
   } catch {
+    // Malformed cover URL from upstream → SSRF guard rejects (null).
     return null;
   }
   if (!opts.allowedHosts.includes(parsed.hostname.toLowerCase())) return null;

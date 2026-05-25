@@ -788,7 +788,7 @@ blockquote {
 .note-placeholder {
   font-family: inherit;
   font-size: 0.875rem;
-  color: #9b9ca0;
+  color: #939497;
   cursor: pointer;
   padding: 4px 0;
   user-select: none;
@@ -796,22 +796,17 @@ blockquote {
 .note-placeholder:hover {
   color: #ccc;
 }
-.note-label {
+.note-time {
   font-family: inherit;
-  font-size: 0.875rem;
-  font-weight: 700;
-  color: #dedede;
-  margin-bottom: 4px;
-}
-.note-label .note-time {
+  font-size: 0.75rem;
   font-weight: 500;
-  color: #9b9ca0;
-  margin-left: 8px;
+  color: #939497;
+  margin-top: 8px;
 }
 .note-display {
   font-family: inherit;
   font-size: 0.875rem;
-  color: #9b9ca0;
+  color: #939497;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -839,7 +834,7 @@ blockquote {
 .note-editor {
   font-family: inherit;
   font-size: 0.875rem;
-  color: #9b9ca0;
+  color: #939497;
   line-height: 1.6;
   background: transparent;
   border: none;

@@ -32,10 +32,14 @@
   let needsShowMore = $state(false);
 
   const relativeStrings = {
-    justNow: "just now",
-    minutes: "{n}m ago",
-    hours: "{n}h ago",
-    yesterday: "Yesterday",
+    justNow: "Just now",
+    minuteAgo: "1 minute ago",
+    minutesAgo: "{n} minutes ago",
+    hourAgo: "1 hour ago",
+    hoursAgo: "{n} hours ago",
+    dayAgo: "1 day ago",
+    daysAgo: "{n} days ago",
+    weekAgo: "1 week ago",
   };
 
   function scheduleSave(): void {
@@ -169,14 +173,6 @@
       {$_("addNote")}
     </div>
   {:else if mode === "display"}
-    <div class="note-label">
-      {$_("noteLabel")}:
-      {#if updatedAt}
-        <span class="note-time">
-          {relativeTime(updatedAt, { strings: relativeStrings })}
-        </span>
-      {/if}
-    </div>
     <div
       bind:this={displayEl}
       class="note-display"
@@ -204,6 +200,11 @@
       >
         {expanded ? $_("showLess") : $_("showMore")}
       </button>
+    {/if}
+    {#if updatedAt}
+      <div class="note-time">
+        {relativeTime(updatedAt, { strings: relativeStrings })}
+      </div>
     {/if}
   {:else}
     <textarea

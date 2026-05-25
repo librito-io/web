@@ -14,7 +14,7 @@ npm run dev          # SvelteKit dev server
 
 ## Commit messages
 
-Commit messages are gated locally by `.husky/commit-msg` and on every PR by `.github/workflows/commitlint.yml` (both run [commitlint](https://commitlint.js.org/) against [`commitlint.config.js`](commitlint.config.js)). Convention: **Conventional Commits** prefix from `feat` `fix` `bug` `chore` `docs` `test` `perf` `refactor`, lowercase subject, no trailing period, subject ≤100 chars. Full rules + rationale (including soft targets of 50 / 72 chars) in [`docs/dev/commits.md`](docs/dev/commits.md).
+Commit messages are gated locally by `.husky/commit-msg` and on every PR by `.github/workflows/commitlint.yml` (both run [commitlint](https://commitlint.js.org/) against [`commitlint.config.mjs`](commitlint.config.mjs)). Convention: **Conventional Commits** prefix from `feat` `fix` `bug` `chore` `docs` `test` `perf` `refactor`, lowercase subject, no trailing period, subject ≤100 chars. Full rules + rationale (including soft targets of 50 / 72 chars) in [`docs/dev/commits.md`](docs/dev/commits.md).
 
 PR titles are validated separately by `.github/workflows/lint-pr-title.yml` using the same Conventional Commits format. Because the repo is squash-merged with `COMMIT_MESSAGES`, the per-commit messages on your branch become the durable archeology in `git log` on `main` — write them as if no PR existed.
 

@@ -2,7 +2,7 @@ name: commitlint
 
 # Backstops the local `.husky/commit-msg` hook against contributors who never
 # ran `npm install` (so husky never wired the hook) or who bypassed it with
-# `--no-verify`. Lints every commit in the PR against `commitlint.config.js`,
+# `--no-verify`. Lints every commit in the PR against `commitlint.config.mjs`,
 # the same config the local hook uses. Pairs with `lint-pr-title.yml` which
 # gates the PR title separately via amannn/action-semantic-pull-request.
 #
@@ -29,11 +29,8 @@ jobs:
       - name: Lint commit messages
         uses: wagoid/commitlint-github-action@v6
         with:
-          configFile: commitlint.config.js
-          # Lint every commit in the PR, not just the head. Catches a single
-          # bad commit hidden inside an otherwise clean branch — relevant
-          # because squash uses COMMIT_MESSAGES, so per-commit messages
-          # become the durable archeology.
-          firstParent: false
+          # Must be .mjs — wagoid v6 rejects .js (and our config uses
+          # `export default` which is ESM regardless).
+          configFile: commitlint.config.mjs
           failOnWarnings: false
           helpURL: https://github.com/librito-io/web/blob/main/docs/dev/commits.md

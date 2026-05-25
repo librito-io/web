@@ -33,7 +33,7 @@ This implies a clean separation:
 
 ## Enforcement
 
-Mechanical rules are gated locally by a `commit-msg` git hook (husky + commitlint, wired automatically by `npm install` via the `prepare` script) and backstopped on every PR by `.github/workflows/commitlint.yml`. Rule values live in `commitlint.config.js`; the convention itself is this doc. PR title shape is validated by the separate `.github/workflows/lint-pr-title.yml` (amannn/action-semantic-pull-request).
+Mechanical rules are gated locally by a `commit-msg` git hook (husky + commitlint, wired automatically by `npm install` via the `prepare` script) and backstopped on every PR by `.github/workflows/commitlint.yml`. Rule values live in `commitlint.config.mjs`; the convention itself is this doc. PR title shape is validated by the separate `.github/workflows/lint-pr-title.yml` (amannn/action-semantic-pull-request).
 
 What the hook enforces (hard-fail at commit time):
 

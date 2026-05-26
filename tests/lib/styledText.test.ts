@@ -50,4 +50,37 @@ describe("renderStyledText", () => {
       { text: "second", bold: false, italic: false },
     ]);
   });
+
+  it("indexes by Unicode codepoints, not UTF-16 code units or UTF-8 bytes", () => {
+    // Firmware (reader PR #50) emits styles indexed in codepoints. For
+    // BMP-only text codepoints == UTF-16 units, so the bug never appeared
+    // on ASCII. Smart-quote chars (U+2019, 1 codepoint, 1 UTF-16 unit,
+    // 3 UTF-8 bytes) and astral chars (1 codepoint, 2 UTF-16 units,
+    // 4 UTF-8 bytes) both stress the contract.
+    //
+    // Real prod row 856ea54d: "Historically, the modern project of food..."
+    // with one U+2019 in "Jesus's". Without this fix, totalLength check
+    // fails (264 UTF-16 units vs 266 styles sum), renderStyledText falls
+    // back to a single regular run, no italic span emitted in DOM.
+    const text = "ab’cd"; // 5 codepoints, 5 UTF-16 units, 7 UTF-8 bytes
+    const runs = renderStyledText(text, "R2I2R1");
+    expect(runs).toEqual([
+      { text: "ab", bold: false, italic: false },
+      { text: "’c", bold: false, italic: true },
+      { text: "d", bold: false, italic: false },
+    ]);
+  });
+
+  it("handles astral codepoints (surrogate pairs) as one codepoint each", () => {
+    // U+1F600 (😀) is 1 codepoint, 2 UTF-16 units, 4 UTF-8 bytes.
+    // Without codepoint iteration, .length would report 4 here and
+    // slice() would split the surrogate pair mid-character.
+    const text = "a\u{1F600}b"; // 3 codepoints
+    const runs = renderStyledText(text, "R1I1R1");
+    expect(runs).toEqual([
+      { text: "a", bold: false, italic: false },
+      { text: "\u{1F600}", bold: false, italic: true },
+      { text: "b", bold: false, italic: false },
+    ]);
+  });
 });

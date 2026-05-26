@@ -16,11 +16,19 @@ const STYLE_FOR_CODE: Record<string, Style> = {
 };
 
 /**
- * Parses a run-length-encoded styles string like "R45B12I5" — 45 chars regular,
- * then 12 bold, then 5 italic. Returns runs sliced against `text`.
+ * Parses a run-length-encoded styles string like "R45B12I5" — 45 codepoints
+ * regular, then 12 bold, then 5 italic. Returns runs sliced against `text`.
  *
- * If `styles` is missing, malformed, or its total length differs from
- * `text.length`, the whole string is returned as a single regular run.
+ * Length integers are **Unicode codepoints** per the firmware encoder contract
+ * (reader repo, `SelectionManager::getResult` → `codepointCount`, PR #50).
+ * JS `string.length` returns UTF-16 code units, so we iterate via
+ * `Array.from(text)` to get one entry per codepoint. For BMP-only text the
+ * two counts coincide; the divergence matters for astral codepoints (emoji,
+ * less-common scripts) where a single codepoint occupies two UTF-16 units.
+ *
+ * If `styles` is missing, malformed, or its total length differs from the
+ * codepoint count of `text`, the whole string is returned as a single
+ * regular run.
  *
  * Embedded "\n" characters in `text` are emitted as standalone runs with
  * `isBreak: true` so callers can render paragraph breaks.
@@ -29,16 +37,17 @@ export function renderStyledText(
   text: string,
   styles?: string | null,
 ): StyledRun[] {
+  const cps = Array.from(text);
   const parsed = styles ? parseStyles(styles) : null;
   const spans =
-    parsed && totalLength(parsed) === text.length
+    parsed && totalLength(parsed) === cps.length
       ? parsed
-      : [{ style: STYLE_FOR_CODE.R, length: text.length }];
+      : [{ style: STYLE_FOR_CODE.R, length: cps.length }];
 
   const out: StyledRun[] = [];
   let offset = 0;
   for (const span of spans) {
-    const chunk = text.slice(offset, offset + span.length);
+    const chunk = cps.slice(offset, offset + span.length).join("");
     offset += span.length;
     for (const piece of splitOnBreaks(chunk, span.style)) out.push(piece);
   }

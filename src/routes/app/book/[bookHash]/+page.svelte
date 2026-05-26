@@ -22,7 +22,7 @@
     />
     <div class="meta">
       <h2 dir="auto">{data.book.title || $_("untitled")}</h2>
-      <div class="page-subtitle" dir="auto">
+      <div class="book-author" dir="auto">
         {data.book.author || $_("unknownAuthor")}
       </div>
       {#if data.catalog.publisher || data.catalog.published_date || data.catalog.page_count}
@@ -38,11 +38,9 @@
       {/if}
       {#if data.catalog.description}
         <p class="catalog-description">{data.catalog.description}</p>
-        <p class="catalog-attribution">
-          via {data.catalog.description_provider === "google_books"
-            ? "Google Books"
-            : "Open Library"}
-        </p>
+        {#if data.catalog.description_provider === "google_books"}
+          <p class="catalog-attribution">via Google Books</p>
+        {/if}
       {/if}
       {#if data.catalog.subjects?.length}
         <ul class="catalog-subjects">
@@ -89,10 +87,14 @@
     min-width: 0;
   }
 
+  .meta :global(.book-author) {
+    font-size: 1.125rem;
+  }
+
   .catalog-line {
     margin-top: 0.5rem;
     font-size: 0.875rem;
-    color: var(--color-muted, #888);
+    color: #9e9fa2;
   }
 
   .catalog-description {

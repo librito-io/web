@@ -3,6 +3,12 @@ name: production-deploy
 on:
   push:
     branches: [main]
+  # Manual fallback for the rare case where a `push` event to main fails
+  # to fire the workflow (GitHub event-delivery hiccup — observed on the
+  # squash merge of #417 with no outage on githubstatus.com). Trigger via
+  # `gh workflow run production-deploy.yml --ref main` to deploy whatever
+  # is at HEAD of main without waiting for the next push.
+  workflow_dispatch:
 
 # Never cancel an in-flight run: interrupting a migration mid-push would leave
 # the database in a partially-applied state with no automatic rollback.

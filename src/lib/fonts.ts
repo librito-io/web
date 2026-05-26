@@ -3,7 +3,8 @@
 // the browser guarantees a single fetch and reuses preloaded bytes.
 export const PRELOAD_FONTS: readonly string[] = [
   "/fonts/bitter-500.woff2",
-  "/fonts/noto-sans-400.woff2",
-  "/fonts/noto-sans-600.woff2",
+  "/fonts/inter-400.woff2",
+  "/fonts/inter-600.woff2",
+  "/fonts/inter-700.woff2",
   "/fonts/jetbrains-mono-500.woff2",
 ] as const;

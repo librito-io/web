@@ -40,6 +40,7 @@
     padding: 6px 14px;
     font-size: 0.875rem;
     font-family: inherit;
+    letter-spacing: var(--tracking-sm);
     cursor: pointer;
     transition:
       background 0.15s,

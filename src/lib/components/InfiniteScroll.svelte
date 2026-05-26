@@ -58,6 +58,7 @@
     padding: 24px 0;
     color: #888;
     font-size: 0.875rem;
+    letter-spacing: var(--tracking-sm);
   }
   .loading-text {
     opacity: 0.7;

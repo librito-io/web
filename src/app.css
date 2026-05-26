@@ -1,15 +1,51 @@
 /* Non-critical weights still via fontsource (bundled CSS, swap).
-   Must precede every other statement per CSS @import rule. */
+   Must precede every other statement per CSS @import rule.
+
+   `@fontsource/inter/500.css` ships per-subset @font-face (latin,
+   cyrillic, vietnamese, greek) gated by unicode-range, so Cyrillic
+   for ru loads on-demand without a separate import.
+
+   Non-Latin script subsets (Arabic / Devanagari / JP / KR / SC)
+   load on-demand via fontsource's per-subset @font-face blocks
+   with unicode-range — the woff2 only fetches when a matching
+   glyph is rendered, so Latin/Cyrillic users pay near-zero bytes.
+   Cold-cache first paint on non-Latin locales sees ~100-300ms
+   FOUT; locale-gated preload tracked in issue #416. */
 @import "@fontsource/bitter/700.css";
 @import "@fontsource/bitter/400-italic.css";
-@import "@fontsource/noto-sans/500.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/noto-sans-arabic/400.css";
+@import "@fontsource/noto-sans-arabic/500.css";
+@import "@fontsource/noto-sans-arabic/600.css";
+@import "@fontsource/noto-sans-arabic/700.css";
+@import "@fontsource/noto-sans-devanagari/400.css";
+@import "@fontsource/noto-sans-devanagari/500.css";
+@import "@fontsource/noto-sans-devanagari/600.css";
+@import "@fontsource/noto-sans-devanagari/700.css";
+@import "@fontsource/noto-sans-jp/400.css";
+@import "@fontsource/noto-sans-jp/500.css";
+@import "@fontsource/noto-sans-jp/600.css";
+@import "@fontsource/noto-sans-jp/700.css";
+@import "@fontsource/noto-sans-kr/400.css";
+@import "@fontsource/noto-sans-kr/500.css";
+@import "@fontsource/noto-sans-kr/600.css";
+@import "@fontsource/noto-sans-kr/700.css";
+@import "@fontsource/noto-sans-sc/400.css";
+@import "@fontsource/noto-sans-sc/500.css";
+@import "@fontsource/noto-sans-sc/600.css";
+@import "@fontsource/noto-sans-sc/700.css";
 
 /* Critical fonts: self-hosted in /static/fonts/ with font-display:
    optional so the browser uses the webfont only if it loads before
    first paint (via the <link rel=preload> in +layout.svelte). If it
    misses that window, the fallback keeps the current page stable —
    no swap, no reflow, no CLS. Subsequent page loads hit the HTTP
-   cache and render with the webfont from the first paint. */
+   cache and render with the webfont from the first paint.
+
+   Self-hosted Inter files are the Latin subset only (~23K each);
+   Cyrillic loads on-demand via the fontsource CSS above. Non-Latin
+   scripts (ar/hi/ja/ko/zh) fall through to the system font in the
+   stack below — same behaviour as before the Inter swap. */
 @font-face {
   font-family: "Bitter";
   font-style: normal;
@@ -18,18 +54,25 @@
   src: url("/fonts/bitter-500.woff2") format("woff2");
 }
 @font-face {
-  font-family: "Noto Sans";
+  font-family: "Inter";
   font-style: normal;
   font-weight: 400;
   font-display: optional;
-  src: url("/fonts/noto-sans-400.woff2") format("woff2");
+  src: url("/fonts/inter-400.woff2") format("woff2");
 }
 @font-face {
-  font-family: "Noto Sans";
+  font-family: "Inter";
   font-style: normal;
   font-weight: 600;
   font-display: optional;
-  src: url("/fonts/noto-sans-600.woff2") format("woff2");
+  src: url("/fonts/inter-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: optional;
+  src: url("/fonts/inter-700.woff2") format("woff2");
 }
 @font-face {
   font-family: "JetBrains Mono";
@@ -54,7 +97,12 @@ html {
 }
 body {
   font-family:
-    "Noto Sans",
+    "Inter",
+    "Noto Sans Arabic",
+    "Noto Sans Devanagari",
+    "Noto Sans JP",
+    "Noto Sans KR",
+    "Noto Sans SC",
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",

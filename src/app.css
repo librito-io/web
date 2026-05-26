@@ -715,14 +715,14 @@ header h1 {
   margin-top: 8px;
 }
 blockquote {
-  font-family: "Bitter", "Bitter Pro", Georgia, serif;
-  font-weight: 500;
+  font-family: "Literata", Georgia, serif;
+  font-weight: 400;
   border-left: none;
   padding: 8px 6px 12px 6px;
   margin: 0 -6px;
-  color: #dedede;
+  color: #dadada;
   font-size: 1rem;
-  line-height: 1.7;
+  line-height: 1.5;
   background: transparent;
   position: relative;
   z-index: 2;

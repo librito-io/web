@@ -14,6 +14,12 @@ export type FeedRow = {
   start_word: number;
   end_word: number;
   text: string;
+  // Run-length-encoded style runs ("R18I7R241"). Length integers are
+  // Unicode codepoints — firmware encoder is reader repo's
+  // `SelectionManager::getResult` → `codepointCount` (PR #50). Renderer
+  // must iterate by codepoint (`Array.from(text)`), not JS `.length`
+  // (UTF-16 code units), to slice runs correctly across astral chars.
+  // See `src/lib/rendering/styledText.ts`.
   styles: string | null;
   paragraph_breaks: number[] | null;
   note_text: string | null;

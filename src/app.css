@@ -11,8 +11,6 @@
    glyph is rendered, so Latin/Cyrillic users pay near-zero bytes.
    Cold-cache first paint on non-Latin locales sees ~100-300ms
    FOUT; locale-gated preload tracked in issue #416. */
-@import "@fontsource/bitter/700.css";
-@import "@fontsource/bitter/400-italic.css";
 @import "@fontsource/inter/500.css";
 @import "@fontsource/noto-sans-arabic/400.css";
 @import "@fontsource/noto-sans-arabic/500.css";
@@ -47,11 +45,18 @@
    scripts (ar/hi/ja/ko/zh) fall through to the system font in the
    stack below — same behaviour as before the Inter swap. */
 @font-face {
-  font-family: "Bitter";
+  font-family: "Literata";
   font-style: normal;
-  font-weight: 500;
+  font-weight: 400;
   font-display: optional;
-  src: url("/fonts/bitter-500.woff2") format("woff2");
+  src: url("/fonts/literata-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Literata";
+  font-style: italic;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/fonts/literata-400-italic.woff2") format("woff2");
 }
 @font-face {
   font-family: "Inter";

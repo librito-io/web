@@ -10,8 +10,8 @@ import { awaitHydration } from "./helpers/hydrate";
 // Regression guard for the Inter font swap (PR #417). Asserts the four
 // font-loading invariants the swap relies on:
 //
-//   1. Preload set on /            — Inter 400/600/700, Bitter 500,
-//                                    JetBrains 500. No Noto preload.
+//   1. Preload set on /            — Inter 400/600/700, JetBrains 500,
+//                                    Literata 400. No Noto preload.
 //   2. Per-script Noto subsets     — non-Latin locales (ar/hi/ja/ko/zh)
 //                                    fetch the matching woff2 on-demand
 //                                    via fontsource @font-face
@@ -20,12 +20,17 @@ import { awaitHydration } from "./helpers/hydrate";
 //                                    woff2 via @fontsource/inter/500.css.
 //   4. Real Bold, not synthetic    — header h1 resolves to Inter 700
 //                                    (document.fonts.check).
+//   5. Real Italic, not synthetic  — Literata italic face loaded
+//                                    (document.fonts.check). Device-side
+//                                    highlights ship RLE italic runs; we
+//                                    must render Literata's italic cut,
+//                                    not a skewed upright.
 //
 // FOUT on cold cache for non-Latin locales is not asserted — locale-gated
 // preload to eliminate it tracked in issue #416.
 
 test.describe("font loading", () => {
-  test("preload links: Inter + Bitter + JetBrains, no Noto", async ({
+  test("preload links: Inter + JetBrains + Literata, no Noto", async ({
     page,
   }) => {
     await page.goto("/");
@@ -42,13 +47,31 @@ test.describe("font loading", () => {
         "/fonts/inter-400.woff2",
         "/fonts/inter-600.woff2",
         "/fonts/inter-700.woff2",
-        "/fonts/bitter-500.woff2",
         "/fonts/jetbrains-mono-500.woff2",
+        "/fonts/literata-400.woff2",
+        "/fonts/literata-400-italic.woff2",
       ]),
     );
 
     const notoPreloads = preloads.filter((href) => /noto/i.test(href));
     expect(notoPreloads).toEqual([]);
+  });
+
+  test("Literata italic 400 loads as real face, not synthetic", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await awaitHydration(page);
+    await page.waitForFunction(() => document.fonts.ready.then(() => true));
+
+    // document.fonts.check returns true only if a real italic cut for
+    // Literata 400 is loaded. Synthetic italic (skewed upright) returns
+    // false here. Device-side highlights ship RLE italic runs via
+    // styledText; we must render the real italic cut.
+    const realItalic = await page.evaluate(() =>
+      document.fonts.check('italic 1em "Literata"'),
+    );
+    expect(realItalic).toBe(true);
   });
 
   test("header h1 renders Inter 700, not synthetic bold", async ({ page }) => {

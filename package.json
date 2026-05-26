@@ -35,7 +35,6 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@fontsource/bitter": "^5.2.10",
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/noto-sans-arabic": "^5.2.10",

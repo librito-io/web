@@ -57,21 +57,39 @@ test.describe("font loading", () => {
     expect(notoPreloads).toEqual([]);
   });
 
-  test("Literata italic 400 loads as real face, not synthetic", async ({
+  test("Literata italic @font-face declared and woff2 loadable", async ({
     page,
   }) => {
     await page.goto("/");
     await awaitHydration(page);
-    await page.waitForFunction(() => document.fonts.ready.then(() => true));
 
-    // document.fonts.check returns true only if a real italic cut for
-    // Literata 400 is loaded. Synthetic italic (skewed upright) returns
-    // false here. Device-side highlights ship RLE italic runs via
-    // styledText; we must render the real italic cut.
-    const realItalic = await page.evaluate(() =>
-      document.fonts.check('italic 1em "Literata"'),
-    );
-    expect(realItalic).toBe(true);
+    // Two-part guard against the synthetic-italic regression. Cannot
+    // rely on document.fonts.check() alone: (a) on `/` no italic text
+    // renders, so the FontFace never gets consumed by layout and check
+    // returns false even with the woff2 preloaded — CI fails despite
+    // correct config; (b) if the italic @font-face block is removed
+    // entirely, the browser silently falls back to synthetic italic and
+    // check() returns true (no font load pending). So we assert both:
+    //   1. An italic Literata @font-face is registered in document.fonts.
+    //   2. document.fonts.load() successfully fetches the woff2.
+    const italicFaces = await page.evaluate(() => {
+      const out: { weight: string; status: string }[] = [];
+      for (const face of document.fonts) {
+        const family = face.family.replace(/['"]/g, "");
+        if (family === "Literata" && face.style === "italic") {
+          out.push({ weight: face.weight, status: face.status });
+        }
+      }
+      return out;
+    });
+    expect(italicFaces.length).toBeGreaterThan(0);
+    expect(italicFaces.some((f) => f.weight === "400")).toBe(true);
+
+    const loaded = await page.evaluate(async () => {
+      const faces = await document.fonts.load('italic 1em "Literata"');
+      return faces.length;
+    });
+    expect(loaded).toBeGreaterThan(0);
   });
 
   test("header h1 renders Inter 700, not synthetic bold", async ({ page }) => {

@@ -21,7 +21,9 @@
       loading="eager"
     />
     <div class="meta">
-      <h2 dir="auto">{data.book.title || $_("untitled")}</h2>
+      <h2 class="book-detail-title" dir="auto">
+        {data.book.title || $_("untitled")}
+      </h2>
       <div class="book-author" dir="auto">
         {data.book.author || $_("unknownAuthor")}
       </div>
@@ -89,23 +91,32 @@
 
   .meta :global(.book-author) {
     font-size: 1.125rem;
+    letter-spacing: var(--tracking-md);
   }
 
   .catalog-line {
     margin-top: 0.5rem;
     font-size: 0.875rem;
+    letter-spacing: var(--tracking-sm);
     color: #9e9fa2;
   }
 
   .catalog-description {
     margin-top: 0.75rem;
-    font-size: 0.9375rem;
-    line-height: 1.6;
+    /* 16px @400 description body. 1.5 leading (= 24px) matches rsms.me's
+       paragraph rhythm. letter-spacing follows the formula/lab value
+       (`--tracking-base` = -0.011em, lab Inter @400 at 16px = -1.1%);
+       picked after eyeballing against rsms's `normal` and a 1.375
+       (22px) leading option. */
+    font-size: 1rem;
+    line-height: 1.5;
+    letter-spacing: var(--tracking-base);
   }
 
   .catalog-attribution {
     margin-top: 0.25rem;
     font-size: 0.75rem;
+    letter-spacing: var(--tracking-xs);
     color: var(--color-muted, #888);
   }
 
@@ -120,6 +131,7 @@
 
   .catalog-subjects li {
     font-size: 0.75rem;
+    letter-spacing: var(--tracking-xs);
     padding: 0.2rem 0.5rem;
     border-radius: 999px;
     background: #2a2a2a;

@@ -7,11 +7,12 @@ import {
 } from "./helpers/auth";
 import { awaitHydration } from "./helpers/hydrate";
 
-// Regression guard for the Inter font swap (PR #417). Asserts the four
+// Regression guard for the Inter font swap (PR #417). Asserts the
 // font-loading invariants the swap relies on:
 //
-//   1. Preload set on /            — Inter 400/600/700, JetBrains 500,
-//                                    Literata 400. No Noto preload.
+//   1. Preload set on /            — Inter 400/600/700, InterVariable,
+//                                    JetBrains 500, Literata 400 + italic.
+//                                    No Noto preload.
 //   2. Per-script Noto subsets     — non-Latin locales (ar/hi/ja/ko/zh)
 //                                    fetch the matching woff2 on-demand
 //                                    via fontsource @font-face
@@ -25,6 +26,11 @@ import { awaitHydration } from "./helpers/hydrate";
 //                                    highlights ship RLE italic runs; we
 //                                    must render Literata's italic cut,
 //                                    not a skewed upright.
+//   6. InterVariable loadable      — book-detail-title (24px heading)
+//                                    resolves to a real InterVariable face
+//                                    so `font-optical-sizing: auto` can
+//                                    interpolate the opsz axis to the
+//                                    font-size (#421).
 //
 // FOUT on cold cache for non-Latin locales is not asserted — locale-gated
 // preload to eliminate it tracked in issue #416.
@@ -47,6 +53,7 @@ test.describe("font loading", () => {
         "/fonts/inter-400.woff2",
         "/fonts/inter-600.woff2",
         "/fonts/inter-700.woff2",
+        "/fonts/inter-variable.woff2",
         "/fonts/jetbrains-mono-500.woff2",
         "/fonts/literata-400.woff2",
         "/fonts/literata-400-italic.woff2",
@@ -87,6 +94,38 @@ test.describe("font loading", () => {
 
     const loaded = await page.evaluate(async () => {
       const faces = await document.fonts.load('italic 1em "Literata"');
+      return faces.length;
+    });
+    expect(loaded).toBeGreaterThan(0);
+  });
+
+  test("InterVariable @font-face declared and woff2 loadable", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await awaitHydration(page);
+
+    // Same two-part guard pattern as the Literata italic test:
+    // document.fonts.check() alone can't distinguish a missing
+    // @font-face block (browser falls back to Inter, returns true) from
+    // a registered-but-not-loaded face. Assert both registration and
+    // successful woff2 fetch.
+    const variableFaces = await page.evaluate(() => {
+      const out: { weight: string; status: string }[] = [];
+      for (const face of document.fonts) {
+        const family = face.family.replace(/['"]/g, "");
+        if (family === "InterVariable" && face.style === "normal") {
+          out.push({ weight: face.weight, status: face.status });
+        }
+      }
+      return out;
+    });
+    expect(variableFaces.length).toBeGreaterThan(0);
+    // The variable font ships a single face with weight range "100 900".
+    expect(variableFaces.some((f) => /100\s*9?00/.test(f.weight))).toBe(true);
+
+    const loaded = await page.evaluate(async () => {
+      const faces = await document.fonts.load('700 1em "InterVariable"');
       return faces.length;
     });
     expect(loaded).toBeGreaterThan(0);

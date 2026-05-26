@@ -9,6 +9,7 @@
     display: inline-block;
     color: #888;
     font-size: 1rem;
+    letter-spacing: var(--tracking-base);
     text-decoration: none;
     padding: 8px 0 16px;
   }

@@ -42,18 +42,24 @@ export async function enrichFeedRowsWithCovers(
   }
   const uniqueCanon = Array.from(new Set(canonByRaw.values()));
 
-  // Title/author candidates: only ISBN-less rows that carry both fields.
-  // Dedupe on the normalized key so duplicate (title, author) across rows
-  // produce one lookup and at most one scheduled resolve.
+  // Title/author candidates. Every row with title+author goes into the
+  // lookup map so the per-row map can fall through to the TA cache when the
+  // ISBN branch misses (issue #427: a book first synced ISBN-less builds a
+  // TA-keyed catalog row; a later sync that fills `books.isbn` would
+  // otherwise render placeholder forever even though the TA row already has
+  // a usable cover). Scheduling is a separate concern — only ISBN-null
+  // rows go into `taSchedulingKeys`, because rows with ISBN should resolve
+  // through the canonical ISBN path, not duplicate via TA.
   const taPairsByKey = new Map<string, { title: string; author: string }>();
+  const taSchedulingKeys = new Set<string>();
   for (const r of rows) {
-    if (r.book_isbn) continue;
     if (!r.book_title || !r.book_author) continue;
     const key = normalizeTitleAuthor(r.book_title, r.book_author);
     if (!key) continue;
     if (!taPairsByKey.has(key)) {
       taPairsByKey.set(key, { title: r.book_title, author: r.book_author });
     }
+    if (!r.book_isbn) taSchedulingKeys.add(key);
   }
   const uniqueTaKeys = Array.from(taPairsByKey.keys());
 
@@ -117,8 +123,11 @@ export async function enrichFeedRowsWithCovers(
         (c) => !coverUrlsByCanon.has(c) && !negativeIsbns.has(c),
       )
     : [];
+  // Only schedule TA resolves for rows that lack an ISBN. Rows with an
+  // ISBN resolve through the canonical ISBN path (`missingIsbns` above);
+  // their TA-key lookup is purely a display fallthrough.
   const missingTaKeys = taLookupOk
-    ? uniqueTaKeys.filter(
+    ? Array.from(taSchedulingKeys).filter(
         (k) => !coverUrlsByTa.has(k) && !negativeTaKeys.has(k),
       )
     : [];
@@ -133,11 +142,19 @@ export async function enrichFeedRowsWithCovers(
 
   return rows.map((r) => {
     if (r.book_isbn) {
-      return {
-        ...r,
-        coverUrl:
-          coverUrlsByCanon.get(canonByRaw.get(r.book_isbn) ?? "") ?? null,
-      };
+      const isbnCover = coverUrlsByCanon.get(canonByRaw.get(r.book_isbn) ?? "");
+      if (isbnCover) return { ...r, coverUrl: isbnCover };
+      // Issue #427 fallthrough: ISBN-bearing book whose ISBN isn't in
+      // book_catalog yet may still have a TA-keyed row from an earlier
+      // ISBN-less sync. Try the TA cache before giving up.
+      if (r.book_title && r.book_author) {
+        const key = normalizeTitleAuthor(r.book_title, r.book_author);
+        if (key) {
+          const taCover = coverUrlsByTa.get(key);
+          if (taCover) return { ...r, coverUrl: taCover };
+        }
+      }
+      return { ...r, coverUrl: null };
     }
     if (r.book_title && r.book_author) {
       const key = normalizeTitleAuthor(r.book_title, r.book_author);

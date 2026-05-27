@@ -1,4 +1,5 @@
 import type {
+  BookCatalogRowFields,
   FailReason,
   FieldProvider,
   ResolveCtx,
@@ -75,4 +76,63 @@ function aggregate<T>(outcomes: LegOutcome<T>[]): FailReason {
   if (outcomes.some((o) => o.kind === "empty")) return "provider_empty_field";
   if (outcomes.every((o) => o.kind === "no_data")) return "provider_no_data";
   return "exhausted";
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+// TTL ladder for the per-field replay predicate. Mirrors the SQL
+// `_field_replay_due()` helper (migration 20260527000004) so SQL replay
+// selection and TS resolver gating use the same boundary. Strict `>`
+// matches the SQL `>` — a row exactly at TTL becomes due on the next pass.
+const TTL_MS: Record<FailReason, number> = {
+  rate_limited: 1 * HOUR_MS,
+  transient_error: 1 * HOUR_MS,
+  provider_disabled: 24 * HOUR_MS,
+  provider_empty_field: 30 * DAY_MS,
+  provider_no_data: 90 * DAY_MS,
+  exhausted: 90 * DAY_MS,
+};
+
+// Per-field gate evaluated before walking the chain. Returns true when the
+// field is unpopulated AND either never-attempted (attempted_at null) or
+// past its fail_reason TTL window.
+//
+// Populated-field discriminant is field-specific:
+//   - cover:      storage_path != null
+//   - subjects:   non-empty array
+//   - page_count: non-null number
+//   - description / publisher / published_date: same-named column non-null
+//
+// fail_reason null with attempted_at set is treated as success (no
+// re-attempt) — the resolver clears fail_reason on a write that populated
+// the field, so this state means "we wrote a value once".
+export function shouldAttempt(
+  field: TrackedField,
+  row: Partial<BookCatalogRowFields>,
+  now: Date,
+): boolean {
+  if (rowFieldIsPopulated(row, field)) return false;
+  const attemptedAt = row[
+    `${field}_attempted_at` as keyof BookCatalogRowFields
+  ] as string | null | undefined;
+  const reason = row[`${field}_fail_reason` as keyof BookCatalogRowFields] as
+    | FailReason
+    | null
+    | undefined;
+  if (!attemptedAt) return true;
+  if (reason == null) return false;
+  const age = now.getTime() - new Date(attemptedAt).getTime();
+  return age > TTL_MS[reason];
+}
+
+function rowFieldIsPopulated(
+  row: Partial<BookCatalogRowFields>,
+  field: TrackedField,
+): boolean {
+  if (field === "cover") return row.storage_path != null;
+  if (field === "subjects") return (row.subjects?.length ?? 0) > 0;
+  // The remaining tracked fields (description, publisher, published_date,
+  // page_count) live in same-named columns on the row.
+  return row[field as keyof BookCatalogRowFields] != null;
 }

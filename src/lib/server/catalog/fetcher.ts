@@ -887,6 +887,11 @@ export async function resolveIsbn(
   rawIsbn: string,
   deps: ResolveDeps,
   ctx?: ResolveCtx,
+  // PR4 consumer: replay cron passes the subset of tracked fields whose
+  // TTL is up so the resolver only walks those legs. Currently wired
+  // through scheduling but not consumed by the walker yet (PR3 lands
+  // the param; PR4 lands the gating).
+  _fields?: TrackedField[],
 ): Promise<ResolveResult> {
   const isbn = canonicalizeIsbn(rawIsbn);
   if (!isbn) throw new InvalidIsbnError(rawIsbn);
@@ -1340,6 +1345,8 @@ export async function resolveTitleAuthor(
   title: string,
   author: string,
   deps: ResolveDeps,
+  // PR4 consumer; see resolveIsbn for rationale.
+  _fields?: TrackedField[],
 ): Promise<ResolveResult> {
   const key = normalizeTitleAuthor(title, author);
   if (!key) throw new InvalidTitleAuthorError();

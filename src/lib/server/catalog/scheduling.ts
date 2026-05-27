@@ -1,5 +1,6 @@
 import { resolveIsbn, resolveTitleAuthor } from "./fetcher";
 import { getCatalogMutex } from "./mutex";
+import type { ResolveCtx, TrackedField } from "./types";
 import {
   catalogOpenLibraryLimiter,
   catalogGoogleBooksLimiter,
@@ -15,9 +16,21 @@ import { createAdminClient } from "$lib/server/supabase";
 // missing key silently degrades the entire premium-cover + description path.
 import { env as privateEnv } from "$env/dynamic/private";
 
+// ISBN-keyed work item carries optional `ctx` (title + author) so the
+// resolver can promote a pre-existing TA-keyed catalog row to ISBN-keyed
+// at the data layer (refit 2026-05-27 PR3) — replacing the display-side
+// fallthrough that previously masked the duplicate-row gap. `fields`
+// scopes the resolver to a subset of tracked fields; consumed by the
+// replay cron (PR4) so a partial-failure row only re-walks the legs whose
+// TTL is up. Undefined = walk every tracked field per shouldAttempt.
 export type CatalogResolveWork =
-  | { kind: "isbn"; isbn: string }
-  | { kind: "ta"; title: string; author: string };
+  | { kind: "isbn"; isbn: string; ctx?: ResolveCtx; fields?: TrackedField[] }
+  | {
+      kind: "ta";
+      title: string;
+      author: string;
+      fields?: TrackedField[];
+    };
 
 /**
  * Schedule per-user, mutex-deduped catalog resolves in the background.
@@ -61,9 +74,15 @@ export async function scheduleCatalogResolveIfAllowed(
       const mutex = await mutexPromise;
       const innerDeps = { rateLimiters, mutex, googleBooksApiKey };
       if (item.kind === "isbn") {
-        await resolveIsbn(admin, item.isbn, innerDeps);
+        await resolveIsbn(admin, item.isbn, innerDeps, item.ctx, item.fields);
       } else {
-        await resolveTitleAuthor(admin, item.title, item.author, innerDeps);
+        await resolveTitleAuthor(
+          admin,
+          item.title,
+          item.author,
+          innerDeps,
+          item.fields,
+        );
       }
     });
   }

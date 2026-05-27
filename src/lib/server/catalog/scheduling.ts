@@ -53,9 +53,26 @@ export type CatalogResolveWork =
  * `runInBackground` (see `wait-until.ts`). Callers never see a thrown
  * resolve failure — the cold-miss work is best-effort.
  */
+/**
+ * Optional behavior overrides for `scheduleCatalogResolveIfAllowed`.
+ */
+export interface ScheduleOpts {
+  /**
+   * When true, skip the per-item `safeLimit(catalogUserLimiter, userId)`
+   * check entirely. Per-source limiters (OpenLibrary, GoogleBooks,
+   * iTunes) still apply — those are the upstream-protection budgets.
+   *
+   * Only cron-driven callers using `SERVICE_USER_ID` set this; a 100-row
+   * replay batch would otherwise be capped at the 10/min per-user limit.
+   * Default `false`.
+   */
+  bypassUserLimit?: boolean;
+}
+
 export async function scheduleCatalogResolveIfAllowed(
   userId: string,
   work: CatalogResolveWork[],
+  opts: ScheduleOpts = {},
 ): Promise<void> {
   if (work.length === 0) return;
   const admin = createAdminClient();
@@ -68,8 +85,10 @@ export async function scheduleCatalogResolveIfAllowed(
   const googleBooksApiKey = privateEnv.GOOGLE_BOOKS_API_KEY;
 
   for (const item of work) {
-    const outcome = await safeLimit(catalogUserLimiter, userId);
-    if (outcome.kind !== "ok" || !outcome.result.success) break;
+    if (!opts.bypassUserLimit) {
+      const outcome = await safeLimit(catalogUserLimiter, userId);
+      if (outcome.kind !== "ok" || !outcome.result.success) break;
+    }
     runInBackground(async () => {
       const mutex = await mutexPromise;
       const innerDeps = { rateLimiters, mutex, googleBooksApiKey };

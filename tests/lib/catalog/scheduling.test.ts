@@ -41,16 +41,24 @@ vi.mock("$lib/server/ratelimit", async (importOriginal) => {
   };
 });
 
-const resolveIsbnSpy = vi.fn(async () => ({
-  cached: false,
-  rateLimited: false,
-  row: {},
-}));
-const resolveTitleAuthorSpy = vi.fn(async () => ({
-  cached: false,
-  rateLimited: false,
-  row: {},
-}));
+const resolveIsbnSpy = vi.fn(
+  async (
+    _supabase: unknown,
+    _isbn: string,
+    _deps: unknown,
+    _ctx?: { title?: string; author?: string },
+    _fields?: string[],
+  ) => ({ cached: false, rateLimited: false, row: {} }),
+);
+const resolveTitleAuthorSpy = vi.fn(
+  async (
+    _supabase: unknown,
+    _title: string,
+    _author: string,
+    _deps: unknown,
+    _fields?: string[],
+  ) => ({ cached: false, rateLimited: false, row: {} }),
+);
 vi.mock("$lib/server/catalog/fetcher", () => ({
   resolveIsbn: resolveIsbnSpy,
   resolveTitleAuthor: resolveTitleAuthorSpy,

@@ -183,4 +183,40 @@ describe("walkChain", () => {
       fail_reason: "exhausted",
     });
   });
+
+  it("leg that throws becomes a transient outcome, walker continues", async () => {
+    const result = await walkChain<string>(
+      {
+        field: "description",
+        legs: [
+          async () => {
+            throw new Error("upstream payload shape regression");
+          },
+          async () =>
+            ({
+              kind: "no_data",
+              provider: "google_books",
+            }) as LegOutcome<string>,
+        ],
+      },
+      ctx,
+    );
+    expect(result.fail_reason).toBe("transient_error");
+  });
+
+  it("leg that throws stays caught even when no later leg succeeds", async () => {
+    const result = await walkChain<string>(
+      {
+        field: "description",
+        legs: [
+          async () => {
+            throw new Error("boom");
+          },
+        ],
+      },
+      ctx,
+    );
+    expect(result.fail_reason).toBe("transient_error");
+    expect(result.value).toBeNull();
+  });
 });

@@ -54,13 +54,25 @@ export interface ChainResult<T> {
 // negative outcomes feed into `aggregate()` to derive one FailReason.
 // Empty `legs` returns `exhausted` so callers can skip the walker pass
 // without a special case at the call site.
+//
+// Throws from a leg are caught and converted into a `transient` outcome
+// so the walker contract ("always aggregate to a FailReason") holds even
+// when a classifier hits an unexpected upstream payload shape. Without
+// the catch, a throw would propagate through resolveIsbn and abort the
+// resolve before the pending-row upsert — leaving state unchanged and
+// the next pass re-throwing identically with no TTL clock running.
 export async function walkChain<T>(
   chain: FieldChain<T>,
   ctx: ResolveCtx,
 ): Promise<ChainResult<T>> {
   const outcomes: LegOutcome<T>[] = [];
   for (const leg of chain.legs) {
-    const outcome = await leg(ctx);
+    let outcome: LegOutcome<T>;
+    try {
+      outcome = await leg(ctx);
+    } catch (error) {
+      outcome = { kind: "transient", error };
+    }
     if (outcome.kind === "success") {
       return {
         value: outcome.value,

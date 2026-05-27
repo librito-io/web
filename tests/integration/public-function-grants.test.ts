@@ -120,6 +120,15 @@ const fns: Fn[] = [
     allowRoles: ["service_role"],
     rpcSlug: null,
   },
+  // catalog-fill-rate cron aggregate (2026-05-27 PR4). Service-role only;
+  // admin sparkline reads catalog_fill_rate_history via RLS, not this RPC.
+  {
+    name: "compute_catalog_fill_rate",
+    args: "",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: "compute_catalog_fill_rate",
+  },
 ];
 
 describe.skipIf(SKIP)("public function grants (issue #327)", () => {

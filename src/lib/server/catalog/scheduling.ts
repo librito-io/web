@@ -33,6 +33,22 @@ export type CatalogResolveWork =
     };
 
 /**
+ * Optional behavior overrides for `scheduleCatalogResolveIfAllowed`.
+ */
+export interface ScheduleOpts {
+  /**
+   * When true, skip the per-item `safeLimit(catalogUserLimiter, userId)`
+   * check entirely. Per-source limiters (OpenLibrary, GoogleBooks,
+   * iTunes) still apply — those are the upstream-protection budgets.
+   *
+   * Only cron-driven callers using `SERVICE_USER_ID` set this; a 100-row
+   * replay batch would otherwise be capped at the 10/min per-user limit.
+   * Default `false`.
+   */
+  bypassUserLimit?: boolean;
+}
+
+/**
  * Schedule per-user, mutex-deduped catalog resolves in the background.
  * Single entry point for the `safeLimit + createAdminClient +
  * getCatalogMutex + runInBackground` boilerplate previously triplicated
@@ -43,6 +59,10 @@ export type CatalogResolveWork =
  * tokens (not 1), and exits the loop as soon as the user's per-minute
  * budget is exhausted. Failed-open / failed-closed outcomes both bail —
  * fan-out volume during an Upstash blip is bounded.
+ *
+ * The cron-driven caller (`/api/cron/catalog-replay`) passes
+ * `{ bypassUserLimit: true }` against `SERVICE_USER_ID` so a 100-row
+ * batch isn't capped at 10/min; per-source limiters still apply.
  *
  * Mutex acquisition lives inside each `runInBackground` callback so the
  * request-handling path does not wait on the lazy Upstash singleton
@@ -56,6 +76,7 @@ export type CatalogResolveWork =
 export async function scheduleCatalogResolveIfAllowed(
   userId: string,
   work: CatalogResolveWork[],
+  opts: ScheduleOpts = {},
 ): Promise<void> {
   if (work.length === 0) return;
   const admin = createAdminClient();
@@ -68,8 +89,10 @@ export async function scheduleCatalogResolveIfAllowed(
   const googleBooksApiKey = privateEnv.GOOGLE_BOOKS_API_KEY;
 
   for (const item of work) {
-    const outcome = await safeLimit(catalogUserLimiter, userId);
-    if (outcome.kind !== "ok" || !outcome.result.success) break;
+    if (!opts.bypassUserLimit) {
+      const outcome = await safeLimit(catalogUserLimiter, userId);
+      if (outcome.kind !== "ok" || !outcome.result.success) break;
+    }
     runInBackground(async () => {
       const mutex = await mutexPromise;
       const innerDeps = { rateLimiters, mutex, googleBooksApiKey };

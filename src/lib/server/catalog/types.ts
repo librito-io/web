@@ -1,6 +1,7 @@
 // Upstream API response shapes — shared across catalog modules
 
 import type { Database } from "$lib/types/database";
+import type { FailReason } from "./tracked-fields";
 
 export interface OpenLibraryAuthor {
   name?: string;
@@ -250,13 +251,12 @@ export function hasCoverStorage<
 // retry in 1h, provider_disabled in 24h, provider_empty_field in 30d,
 // provider_no_data + exhausted in 90d. CHECK-constrained at the DB level
 // per migration 20260527000001.
-export type FailReason =
-  | "rate_limited"
-  | "transient_error"
-  | "provider_disabled"
-  | "provider_empty_field"
-  | "provider_no_data"
-  | "exhausted";
+//
+// Re-exported from `./tracked-fields` so the operator CLI under
+// `scripts/data/` can pull the canonical literal union via relative path
+// without dragging $lib resolution through tsx.
+export type { FailReason } from "./tracked-fields";
+export { FAIL_REASONS } from "./tracked-fields";
 
 // Provider provenance for textual fields (publisher / published_date /
 // subjects / page_count). Cover uses the narrower CoverSource union;
@@ -267,23 +267,11 @@ export type FieldProvider =
   | "itunes"
   | "manual";
 
-// Fields the per-field walker tracks state for.
-export type TrackedField =
-  | "cover"
-  | "description"
-  | "publisher"
-  | "published_date"
-  | "subjects"
-  | "page_count";
-
-export const TRACKED_FIELDS: TrackedField[] = [
-  "cover",
-  "description",
-  "publisher",
-  "published_date",
-  "subjects",
-  "page_count",
-];
+// Fields the per-field walker tracks state for. Re-exported from
+// `./tracked-fields` so the operator CLI under `scripts/data/` can pull
+// the canonical literal union without $lib resolution.
+export type { TrackedField } from "./tracked-fields";
+export { TRACKED_FIELDS } from "./tracked-fields";
 
 // Optional context the caller hands to resolveIsbn so the resolver can
 // reconcile a previously-TA-keyed row to ISBN on cold-resolve (PR3).

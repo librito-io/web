@@ -887,10 +887,11 @@ export async function resolveIsbn(
   rawIsbn: string,
   deps: ResolveDeps,
   ctx?: ResolveCtx,
-  // PR4 consumer: replay cron passes the subset of tracked fields whose
-  // TTL is up so the resolver only walks those legs. Currently wired
-  // through scheduling but not consumed by the walker yet (PR3 lands
-  // the param; PR4 lands the gating).
+  // Replay cron passes the subset of tracked fields whose TTL is up so
+  // the resolver could skip the per-field shouldAttempt evaluations.
+  // Param threaded through but not consumed yet — shouldAttempt + the
+  // SQL TTL ladder already produce equivalent behavior, so this is a
+  // perf optimization rather than a correctness gate. Tracked in #439.
   _fields?: TrackedField[],
 ): Promise<ResolveResult> {
   const isbn = canonicalizeIsbn(rawIsbn);
@@ -1390,7 +1391,8 @@ export async function resolveTitleAuthor(
   title: string,
   author: string,
   deps: ResolveDeps,
-  // PR4 consumer; see resolveIsbn for rationale.
+  // Replay-cron field-scoping param; see resolveIsbn for rationale.
+  // Optimization tracked in #439 — not consumed yet.
   _fields?: TrackedField[],
 ): Promise<ResolveResult> {
   const key = normalizeTitleAuthor(title, author);

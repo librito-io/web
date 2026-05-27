@@ -39,10 +39,7 @@ describe.skipIf(!process.env.INTEGRATION)(
       const { data: row } = await admin
         .from("book_catalog")
         .select(
-          "description, description_provider, description_attempted_at, " +
-            "description_fail_reason, description_attempts, " +
-            "publisher, publisher_attempted_at, publisher_fail_reason, publisher_attempts, " +
-            "subjects, subjects_provider, subjects_attempted_at, subjects_attempts",
+          "description, description_provider, description_attempted_at, description_fail_reason, description_attempts, publisher, publisher_attempted_at, publisher_fail_reason, publisher_attempts, subjects, subjects_provider, subjects_attempted_at, subjects_attempts",
         )
         .eq("isbn", "9780000000300")
         .single();
@@ -84,8 +81,7 @@ describe.skipIf(!process.env.INTEGRATION)(
       const { data: row } = await admin
         .from("book_catalog")
         .select(
-          "publisher, publisher_provider, publisher_attempted_at, publisher_attempts, " +
-            "description, description_provider, description_attempted_at, description_attempts",
+          "publisher, publisher_provider, publisher_attempted_at, publisher_attempts, description, description_provider, description_attempted_at, description_attempts",
         )
         .eq("isbn", "9780000000301")
         .single();
@@ -145,8 +141,7 @@ describe.skipIf(!process.env.INTEGRATION)(
       const { data: row } = await admin
         .from("book_catalog")
         .select(
-          "publisher, publisher_provider, publisher_attempts, " +
-            "subjects, subjects_provider, subjects_attempts",
+          "publisher, publisher_provider, publisher_attempts, subjects, subjects_provider, subjects_attempts",
         )
         .eq("normalized_title_author", "field-state-ta|author")
         .is("isbn", null)

@@ -1,6 +1,7 @@
 <script lang="ts">
   import "../app.css";
-  import { invalidate, goto } from "$app/navigation";
+  import { invalidate, goto, beforeNavigate } from "$app/navigation";
+  import { updated } from "$app/state";
   import { onMount } from "svelte";
   import * as Sentry from "@sentry/sveltekit";
   import Header from "$lib/components/Header.svelte";
@@ -22,6 +23,22 @@
       Sentry.setUser({ id: data.user.id });
     } else {
       Sentry.setUser(null);
+    }
+  });
+
+  // After a deploy, pages kept open reference chunk URLs from the
+  // previous build. The version poll configured in svelte.config.js
+  // flips `updated.current` to true on mismatch; here we force a full
+  // page navigation so the browser fetches the new chunk graph fresh
+  // instead of letting client-side routing lazy-import old chunks that
+  // may already have rotated on the Vercel alias. Without this hook,
+  // the residual symptom is Safari "Importing a module script failed"
+  // (issue #413, Sentry LIBRITO-WEB-C). `willUnload` skips browser-
+  // initiated full unloads; missing `to.url` means a non-navigable
+  // target (external/anchor edge cases).
+  beforeNavigate(({ willUnload, to }) => {
+    if (updated.current && !willUnload && to?.url) {
+      location.href = to.url.href;
     }
   });
 

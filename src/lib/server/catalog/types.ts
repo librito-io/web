@@ -81,7 +81,14 @@ export interface GoogleBooksItem {
 
 export type CoverStorageBackend = "cloudflare-images" | "supabase";
 export type CoverVariant = "thumbnail" | "medium" | "large" | "xlarge";
-export type DescriptionProvider = "openlibrary" | "google_books" | "manual";
+// 'itunes' added in the 2026-05-27 refit alongside the new third
+// description-chain leg. DB CHECK widened in migration 20260527000001;
+// resolver wiring lands in PR2.
+export type DescriptionProvider =
+  | "openlibrary"
+  | "google_books"
+  | "itunes"
+  | "manual";
 // "openlibrary_search_isbn" was emitted by an earlier OL-primary resolver
 // that distinguished data-document-derived from search-derived cover_ids.
 // The current chain (issue #199) unifies both paths under "openlibrary_isbn"
@@ -101,7 +108,10 @@ export type CoverSource =
   | "openlibrary_isbn"
   | "openlibrary_search_title"
   | "google_books"
-  | "itunes";
+  | "itunes"
+  // 'manual' added in the 2026-05-27 refit for operator-uploaded covers
+  // (PR5 admin route). DB CHECK widened in migration 20260527000001.
+  | "manual";
 
 export interface CatalogMetadata {
   title?: string;
@@ -200,4 +210,55 @@ export function hasCoverStorage<
   cover_storage_backend: CoverStorageBackend;
 } {
   return row.storage_path != null && row.cover_storage_backend != null;
+}
+
+// ─── Catalog refit (2026-05-27) shared types ───────────────────────────────
+//
+// Per-field state bucket literals. Drives the TTL ladder in
+// _field_replay_due() / shouldAttempt(): rate_limited + transient_error
+// retry in 1h, provider_disabled in 24h, provider_empty_field in 30d,
+// provider_no_data + exhausted in 90d. CHECK-constrained at the DB level
+// per migration 20260527000001.
+export type FailReason =
+  | "rate_limited"
+  | "transient_error"
+  | "provider_disabled"
+  | "provider_empty_field"
+  | "provider_no_data"
+  | "exhausted";
+
+// Provider provenance for textual fields (publisher / published_date /
+// subjects / page_count). Cover uses the narrower CoverSource union;
+// description uses DescriptionProvider (same four literals).
+export type FieldProvider =
+  | "openlibrary"
+  | "google_books"
+  | "itunes"
+  | "manual";
+
+// Fields the per-field walker tracks state for.
+export type TrackedField =
+  | "cover"
+  | "description"
+  | "publisher"
+  | "published_date"
+  | "subjects"
+  | "page_count";
+
+export const TRACKED_FIELDS: TrackedField[] = [
+  "cover",
+  "description",
+  "publisher",
+  "published_date",
+  "subjects",
+  "page_count",
+];
+
+// Optional context the caller hands to resolveIsbn so the resolver can
+// reconcile a previously-TA-keyed row to ISBN on cold-resolve (PR3).
+// Both fields are required together for promote-on-resolve to fire;
+// undefined ctx keeps the existing no-promote behavior.
+export interface ResolveCtx {
+  title?: string;
+  author?: string;
 }

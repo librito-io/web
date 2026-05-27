@@ -39,11 +39,17 @@ export type Database = {
           attempt_count: number
           author: string | null
           cover_aspect: number | null
+          cover_attempted_at: string | null
+          cover_attempts: number
           cover_bytes_per_pixel: number | null
+          cover_fail_reason: string | null
           cover_max_width: number | null
           cover_source: string | null
           cover_storage_backend: string | null
           description: string | null
+          description_attempted_at: string | null
+          description_attempts: number
+          description_fail_reason: string | null
           description_provider: string | null
           description_raw: string | null
           do_not_refetch_description: boolean
@@ -61,25 +67,47 @@ export type Database = {
           normalized_title_author: string | null
           openlibrary_cover_id: number | null
           page_count: number | null
+          page_count_attempted_at: string | null
+          page_count_attempts: number
+          page_count_fail_reason: string | null
+          page_count_provider: string | null
           pending_storage: boolean
           published_date: string | null
+          published_date_attempted_at: string | null
+          published_date_attempts: number
+          published_date_fail_reason: string | null
+          published_date_provider: string | null
           publisher: string | null
+          publisher_attempted_at: string | null
+          publisher_attempts: number
+          publisher_fail_reason: string | null
+          publisher_provider: string | null
           series_name: string | null
           series_position: number | null
           source_url: string | null
           storage_path: string | null
           subjects: string[] | null
+          subjects_attempted_at: string | null
+          subjects_attempts: number
+          subjects_fail_reason: string | null
+          subjects_provider: string | null
           title: string | null
         }
         Insert: {
           attempt_count?: number
           author?: string | null
           cover_aspect?: number | null
+          cover_attempted_at?: string | null
+          cover_attempts?: number
           cover_bytes_per_pixel?: number | null
+          cover_fail_reason?: string | null
           cover_max_width?: number | null
           cover_source?: string | null
           cover_storage_backend?: string | null
           description?: string | null
+          description_attempted_at?: string | null
+          description_attempts?: number
+          description_fail_reason?: string | null
           description_provider?: string | null
           description_raw?: string | null
           do_not_refetch_description?: boolean
@@ -97,25 +125,47 @@ export type Database = {
           normalized_title_author?: string | null
           openlibrary_cover_id?: number | null
           page_count?: number | null
+          page_count_attempted_at?: string | null
+          page_count_attempts?: number
+          page_count_fail_reason?: string | null
+          page_count_provider?: string | null
           pending_storage?: boolean
           published_date?: string | null
+          published_date_attempted_at?: string | null
+          published_date_attempts?: number
+          published_date_fail_reason?: string | null
+          published_date_provider?: string | null
           publisher?: string | null
+          publisher_attempted_at?: string | null
+          publisher_attempts?: number
+          publisher_fail_reason?: string | null
+          publisher_provider?: string | null
           series_name?: string | null
           series_position?: number | null
           source_url?: string | null
           storage_path?: string | null
           subjects?: string[] | null
+          subjects_attempted_at?: string | null
+          subjects_attempts?: number
+          subjects_fail_reason?: string | null
+          subjects_provider?: string | null
           title?: string | null
         }
         Update: {
           attempt_count?: number
           author?: string | null
           cover_aspect?: number | null
+          cover_attempted_at?: string | null
+          cover_attempts?: number
           cover_bytes_per_pixel?: number | null
+          cover_fail_reason?: string | null
           cover_max_width?: number | null
           cover_source?: string | null
           cover_storage_backend?: string | null
           description?: string | null
+          description_attempted_at?: string | null
+          description_attempts?: number
+          description_fail_reason?: string | null
           description_provider?: string | null
           description_raw?: string | null
           do_not_refetch_description?: boolean
@@ -133,14 +183,30 @@ export type Database = {
           normalized_title_author?: string | null
           openlibrary_cover_id?: number | null
           page_count?: number | null
+          page_count_attempted_at?: string | null
+          page_count_attempts?: number
+          page_count_fail_reason?: string | null
+          page_count_provider?: string | null
           pending_storage?: boolean
           published_date?: string | null
+          published_date_attempted_at?: string | null
+          published_date_attempts?: number
+          published_date_fail_reason?: string | null
+          published_date_provider?: string | null
           publisher?: string | null
+          publisher_attempted_at?: string | null
+          publisher_attempts?: number
+          publisher_fail_reason?: string | null
+          publisher_provider?: string | null
           series_name?: string | null
           series_position?: number | null
           source_url?: string | null
           storage_path?: string | null
           subjects?: string[] | null
+          subjects_attempted_at?: string | null
+          subjects_attempts?: number
+          subjects_fail_reason?: string | null
+          subjects_provider?: string | null
           title?: string | null
         }
         Relationships: []
@@ -260,6 +326,47 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      catalog_admin_actions: {
+        Row: {
+          action: string
+          admin_user_id: string
+          after_jsonb: Json | null
+          before_jsonb: Json | null
+          catalog_id: string
+          created_at: string
+          id: string
+          isbn: string | null
+        }
+        Insert: {
+          action: string
+          admin_user_id: string
+          after_jsonb?: Json | null
+          before_jsonb?: Json | null
+          catalog_id: string
+          created_at?: string
+          id?: string
+          isbn?: string | null
+        }
+        Update: {
+          action?: string
+          admin_user_id?: string
+          after_jsonb?: Json | null
+          before_jsonb?: Json | null
+          catalog_id?: string
+          created_at?: string
+          id?: string
+          isbn?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "catalog_admin_actions_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "book_catalog"
             referencedColumns: ["id"]
           },
         ]
@@ -460,16 +567,19 @@ export type Database = {
           created_at: string
           display_name: string | null
           id: string
+          is_admin: boolean
         }
         Insert: {
           created_at?: string
           display_name?: string | null
           id: string
+          is_admin?: boolean
         }
         Update: {
           created_at?: string
           display_name?: string | null
           id?: string
+          is_admin?: boolean
         }
         Relationships: []
       }
@@ -478,6 +588,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      _field_replay_due: {
+        Args: { p_attempted_at: string; p_fail_reason: string }
+        Returns: boolean
+      }
+      admin_apply_action: {
+        Args: {
+          p_action: string
+          p_admin_user_id: string
+          p_catalog_id: string
+          p_patch_jsonb: Json
+        }
+        Returns: string
+      }
       claim_pairing_atomic: {
         Args: {
           p_max_attempts: number
@@ -536,9 +659,28 @@ export type Database = {
           jobname: string
         }[]
       }
+      promote_ta_to_isbn: {
+        Args: { p_isbn: string; p_ta_key: string }
+        Returns: boolean
+      }
+      requeue_catalog_resolve: {
+        Args: { p_fields: string[]; p_id: string }
+        Returns: undefined
+      }
       rollback_claim_pairing: {
         Args: { p_pairing_id: string; p_user_id: string }
         Returns: undefined
+      }
+      select_replay_candidates: {
+        Args: { p_limit: number }
+        Returns: {
+          author: string
+          id: string
+          isbn: string
+          normalized_title_author: string
+          replay_fields: string[]
+          title: string
+        }[]
       }
       soft_delete_highlights: {
         Args: { p_now: string; p_rows: Json; p_user_id: string }

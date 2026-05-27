@@ -160,3 +160,58 @@ Bearer $CRON_SECRET`.
    "Validating the pdf.isAvailable filter" query above. If
    `gb_filtered` ratio drifts above ~30%, the filter may be too
    aggressive — review the bad bucket and consider relaxing.
+
+## Catalog replay (`catalog-replay.ts`)
+
+Operator CLI for ad-hoc requeues of `book_catalog` rows. Wraps the
+`requeue_catalog_resolve(id, fields[])` RPC behind predefined predicates
+— no free-form SQL on operator input (spec safety note).
+
+Set `PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the env
+(or pass `--supabase-url` / `--service-role-key`).
+
+### Modes (pick one)
+
+- `--isbns <comma-list>` — explicit list of canonical ISBN-13s.
+- `--missing <field>` — every row where the field's value column is NULL
+  (cover uses `storage_path IS NULL`). Bulk-mode cap: 500 rows per run.
+- `--by-fail-reason <reason>` — every row whose ANY tracked field's
+  `fail_reason` matches. Bulk-mode cap: 500 rows per run.
+
+All modes require `--fields <comma-list>`, the subset to re-resolve.
+Valid fields: `cover, description, publisher, published_date,
+subjects, page_count`. Valid fail reasons: `rate_limited,
+transient_error, provider_disabled, provider_empty_field,
+provider_no_data, exhausted`.
+
+Add `--dry-run` to print the candidate list without writing.
+
+### Examples
+
+```bash
+# Requeue description for a specific ISBN.
+tsx scripts/data/catalog-replay.ts \
+  --isbns 9781668082461 \
+  --fields description
+
+# Force-replay every rate-limited cover.
+tsx scripts/data/catalog-replay.ts \
+  --by-fail-reason rate_limited \
+  --fields cover
+
+# Dry-run a bulk missing-description query.
+tsx scripts/data/catalog-replay.ts \
+  --missing description \
+  --fields description \
+  --dry-run
+```
+
+After requeue, the next `catalog-replay` cron run (nightly, 04:00 UTC)
+picks the rows up. To trigger immediately:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" \
+  https://librito.io/api/cron/catalog-replay
+```
+
+Pre-launch: production URL is still the default Vercel domain — substitute as needed.

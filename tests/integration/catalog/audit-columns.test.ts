@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getAdmin, getSql, shutdown } from "./helpers";
+import { getAdmin, getSql, shutdown } from "../helpers";
 
 // Verifies the five audit columns added in 20260518000001
 // (`gb_pdf_available`, `gb_viewability`, `gb_image_link_tiers`,

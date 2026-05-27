@@ -3,6 +3,7 @@ import * as Sentry from "@sentry/sveltekit";
 import type { LimitResult, RateLimiter } from "$lib/server/ratelimit";
 import { canonicalizeIsbn } from "./isbn";
 import { stripMarketingCruft } from "./cleanup";
+import type { FetchOutcome } from "./chain";
 import {
   fetchOpenLibraryByIsbn,
   searchOpenLibraryByIsbn,
@@ -193,22 +194,41 @@ function memoizeGoogleBooksVolume(
 ): {
   fetch: () => Promise<GoogleBooksItem | null>;
   snapshot: () => GoogleBooksItem | null;
+  /**
+   * Last attempt's outcome. Null until `fetch()` has been called once. The
+   * walker's GB legs read this to distinguish rate_limited / transient /
+   * empty / ok — collapsing all four into `null` via `snapshot()` alone
+   * would lose the signal that drives the per-field TTL ladder.
+   * Refit 2026-05-27.
+   */
+  outcome: () => FetchOutcome<GoogleBooksItem> | null;
 } {
   let cached: GoogleBooksItem | null = null;
+  let last: FetchOutcome<GoogleBooksItem> | null = null;
   return {
     fetch: async () => {
       if (cached) return cached;
-      if (!(await tryAcquire(deps.rateLimiters.googleBooks))) return null;
+      if (!(await tryAcquire(deps.rateLimiters.googleBooks))) {
+        last = { kind: "rate_limited" };
+        return null;
+      }
       try {
         const v = await fetcher();
-        if (v) cached = v;
+        if (v) {
+          cached = v;
+          last = { kind: "ok", value: v };
+        } else {
+          last = { kind: "empty" };
+        }
         return v;
-      } catch {
+      } catch (err) {
         // Per-leg GB fetch fail → fall through to next consumer / source.
+        last = { kind: "transient", error: err };
         return null;
       }
     },
     snapshot: () => cached,
+    outcome: () => last,
   };
 }
 

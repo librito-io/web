@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getAdmin, getSql, shutdown } from "./helpers";
+import { getAdmin, getSql, shutdown } from "../helpers";
 
 // Regression guard for issue #214: `upsert_book_catalog_by_isbn` threw
 // SQLSTATE 22023 ("cannot extract elements from a scalar") whenever

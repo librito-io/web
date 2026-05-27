@@ -74,6 +74,52 @@ const fns: Fn[] = [
     allowRoles: ["service_role"],
     rpcSlug: null,
   },
+  // Catalog refit RPCs (2026-05-27). All service-role only — no
+  // PostgREST-exposed authenticated callers. _field_replay_due is the
+  // internal TTL helper consumed by select_replay_candidates; the rest
+  // are surface entry points (replay cron + admin route).
+  {
+    name: "_field_replay_due",
+    args: "timestamptz, text",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: null,
+  },
+  {
+    name: "select_replay_candidates",
+    args: "integer",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: "select_replay_candidates",
+  },
+  {
+    name: "promote_ta_to_isbn",
+    args: "text, text",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: "promote_ta_to_isbn",
+  },
+  {
+    name: "requeue_catalog_resolve",
+    args: "uuid, text[]",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: "requeue_catalog_resolve",
+  },
+  {
+    name: "admin_apply_action",
+    args: "uuid, uuid, text, jsonb",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: "admin_apply_action",
+  },
+  {
+    name: "profiles_prevent_is_admin_self_update",
+    args: "",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: null,
+  },
 ];
 
 describe.skipIf(SKIP)("public function grants (issue #327)", () => {

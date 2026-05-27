@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getAdmin, getSql, shutdown } from "./helpers";
+import { getAdmin, getSql, shutdown } from "../helpers";
 
 // Behavior-level guard: the cover_max_width migration (20260517000001) added
 // the column to book_catalog AND threaded it through both upsert RPCs. This

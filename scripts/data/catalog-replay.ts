@@ -1,8 +1,10 @@
 #!/usr/bin/env -S npx tsx
 //
 // Operator CLI for catalog row requeue. Wraps requeue_catalog_resolve(id,
-// fields[]) via service-role Supabase and (optionally) triggers the
-// nightly cron immediately so the operator doesn't wait until 04:00 UTC.
+// fields[]) via service-role Supabase. Print-only — the next nightly
+// catalog-replay cron picks the requeued rows up; the CLI does NOT
+// trigger the cron itself. The README + final log line shows the curl
+// recipe to force-fire it.
 //
 // Usage:
 //   tsx scripts/data/catalog-replay.ts --isbns 9780...,9781... --fields description,cover
@@ -19,34 +21,15 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { parseArgs } from "node:util";
+import {
+  TRACKED_FIELDS,
+  parseFieldsArg,
+  pickPredicateMode,
+  missingFieldColumn,
+  failReasonOrClause,
+} from "./catalog-replay-predicates";
 
-const TRACKED_FIELDS = [
-  "cover",
-  "description",
-  "publisher",
-  "published_date",
-  "subjects",
-  "page_count",
-] as const;
-type TrackedField = (typeof TRACKED_FIELDS)[number];
-
-const FAIL_REASONS = [
-  "rate_limited",
-  "transient_error",
-  "provider_disabled",
-  "provider_empty_field",
-  "provider_no_data",
-  "exhausted",
-] as const;
-type FailReason = (typeof FAIL_REASONS)[number];
-
-function isTrackedField(v: string): v is TrackedField {
-  return (TRACKED_FIELDS as readonly string[]).includes(v);
-}
-
-function isFailReason(v: string): v is FailReason {
-  return (FAIL_REASONS as readonly string[]).includes(v);
-}
+const BULK_MODE_LIMIT = 500;
 
 async function main(): Promise<void> {
   const { values } = parseArgs({
@@ -78,30 +61,13 @@ async function main(): Promise<void> {
       )}`,
     );
   }
-  const fields = values.fields.split(",").map((s) => s.trim());
-  for (const f of fields) {
-    if (!isTrackedField(f)) {
-      throw new Error(
-        `Unknown field "${f}". Valid: ${TRACKED_FIELDS.join(",")}`,
-      );
-    }
-  }
+  const fields = parseFieldsArg(values.fields);
 
-  const modes = [
-    values.isbns ? "isbns" : null,
-    values.missing ? "missing" : null,
-    values["by-fail-reason"] ? "by-fail-reason" : null,
-  ].filter(Boolean);
-  if (modes.length === 0) {
-    throw new Error(
-      "Pass one of --isbns <list>, --missing <field>, --by-fail-reason <reason>.",
-    );
-  }
-  if (modes.length > 1) {
-    throw new Error(
-      `Pass exactly one predicate mode; got --${modes.join(" and --")}.`,
-    );
-  }
+  const mode = pickPredicateMode({
+    isbns: values.isbns,
+    missing: values.missing,
+    byFailReason: values["by-fail-reason"],
+  });
 
   const admin = createClient(url, key, { auth: { persistSession: false } });
 
@@ -113,46 +79,29 @@ async function main(): Promise<void> {
   };
   let candidates: Candidate[];
 
-  if (values.isbns) {
-    const isbns = values.isbns
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+  if (mode.kind === "isbns") {
     const { data, error } = await admin
       .from("book_catalog")
       .select("id, isbn, title, author")
-      .in("isbn", isbns);
+      .in("isbn", mode.isbns);
     if (error) throw new Error(error.message);
     candidates = (data ?? []) as Candidate[];
-  } else if (values.missing) {
-    const field = values.missing;
-    if (!isTrackedField(field)) {
-      throw new Error(`--missing must be one of ${TRACKED_FIELDS.join(",")}`);
-    }
-    // Cover's value-presence discriminant is storage_path, not "cover".
-    const col = field === "cover" ? "storage_path" : field;
+  } else if (mode.kind === "missing") {
+    const col = missingFieldColumn(mode.field);
     const { data, error } = await admin
       .from("book_catalog")
       .select("id, isbn, title, author")
       .is(col, null)
-      .limit(500);
+      .limit(BULK_MODE_LIMIT);
     if (error) throw new Error(error.message);
     candidates = (data ?? []) as Candidate[];
   } else {
-    const reason = values["by-fail-reason"]!;
-    if (!isFailReason(reason)) {
-      throw new Error(
-        `--by-fail-reason must be one of ${FAIL_REASONS.join(",")}`,
-      );
-    }
-    const orClause = TRACKED_FIELDS.map(
-      (f) => `${f}_fail_reason.eq.${reason}`,
-    ).join(",");
+    const orClause = failReasonOrClause(mode.reason);
     const { data, error } = await admin
       .from("book_catalog")
       .select("id, isbn, title, author")
       .or(orClause)
-      .limit(500);
+      .limit(BULK_MODE_LIMIT);
     if (error) throw new Error(error.message);
     candidates = (data ?? []) as Candidate[];
   }

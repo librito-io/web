@@ -33,27 +33,6 @@ export type CatalogResolveWork =
     };
 
 /**
- * Schedule per-user, mutex-deduped catalog resolves in the background.
- * Single entry point for the `safeLimit + createAdminClient +
- * getCatalogMutex + runInBackground` boilerplate previously triplicated
- * across the feed enrichment path and the book detail loader.
- *
- * Per-item `safeLimit(catalogUserLimiter, userId)` with break-on-deny
- * preserves the issue #110 semantics: a 50-item fan-out consumes 50
- * tokens (not 1), and exits the loop as soon as the user's per-minute
- * budget is exhausted. Failed-open / failed-closed outcomes both bail —
- * fan-out volume during an Upstash blip is bounded.
- *
- * Mutex acquisition lives inside each `runInBackground` callback so the
- * request-handling path does not wait on the lazy Upstash singleton
- * init; the shared `mutexPromise` is reused across the cohort within
- * one helper invocation.
- *
- * Cosmetic enrichment posture: all errors are absorbed inside
- * `runInBackground` (see `wait-until.ts`). Callers never see a thrown
- * resolve failure — the cold-miss work is best-effort.
- */
-/**
  * Optional behavior overrides for `scheduleCatalogResolveIfAllowed`.
  */
 export interface ScheduleOpts {
@@ -69,6 +48,31 @@ export interface ScheduleOpts {
   bypassUserLimit?: boolean;
 }
 
+/**
+ * Schedule per-user, mutex-deduped catalog resolves in the background.
+ * Single entry point for the `safeLimit + createAdminClient +
+ * getCatalogMutex + runInBackground` boilerplate previously triplicated
+ * across the feed enrichment path and the book detail loader.
+ *
+ * Per-item `safeLimit(catalogUserLimiter, userId)` with break-on-deny
+ * preserves the issue #110 semantics: a 50-item fan-out consumes 50
+ * tokens (not 1), and exits the loop as soon as the user's per-minute
+ * budget is exhausted. Failed-open / failed-closed outcomes both bail —
+ * fan-out volume during an Upstash blip is bounded.
+ *
+ * The cron-driven caller (`/api/cron/catalog-replay`) passes
+ * `{ bypassUserLimit: true }` against `SERVICE_USER_ID` so a 100-row
+ * batch isn't capped at 10/min; per-source limiters still apply.
+ *
+ * Mutex acquisition lives inside each `runInBackground` callback so the
+ * request-handling path does not wait on the lazy Upstash singleton
+ * init; the shared `mutexPromise` is reused across the cohort within
+ * one helper invocation.
+ *
+ * Cosmetic enrichment posture: all errors are absorbed inside
+ * `runInBackground` (see `wait-until.ts`). Callers never see a thrown
+ * resolve failure — the cold-miss work is best-effort.
+ */
 export async function scheduleCatalogResolveIfAllowed(
   userId: string,
   work: CatalogResolveWork[],

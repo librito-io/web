@@ -4,6 +4,19 @@ import { getAdmin, shutdown } from "../helpers";
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
+// The shared integration getAdmin() returns an un-typed supabase-js
+// client (no Database generic), so RPC return shape doesn't flow into
+// .find() callbacks. Mirror the generated select_replay_candidates row
+// here so the test assertions are self-checked rather than implicit-any.
+interface ReplayCandidate {
+  id: string;
+  isbn: string | null;
+  normalized_title_author: string | null;
+  title: string | null;
+  author: string | null;
+  replay_fields: string[];
+}
+
 /**
  * Seed a row with every per-field attempted_at populated to a fresh
  * timestamp + fail_reason rate_limited. That parks all six fields'
@@ -69,12 +82,16 @@ describe.skipIf(!process.env.INTEGRATION)(
       );
       expect(error).toBeNull();
 
-      const due = (rows ?? []).find((r) => r.isbn === "9780000000010");
+      const due = (rows as ReplayCandidate[] | null)?.find(
+        (r) => r.isbn === "9780000000010",
+      );
       expect(due?.replay_fields).toContain("description");
 
       // Row at 30min has every field parked and no field is TTL-up, so it
       // doesn't surface at all.
-      const notDue = (rows ?? []).find((r) => r.isbn === "9780000000011");
+      const notDue = (rows as ReplayCandidate[] | null)?.find(
+        (r) => r.isbn === "9780000000011",
+      );
       expect(notDue).toBeUndefined();
     });
 
@@ -98,10 +115,14 @@ describe.skipIf(!process.env.INTEGRATION)(
       const { data: rows } = await admin.rpc("select_replay_candidates", {
         p_limit: 100,
       });
-      const due = (rows ?? []).find((r) => r.isbn === "9780000000020");
+      const due = (rows as ReplayCandidate[] | null)?.find(
+        (r) => r.isbn === "9780000000020",
+      );
       expect(due?.replay_fields).toContain("description");
 
-      const notDue = (rows ?? []).find((r) => r.isbn === "9780000000021");
+      const notDue = (rows as ReplayCandidate[] | null)?.find(
+        (r) => r.isbn === "9780000000021",
+      );
       expect(notDue).toBeUndefined();
     });
 
@@ -119,7 +140,9 @@ describe.skipIf(!process.env.INTEGRATION)(
       const { data: rows } = await admin.rpc("select_replay_candidates", {
         p_limit: 100,
       });
-      const found = (rows ?? []).find((r) => r.isbn === "9780000000030");
+      const found = (rows as ReplayCandidate[] | null)?.find(
+        (r) => r.isbn === "9780000000030",
+      );
       expect(found?.replay_fields).toEqual(["description"]);
     });
 
@@ -142,7 +165,9 @@ describe.skipIf(!process.env.INTEGRATION)(
       const { data: rows } = await admin.rpc("select_replay_candidates", {
         p_limit: 100,
       });
-      const row = (rows ?? []).find((r) => r.isbn === "9780000000040");
+      const row = (rows as ReplayCandidate[] | null)?.find(
+        (r) => r.isbn === "9780000000040",
+      );
       expect(row?.replay_fields).toEqual(
         expect.arrayContaining(["description", "subjects"]),
       );

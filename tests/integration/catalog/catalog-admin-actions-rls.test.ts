@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import type { TransactionSql } from "postgres";
 import {
   getAdmin,
   getSql,
@@ -15,7 +16,7 @@ import {
  */
 async function asAuthUser<T>(
   userId: string,
-  work: (txn: ReturnType<typeof getSql>) => Promise<T> | T,
+  work: (txn: TransactionSql) => Promise<T> | T,
 ): Promise<T> {
   return getSql().begin(async (txn) => {
     await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({

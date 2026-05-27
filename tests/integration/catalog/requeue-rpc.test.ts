@@ -43,9 +43,7 @@ describe.skipIf(!process.env.INTEGRATION)("requeue_catalog_resolve RPC", () => {
     const { data: after } = await admin
       .from("book_catalog")
       .select(
-        "description, description_raw, description_provider, " +
-          "description_attempted_at, description_fail_reason, " +
-          "do_not_refetch_description, publisher, publisher_provider",
+        "description, description_raw, description_provider, description_attempted_at, description_fail_reason, do_not_refetch_description, publisher, publisher_provider",
       )
       .eq("id", rowId)
       .single();
@@ -82,8 +80,7 @@ describe.skipIf(!process.env.INTEGRATION)("requeue_catalog_resolve RPC", () => {
     const { data: after } = await admin
       .from("book_catalog")
       .select(
-        "storage_path, cover_storage_backend, image_sha256, " +
-          "cover_max_width, cover_source, pending_storage",
+        "storage_path, cover_storage_backend, image_sha256, cover_max_width, cover_source, pending_storage",
       )
       .eq("id", rowId)
       .single();

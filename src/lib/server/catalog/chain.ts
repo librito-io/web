@@ -26,6 +26,18 @@ export type LegOutcome<T> =
   | { kind: "disabled" }
   | { kind: "no_data"; provider: FieldProvider };
 
+// Outcome of one upstream fetch attempt, surfaced into leg classifiers so
+// they can distinguish "rate_limited" / "transient" / "empty" / "ok"
+// without inspecting raw HTTP errors. Resolver populates this once per
+// provider per resolve; multiple fields downstream consume the same
+// outcome (e.g. GB description, GB publisher, GB page_count all read from
+// the same `FetchOutcome<GoogleBooksItem>`).
+export type FetchOutcome<T> =
+  | { kind: "ok"; value: T }
+  | { kind: "empty" }
+  | { kind: "rate_limited" }
+  | { kind: "transient"; error: unknown };
+
 export interface FieldChain<T> {
   field: TrackedField;
   legs: Array<(ctx: ResolveCtx) => Promise<LegOutcome<T>>>;

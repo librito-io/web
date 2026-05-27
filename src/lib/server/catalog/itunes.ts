@@ -10,6 +10,10 @@ export interface ItunesResult {
   artworkUrl60?: string;
   artworkUrl100?: string;
   wrapperType?: string;
+  // iTunes lookup returns description text for audiobook / ebook wrapperTypes
+  // (sometimes HTML-escaped). Consumed by the description chain's iTunes leg
+  // (refit 2026-05-27); cover chain doesn't read it.
+  description?: string;
 }
 
 const COVER_MIN_BYTES = 1024;

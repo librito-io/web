@@ -204,6 +204,23 @@ async function selectBySha(
   };
 }
 
+// Cover isn't a walker field — derive its fail_reason from the cover
+// result + the gb memo outcome the cover chain consulted. Shared by
+// resolveIsbn and resolveTitleAuthor so a future bucket addition (e.g.
+// "disabled") lands in one place. Returns null when no attempt was made
+// (shouldAttempt was false) OR when the cover succeeded — caller writes
+// null fail_reason in both cases.
+function coverFailReasonFromGb(
+  coverShouldAttempt: boolean,
+  cover: CoverResolution | null,
+  gbOutcome: FetchOutcome<GoogleBooksItem> | null,
+): FailReason | null {
+  if (!coverShouldAttempt || cover) return null;
+  if (gbOutcome?.kind === "rate_limited") return "rate_limited";
+  if (gbOutcome?.kind === "transient") return "transient_error";
+  return "exhausted";
+}
+
 // Description-side iTunes lookup. Distinct from the cover chain's iTunes
 // fetch — they each burn their own iTunes token per resolve. Memoization
 // across both is deferred (follow-up: separate issue for the deeper
@@ -373,7 +390,7 @@ export const KNOWN_GB_PLACEHOLDER_SHAS = new Set<string>([
 
 /** Audit metadata captured per resolve, regardless of which source won.
  *  See plan 2026-05-18 Task 9. */
-interface ResolveAuditFields {
+export interface ResolveAuditFields {
   gb_pdf_available: boolean | null;
   gb_viewability: string | null;
   gb_image_link_tiers: string[] | null;
@@ -464,7 +481,7 @@ function computeAuditFields(
   };
 }
 
-interface CoverResolution {
+export interface CoverResolution {
   bytes: Uint8Array;
   mime: string;
   source: CoverSource;
@@ -979,13 +996,21 @@ export async function resolveIsbn(
     if (shouldAttempt("description", existing ?? {}, now)) {
       const doNotRefetch = existing?.do_not_refetch_description ?? false;
       if (doNotRefetch) {
-        // Takedown flag preserved. Skip the walker; don't write
-        // description state — leaves attempted_at unchanged so the row
-        // stays in the same observable state as before the refit.
+        // Takedown flag preserved. Walker skipped — but state IS written
+        // so the 90-day exhausted TTL gates re-attempts and viewer-load
+        // log spam is bounded to one per quarter, not every render.
+        // catalog_description_skipped_takedown_flag warn surfaces the
+        // first carryover per resolve so audit can spot a stale flag
+        // (issue #206).
         logger().warn(
           { event: "catalog_description_skipped_takedown_flag", isbn },
           "catalog_description_skipped_takedown_flag",
         );
+        fieldResults.description = {
+          value: null,
+          provider: null,
+          fail_reason: "exhausted",
+        };
       } else {
         fieldResults.description = await walkChain<string>(
           {
@@ -1070,15 +1095,12 @@ export async function resolveIsbn(
       metadata.google_volume_id = gbMemo.snapshot()!.id;
     }
 
-    // 8. Cover provider + fail_reason classification (cover isn't a
-    //    walker field — derive from cover result + gb outcome).
-    let coverFailReason: FailReason | null = null;
-    if (coverShouldAttempt && !cover) {
-      const gbOut = gbMemo.outcome();
-      if (gbOut?.kind === "rate_limited") coverFailReason = "rate_limited";
-      else if (gbOut?.kind === "transient") coverFailReason = "transient_error";
-      else coverFailReason = "exhausted";
-    }
+    // 8. Cover provider + fail_reason classification.
+    const coverFailReason = coverFailReasonFromGb(
+      coverShouldAttempt,
+      cover,
+      gbMemo.outcome(),
+    );
 
     const audit = computeAuditFields(gbMemo.snapshot(), cover);
 
@@ -1169,7 +1191,7 @@ export async function resolveIsbn(
 // Cover state writes follow the dual-shape rule (see resolveIsbn step 9
 // comment): when cover === null, attempted_at + fail_reason land here;
 // when cover !== null, the finalize UPDATE writes them post-upload.
-interface BuildPendingRowArgs {
+export interface BuildPendingRowArgs {
   isbn: string | null;
   normalizedTitleAuthor: string | null;
   cover: CoverResolution | null;
@@ -1183,7 +1205,9 @@ interface BuildPendingRowArgs {
   now: Date;
 }
 
-function buildPendingRow(args: BuildPendingRowArgs): Record<string, unknown> {
+export function buildPendingRow(
+  args: BuildPendingRowArgs,
+): Record<string, unknown> {
   const {
     isbn,
     normalizedTitleAuthor,
@@ -1444,6 +1468,7 @@ export async function resolveTitleAuthor(
     if (shouldAttempt("description", existing ?? {}, now)) {
       const doNotRefetch = existing?.do_not_refetch_description ?? false;
       if (doNotRefetch) {
+        // See resolveIsbn for the rationale on writing exhausted state.
         logger().warn(
           {
             event: "catalog_description_skipped_takedown_flag",
@@ -1452,6 +1477,11 @@ export async function resolveTitleAuthor(
           },
           "catalog_description_skipped_takedown_flag",
         );
+        fieldResults.description = {
+          value: null,
+          provider: null,
+          fail_reason: "exhausted",
+        };
       } else {
         fieldResults.description = await walkChain<string>(
           {
@@ -1525,13 +1555,11 @@ export async function resolveTitleAuthor(
       metadata.google_volume_id = gbMemo.snapshot()!.id;
     }
 
-    let coverFailReason: FailReason | null = null;
-    if (coverShouldAttempt && !cover) {
-      const gbOut = gbMemo.outcome();
-      if (gbOut?.kind === "rate_limited") coverFailReason = "rate_limited";
-      else if (gbOut?.kind === "transient") coverFailReason = "transient_error";
-      else coverFailReason = "exhausted";
-    }
+    const coverFailReason = coverFailReasonFromGb(
+      coverShouldAttempt,
+      cover,
+      gbMemo.outcome(),
+    );
 
     const audit = computeAuditFields(gbMemo.snapshot(), cover);
     const pending = cover !== null;

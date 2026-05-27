@@ -82,6 +82,10 @@ function deps(overrides: Partial<Parameters<typeof resolveIsbn>[2]> = {}) {
         image_sha256: "deadbeef".repeat(8),
       })),
     },
+    // googleBooksApiKey present so the walker's GB legs aren't gated as
+    // `disabled` (refit 2026-05-27). Tests asserting the no-key path
+    // should override to undefined explicitly.
+    googleBooksApiKey: "test-api-key",
     now: () => new Date("2026-05-02T00:00:00Z"),
     ...overrides,
   };
@@ -111,14 +115,90 @@ function makeDepsWithAllUpstreamFailing() {
   });
 }
 
-/** Stale row: past the 30-day negative-cache TTL. */
+/** Stale row: past the 90-day per-field TTL for provider_no_data. */
 function staleNegativeRow(extra: Record<string, unknown> = {}) {
+  // 100 days before "now" (2026-05-02) → exceeds the 90-day TTL for
+  // provider_no_data / exhausted; every field is due for re-attempt.
+  const stale = "2026-01-22T00:00:00Z";
   return {
     isbn: "9780743273565",
     storage_path: null,
     description: null,
-    last_attempted_at: "2026-03-01T00:00:00Z", // >30d before "now" (2026-05-02)
+    publisher: null,
+    published_date: null,
+    subjects: null,
+    page_count: null,
+    last_attempted_at: stale,
     attempt_count: 1,
+    cover_attempted_at: stale,
+    cover_fail_reason: "provider_no_data",
+    description_attempted_at: stale,
+    description_fail_reason: "provider_no_data",
+    publisher_attempted_at: stale,
+    publisher_fail_reason: "provider_no_data",
+    published_date_attempted_at: stale,
+    published_date_fail_reason: "provider_no_data",
+    subjects_attempted_at: stale,
+    subjects_fail_reason: "provider_no_data",
+    page_count_attempted_at: stale,
+    page_count_fail_reason: "provider_no_data",
+    ...extra,
+  };
+}
+
+/**
+ * Fully-cached row: every tracked field populated. shouldAttempt returns
+ * false for every field; cache short-circuit returns cached=true without
+ * any upstream calls. Refit 2026-05-27.
+ */
+function fullyCachedRow(extra: Record<string, unknown> = {}) {
+  return {
+    isbn: "9780743273565",
+    storage_path: "x/y.jpg",
+    cover_storage_backend: "supabase",
+    title: "Gatsby",
+    description: "filled",
+    publisher: "filled",
+    published_date: "2020",
+    subjects: ["fiction"],
+    page_count: 200,
+    ...extra,
+  };
+}
+
+/**
+ * Fresh-negative row: cover null + every tracked field fail_reason set
+ * within the 90-day TTL window. shouldAttempt returns false for every
+ * field; cache short-circuit returns cached=true.
+ */
+function freshNegativeRow(
+  isbn = "9780000000026",
+  extra: Record<string, unknown> = {},
+) {
+  const recent = "2026-04-25T00:00:00Z"; // 7 days before fixture "now"
+  return {
+    isbn,
+    storage_path: null,
+    description: null,
+    publisher: null,
+    published_date: null,
+    subjects: null,
+    page_count: null,
+    pending_storage: false,
+    last_attempted_at: recent,
+    attempt_count: 1,
+    cover_attempted_at: recent,
+    cover_fail_reason: "provider_no_data",
+    description_attempted_at: recent,
+    description_fail_reason: "provider_no_data",
+    publisher_attempted_at: recent,
+    publisher_fail_reason: "provider_no_data",
+    published_date_attempted_at: recent,
+    published_date_fail_reason: "provider_no_data",
+    subjects_attempted_at: recent,
+    subjects_fail_reason: "provider_no_data",
+    page_count_attempted_at: recent,
+    page_count_fail_reason: "provider_no_data",
     ...extra,
   };
 }
@@ -194,9 +274,7 @@ describe("resolveIsbn", () => {
   it("returns existing positive cache row without fetching", async () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", {
-      data: [
-        { isbn: "9780743273565", storage_path: "x/y.jpg", title: "Gatsby" },
-      ],
+      data: [fullyCachedRow()],
       error: null,
     });
     const d = deps();
@@ -208,13 +286,7 @@ describe("resolveIsbn", () => {
   it("returns existing negative cache row when within TTL", async () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", {
-      data: [
-        {
-          isbn: "9780743273565",
-          storage_path: null,
-          last_attempted_at: "2026-04-25T00:00:00Z", // 7 days ago
-        },
-      ],
+      data: [freshNegativeRow("9780743273565")],
       error: null,
     });
     const d = deps();
@@ -227,13 +299,7 @@ describe("resolveIsbn", () => {
   it("retries when negative cache exceeds TTL", async () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", {
-      data: [
-        {
-          isbn: "9780743273565",
-          storage_path: null,
-          last_attempted_at: "2026-03-01T00:00:00Z", // > 30d ago
-        },
-      ],
+      data: [staleNegativeRow()],
       error: null,
     });
     supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
@@ -302,15 +368,7 @@ describe("resolveIsbn", () => {
   it("still short-circuits on non-pending fresh-negative row", async () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", {
-      data: [
-        {
-          isbn: "9780000000026",
-          storage_path: null,
-          pending_storage: false,
-          last_attempted_at: new Date().toISOString(),
-          attempt_count: 1,
-        },
-      ],
+      data: [freshNegativeRow("9780000000026")],
       error: null,
     });
 
@@ -334,11 +392,10 @@ describe("resolveTitleAuthor", () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", {
       data: [
-        {
+        fullyCachedRow({
           isbn: null,
           normalized_title_author: "the great gatsby|f scott fitzgerald",
-          storage_path: "x/y.jpg",
-        },
+        }),
       ],
       error: null,
     });
@@ -385,14 +442,10 @@ describe("resolveTitleAuthor", () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", {
       data: [
-        {
+        freshNegativeRow(undefined, {
           isbn: null,
           normalized_title_author: "synth title|synth author",
-          storage_path: null,
-          pending_storage: false,
-          last_attempted_at: new Date().toISOString(),
-          attempt_count: 1,
-        },
+        }),
       ],
       error: null,
     });
@@ -664,11 +717,17 @@ describe("resolveIsbn – resolver chain cover", () => {
     expect(result.row.cover_max_width).toBeGreaterThanOrEqual(1200);
     expect(result.row.storage_path).not.toBeNull();
 
-    // iTunes should not have been called
-    const itunesCalls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (args: unknown[]) => String(args[0]).includes("itunes.apple.com"),
+    // iTunes cover bytes endpoint should not have been called — GB won
+    // the cover chain at premium tier. Refit 2026-05-27 added an iTunes
+    // description leg that DOES call the lookup endpoint when GB/OL
+    // didn't supply description, so we filter the cover-bytes host
+    // separately rather than asserting against the iTunes API root.
+    const itunesCoverBytesCalls = (
+      fetchFn as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((args: unknown[]) =>
+      String(args[0]).includes("mzstatic.com"),
     );
-    expect(itunesCalls).toHaveLength(0);
+    expect(itunesCoverBytesCalls).toHaveLength(0);
   });
 
   it("GB low-res falls through to iTunes; iTunes 1400+ wins", async () => {
@@ -2835,48 +2894,13 @@ describe("enrichDescriptionWithGoogleBooks – skip-point logs (#206)", () => {
     expect(skipLog?.isbn).toBe("9780743273565");
   });
 
-  it("warns when GB volume fetch returns null", async () => {
-    const supabase = coldMissSupabase();
-    const fetchFn = baseFetchFn((url) =>
-      url.includes("googleapis.com/books")
-        ? new Response(
-            JSON.stringify({ kind: "books#volumes", totalItems: 0 }),
-            {
-              status: 200,
-              headers: { "content-type": "application/json" },
-            },
-          )
-        : null,
-    );
-    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
-
-    const skipLog = logWrites.find(
-      (l) => l.event === "catalog_description_no_gb_volume",
-    );
-    expect(skipLog).toBeDefined();
-    expect(skipLog?.level).toBe("warn");
-    expect(skipLog?.isbn).toBe("9780743273565");
-  });
-
-  it("logs info when GB volume exists but has no description text", async () => {
-    const supabase = coldMissSupabase();
-    const fetchFn = baseFetchFn((url) =>
-      url.includes("googleapis.com/books")
-        ? new Response(gbVolumesResponse({}, {}), {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          })
-        : null,
-    );
-    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
-
-    const skipLog = logWrites.find(
-      (l) => l.event === "catalog_description_gb_volume_no_description",
-    );
-    expect(skipLog).toBeDefined();
-    expect(skipLog?.level).toBe("info");
-    expect(skipLog?.google_volume_id).toBe("gbid1");
-  });
+  // Removed (refit 2026-05-27): catalog_description_no_gb_volume +
+  // catalog_description_gb_volume_no_description log events. The walker
+  // surfaces the same signal via the `description_fail_reason` column
+  // (provider_no_data / provider_empty_field) — the DB is the queryable
+  // source of truth. The takedown-flag log above stays because that's
+  // the only path the walker explicitly logs (carryover surprise per
+  // issue #206).
 });
 
 describe("resolveIsbn – Sentry suspect-cover warning (Task 10)", () => {

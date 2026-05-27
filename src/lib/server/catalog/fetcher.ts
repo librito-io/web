@@ -2,8 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/sveltekit";
 import type { LimitResult, RateLimiter } from "$lib/server/ratelimit";
 import { canonicalizeIsbn } from "./isbn";
-import { stripMarketingCruft } from "./cleanup";
-import type { FetchOutcome } from "./chain";
 import {
   fetchOpenLibraryByIsbn,
   searchOpenLibraryByIsbn,
@@ -18,21 +16,43 @@ import {
   fetchGoogleBooksCoverBytes,
   selectBestGoogleImageLink,
 } from "./googlebooks";
-import {
-  extractOpenLibraryMetadata,
-  extractGoogleBooksMetadata,
-} from "./extract";
+import { extractOpenLibraryMetadata } from "./extract";
 import { normalizeTitleAuthor } from "./title-author";
 import {
   hasCoverStorage,
+  TRACKED_FIELDS,
   type BookCatalogRowFields,
   type CatalogMetadata,
   type CoverSource,
   type CoverStorageBackend,
+  type FailReason,
+  type FieldProvider,
   type GoogleBooksItem,
   type OpenLibraryDataDoc,
   type OpenLibraryWork,
+  type ResolveCtx,
+  type TrackedField,
 } from "./types";
+import {
+  shouldAttempt,
+  walkChain,
+  type ChainResult,
+  type FetchOutcome,
+} from "./chain";
+import {
+  classifyDescriptionFromGoogleBooks,
+  classifyDescriptionFromItunes,
+  classifyDescriptionFromOpenLibrary,
+  classifyPageCountFromGoogleBooks,
+  classifyPageCountFromOpenLibrary,
+  classifyPublishedDateFromGoogleBooks,
+  classifyPublishedDateFromOpenLibrary,
+  classifyPublisherFromGoogleBooks,
+  classifyPublisherFromOpenLibrary,
+  classifySubjectsFromGoogleBooks,
+  classifySubjectsFromOpenLibrary,
+  type GbState,
+} from "./field-legs";
 import { uploadCover as defaultUploadCover } from "$lib/server/cover-storage";
 import { sha256Hex } from "./sha";
 import { type CatalogMutex, noopMutex } from "./mutex";
@@ -50,8 +70,6 @@ export class InvalidIsbnError extends Error {
     super(`InvalidIsbn: ${raw}`);
   }
 }
-
-const NEGATIVE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface ResolveDeps {
   fetchFn?: typeof fetch;
@@ -96,8 +114,48 @@ type StorageRecord = {
 // `description` over the wire on every cache-hit check for nothing.
 // ResolveResult.row is returned to callers but none of them read `.row`,
 // so widening this list requires a new in-file consumer.
-const RESOLVE_SELECT =
-  "pending_storage, storage_path, last_attempted_at, attempt_count, do_not_refetch_description";
+// Selects every column the per-field cache guard + per-field walker
+// finalize step reads off the existing row. Hot path on every viewer
+// first-render, so we still avoid `select("*")` — but the per-field state
+// model needs all 6 value columns + 22 state columns to drive shouldAttempt
+// and increment *_attempts. Refit 2026-05-27.
+const RESOLVE_SELECT = [
+  "pending_storage",
+  "storage_path",
+  "cover_storage_backend",
+  "last_attempted_at",
+  "attempt_count",
+  "do_not_refetch_description",
+  // value columns for shouldAttempt populated-check
+  "description",
+  "publisher",
+  "published_date",
+  "subjects",
+  "page_count",
+  // state columns for shouldAttempt TTL ladder + applyFieldResult increment
+  "cover_attempted_at",
+  "cover_fail_reason",
+  "cover_attempts",
+  "description_attempted_at",
+  "description_fail_reason",
+  "description_attempts",
+  "publisher_attempted_at",
+  "publisher_fail_reason",
+  "publisher_attempts",
+  "publisher_provider",
+  "published_date_attempted_at",
+  "published_date_fail_reason",
+  "published_date_attempts",
+  "published_date_provider",
+  "subjects_attempted_at",
+  "subjects_fail_reason",
+  "subjects_attempts",
+  "subjects_provider",
+  "page_count_attempted_at",
+  "page_count_fail_reason",
+  "page_count_attempts",
+  "page_count_provider",
+].join(", ");
 
 async function selectByIsbn(
   supabase: SupabaseClient,
@@ -146,14 +204,26 @@ async function selectBySha(
   };
 }
 
-function isFreshNegative(
-  row: Partial<BookCatalogRowFields>,
-  now: Date,
-): boolean {
-  if (row.storage_path) return false;
-  if (!row.last_attempted_at) return false;
-  const last = new Date(row.last_attempted_at).getTime();
-  return now.getTime() - last < NEGATIVE_CACHE_TTL_MS;
+// Description-side iTunes lookup. Distinct from the cover chain's iTunes
+// fetch — they each burn their own iTunes token per resolve. Memoization
+// across both is deferred (follow-up: separate issue for the deeper
+// refactor). Worst case under PR2: cover chain consumes up to 3 iTunes
+// tokens (one per tier pass), description leg consumes 1 = 4/resolve.
+// iTunes per-day budget is generous; acceptable pre-launch.
+async function fetchItunesDescription(
+  isbn: string,
+  deps: ResolveDeps,
+): Promise<FetchOutcome<import("./itunes").ItunesResult>> {
+  if (!(await tryAcquire(deps.rateLimiters.itunes))) {
+    return { kind: "rate_limited" };
+  }
+  try {
+    const result = await fetchItunesByIsbn(isbn, { fetchFn: deps.fetchFn });
+    if (!result) return { kind: "empty" };
+    return { kind: "ok", value: result };
+  } catch (err) {
+    return { kind: "transient", error: err };
+  }
 }
 
 async function tryAcquire(
@@ -703,88 +773,6 @@ async function resolveCoverWithTiering(
   );
 }
 
-// ─── Description enrichment (decoupled from cover) ───────────────────────────
-
-/**
- * Enrich `metadata.description` via Google Books when OL left it empty.
- *
- * Cover is intentionally NOT fetched here — cover resolution now lives
- * entirely in the resolver chain (`resolveCoverWithTiering`). This helper
- * is single-responsibility: description text only.
- *
- * `do_not_refetch_description` gates description text. When set, GB is
- * consulted for no-op (we skip early), preserving behavior for takedown'd
- * ISBNs without making an unnecessary API call.
- *
- * Per-source rate-limit budget is checked via `tryAcquire` (fail-open).
- * All upstream errors are caught and logged.
- */
-async function enrichDescriptionWithGoogleBooks(
-  metadata: CatalogMetadata,
-  fetchVolume: () => Promise<GoogleBooksItem | null>,
-  opts: {
-    do_not_refetch_description: boolean;
-    logCtx: Record<string, unknown>;
-  },
-): Promise<void> {
-  if (metadata.description) return;
-  if (opts.do_not_refetch_description) {
-    // Issue #206: surface the takedown-flag skip so a row that has the
-    // flag set unexpectedly (e.g. carryover after a reset that didn't
-    // touch `do_not_refetch_description = false`) is visible in logs
-    // rather than only via a downstream NULL description.
-    logger().warn(
-      {
-        event: "catalog_description_skipped_takedown_flag",
-        ...opts.logCtx,
-      },
-      "catalog_description_skipped_takedown_flag",
-    );
-    return;
-  }
-  // Rate-limit gating moved into the memoized `fetchVolume` callback
-  // (issue #203). If the cover chain already paid the token, this is a
-  // memo hit; if it didn't, `fetchVolume` will tryAcquire on its own.
-  try {
-    const gb = await fetchVolume();
-    if (!gb) {
-      logger().warn(
-        {
-          event: "catalog_description_no_gb_volume",
-          ...opts.logCtx,
-        },
-        "catalog_description_no_gb_volume",
-      );
-      return;
-    }
-    const gbMeta = extractGoogleBooksMetadata(gb);
-    if (!gbMeta.description) {
-      logger().info(
-        {
-          event: "catalog_description_gb_volume_no_description",
-          ...opts.logCtx,
-          google_volume_id: gbMeta.google_volume_id,
-        },
-        "catalog_description_gb_volume_no_description",
-      );
-      return;
-    }
-    metadata.description_raw = gbMeta.description;
-    metadata.description = stripMarketingCruft(gbMeta.description);
-    metadata.description_provider = "google_books";
-    metadata.google_volume_id = gbMeta.google_volume_id;
-  } catch (err) {
-    logger().warn(
-      {
-        event: "catalog_googlebooks_failed",
-        ...opts.logCtx,
-        error: String(err),
-      },
-      "catalog_googlebooks_failed",
-    );
-  }
-}
-
 // ─── OL cover_id discovery (metadata only — no byte fetch) ───────────────────
 
 /**
@@ -870,6 +858,7 @@ export async function resolveIsbn(
   supabase: SupabaseClient,
   rawIsbn: string,
   deps: ResolveDeps,
+  ctx?: ResolveCtx,
 ): Promise<ResolveResult> {
   const isbn = canonicalizeIsbn(rawIsbn);
   if (!isbn) throw new InvalidIsbnError(rawIsbn);
@@ -879,15 +868,14 @@ export async function resolveIsbn(
   const mutex = deps.mutex ?? noopMutex;
 
   const existing = await selectByIsbn(supabase, isbn);
-  // pending_storage=TRUE means a prior round wrote the metadata row but
-  // never finalized the storage fields (upload throw or finalize UPDATE
-  // throw). Treat as miss so this round retries the upload + finalize.
-  // Feed-driven re-resolve is the retry trigger; see spec
-  // 2026-05-18-catalog-cover-upload-ordering-design.
+  // Cache short-circuit replaced by per-field gating (refit 2026-05-27).
+  // Row is "cached" only when every tracked field is populated OR within
+  // its fail_reason TTL window. pending_storage=TRUE always falls through
+  // so the upload + finalize retry path runs (spec 2026-05-18).
   if (
     existing &&
     !existing.pending_storage &&
-    (existing.storage_path || isFreshNegative(existing, now))
+    TRACKED_FIELDS.every((f) => !shouldAttempt(f, existing, now))
   ) {
     return { cached: true, rateLimited: false, row: existing };
   }
@@ -895,13 +883,9 @@ export async function resolveIsbn(
   // Per-ISBN mutex (audit #12): two concurrent resolves of the same ISBN
   // (two tabs, tab + cron, two cron runs across overlapping cadences)
   // would otherwise each fire full upstream pipelines and burn per-source
-  // rate-limit tokens for naught — `persistCover` dedups identical bytes
-  // post-fetch but the upstream calls already happened. Lock check sits
-  // AFTER the cache guards (no point coordinating cached hits) and BEFORE
-  // the per-source `tryAcquire` (loser must not consume per-source budget
-  // either). Loser short-circuits with `rateLimited: true` so callers
-  // (API handler, page loader, cron) treat it identically to "skip this
-  // round" — same external semantics as the existing per-source deny path.
+  // rate-limit tokens for naught. Loser short-circuits with `rateLimited:
+  // true` and consumes neither per-source budget nor *_attempts. See
+  // existing rationale in selectByIsbn comments + spec.
   const lockKey = `catalog:lock:isbn:${isbn}`;
   const acquired = await mutex.acquire(lockKey);
   if (!acquired) {
@@ -911,6 +895,9 @@ export async function resolveIsbn(
   try {
     const olOk = await tryAcquire(deps.rateLimiters.openLibrary);
     if (!olOk) {
+      // Pre-acquire OL denial: leave per-field state UNCHANGED so
+      // shouldAttempt fires again on the next pass via the
+      // null-attempted-at branch (or its existing TTL). No UPDATE here.
       return { cached: false, rateLimited: true, row: existing ?? { isbn } };
     }
 
@@ -929,10 +916,9 @@ export async function resolveIsbn(
       deps,
     );
 
-    // Memoized GB volume fetcher shared by cover chain + description path
-    // (issue #203). Caches only on successful fetch — a rate-limit denial
-    // or upstream error leaves the slot open for a retry from the next
-    // consumer (e.g. cover chain denied, description still wants to try).
+    // Memoized GB volume fetcher shared by cover chain + walker GB legs
+    // (issue #203 + refit 2026-05-27). Caches only on successful fetch;
+    // outcome() exposes the last attempt for walker leg classification.
     const gbMemo = memoizeGoogleBooksVolume(deps, () =>
       fetchGoogleBooksByIsbn(isbn, {
         fetchFn: deps.fetchFn,
@@ -940,71 +926,182 @@ export async function resolveIsbn(
       }),
     );
 
-    // 3. Resolve cover via chain (OL direct → OL cover_id → GB → iTunes)
-    const cover = await resolveCoverWithTiering(deps, {
-      isbn,
-      openLibraryCoverId: openLibraryCoverId ?? undefined,
-      fetchGbVolume: gbMemo.fetch,
-    });
+    // 3. Cover chain (existing 3-tier resolveCoverWithTiering). Only walks
+    //    when shouldAttempt('cover'); otherwise skip the expensive byte
+    //    fetch entirely. Per-field gating extends to cover.
+    const coverShouldAttempt = shouldAttempt("cover", existing ?? {}, now);
+    const cover = coverShouldAttempt
+      ? await resolveCoverWithTiering(deps, {
+          isbn,
+          openLibraryCoverId: openLibraryCoverId ?? undefined,
+          fetchGbVolume: gbMemo.fetch,
+        })
+      : null;
 
-    // 4. Description fallback via GB (cover is decoupled from description now)
-    await enrichDescriptionWithGoogleBooks(metadata, gbMemo.fetch, {
-      do_not_refetch_description: existing?.do_not_refetch_description ?? false,
-      logCtx: { isbn },
-    });
+    // 4. Prime GB memo ONCE for the walker's GB legs when any non-cover
+    //    field needs walking AND cover chain didn't already trigger GB.
+    //    One GB token per resolve regardless of how many GB legs fire.
+    const nonCoverNeedsWalk = TRACKED_FIELDS.some(
+      (f) => f !== "cover" && shouldAttempt(f, existing ?? {}, now),
+    );
+    if (
+      nonCoverNeedsWalk &&
+      gbMemo.outcome() === null &&
+      deps.googleBooksApiKey
+    ) {
+      await gbMemo.fetch();
+    }
 
-    // 5. Compute audit fields BEFORE any storage I/O so the pending-row
-    //    upsert carries the full audit shape even if upload later fails.
-    //    GB metadata is captured unconditionally whenever a GB volume was
-    //    fetched during this resolve — even if GB was filtered out as the
-    //    cover source — so production SQL can validate the pdf.isAvailable
-    //    filter without log scraping. `snapshot()` reads the memo
-    //    synchronously, never burning a fresh GB token.
+    // 5. Build GbState for walker legs.
+    const gbState: GbState = !deps.googleBooksApiKey
+      ? { apiKeySet: false }
+      : {
+          apiKeySet: true,
+          outcome: gbMemo.outcome() ?? { kind: "empty" },
+        };
+
+    // 6. Walk each non-cover tracked field whose TTL is up.
+    const walkerCtx: ResolveCtx = ctx ?? {};
+    const fieldResults: Partial<Record<TrackedField, ChainResult<unknown>>> =
+      {};
+
+    if (shouldAttempt("description", existing ?? {}, now)) {
+      const doNotRefetch = existing?.do_not_refetch_description ?? false;
+      if (doNotRefetch) {
+        // Takedown flag preserved. Skip the walker; don't write
+        // description state — leaves attempted_at unchanged so the row
+        // stays in the same observable state as before the refit.
+        logger().warn(
+          { event: "catalog_description_skipped_takedown_flag", isbn },
+          "catalog_description_skipped_takedown_flag",
+        );
+      } else {
+        fieldResults.description = await walkChain<string>(
+          {
+            field: "description",
+            legs: [
+              async () => classifyDescriptionFromOpenLibrary(olWork),
+              async () => classifyDescriptionFromGoogleBooks(gbState),
+              async () =>
+                classifyDescriptionFromItunes({
+                  hasIsbn: true,
+                  outcome: await fetchItunesDescription(isbn, deps),
+                }),
+            ],
+          },
+          walkerCtx,
+        );
+      }
+    }
+    if (shouldAttempt("publisher", existing ?? {}, now)) {
+      fieldResults.publisher = await walkChain<string>(
+        {
+          field: "publisher",
+          legs: [
+            async () => classifyPublisherFromOpenLibrary(olData),
+            async () => classifyPublisherFromGoogleBooks(gbState),
+          ],
+        },
+        walkerCtx,
+      );
+    }
+    if (shouldAttempt("published_date", existing ?? {}, now)) {
+      fieldResults.published_date = await walkChain<string>(
+        {
+          field: "published_date",
+          legs: [
+            async () => classifyPublishedDateFromOpenLibrary(olData),
+            async () => classifyPublishedDateFromGoogleBooks(gbState),
+          ],
+        },
+        walkerCtx,
+      );
+    }
+    if (shouldAttempt("subjects", existing ?? {}, now)) {
+      fieldResults.subjects = await walkChain<string[]>(
+        {
+          field: "subjects",
+          legs: [
+            async () => classifySubjectsFromOpenLibrary(olData, olWork),
+            async () => classifySubjectsFromGoogleBooks(gbState),
+          ],
+        },
+        walkerCtx,
+      );
+    }
+    if (shouldAttempt("page_count", existing ?? {}, now)) {
+      fieldResults.page_count = await walkChain<number>(
+        {
+          field: "page_count",
+          legs: [
+            async () => classifyPageCountFromOpenLibrary(olData),
+            async () => classifyPageCountFromGoogleBooks(gbState),
+          ],
+        },
+        walkerCtx,
+      );
+    }
+
+    // 7. Capture description_raw from the GB outcome when description was
+    //    sourced via GB. The walker's leg returns the cleaned text; the
+    //    raw GB description goes into a separate column for debug parity
+    //    with the pre-refit enrichment helper.
+    if (
+      fieldResults.description?.provider === "google_books" &&
+      gbMemo.snapshot()?.volumeInfo?.description
+    ) {
+      metadata.description_raw = gbMemo.snapshot()!.volumeInfo!.description!;
+    }
+    // GB volume id flows from gbMemo regardless of which leg won the
+    // walker — preserves pre-refit behaviour where description fetched
+    // from GB carried google_volume_id even when cover came from OL.
+    if (gbMemo.snapshot()?.id) {
+      metadata.google_volume_id = gbMemo.snapshot()!.id;
+    }
+
+    // 8. Cover provider + fail_reason classification (cover isn't a
+    //    walker field — derive from cover result + gb outcome).
+    let coverFailReason: FailReason | null = null;
+    if (coverShouldAttempt && !cover) {
+      const gbOut = gbMemo.outcome();
+      if (gbOut?.kind === "rate_limited") coverFailReason = "rate_limited";
+      else if (gbOut?.kind === "transient") coverFailReason = "transient_error";
+      else coverFailReason = "exhausted";
+    }
+
     const audit = computeAuditFields(gbMemo.snapshot(), cover);
 
-    // 6. Initial upsert: metadata + audit; storage fields NULL;
-    //    pending_storage=TRUE iff we have cover bytes to upload.
-    //    See spec 2026-05-18-catalog-cover-upload-ordering-design and
-    //    issue #218 — the orphan-prevention contract.
+    // 9. Build pendingRow with per-field value + state writes.
+    //
+    //    Cover state has two outcome shapes:
+    //      - cover === null (negative): write cover_attempted_at +
+    //        cover_fail_reason in the upsert. No finalize UPDATE will run.
+    //      - cover !== null (positive): leave cover_attempted_at NULL in
+    //        the upsert; write it (+ cover_fail_reason = NULL) in the
+    //        post-upload finalize UPDATE. Throw between upload and
+    //        finalize leaves state NULL → next pass's shouldAttempt
+    //        returns true via the never-attempted branch.
+    //
+    //    Non-cover fields write attempted_at + fail_reason in the upsert
+    //    when their walker ran; existing state otherwise preserved via
+    //    COALESCE in the upsert RPC. *_attempts is GREATEST-merged.
     const pending = cover !== null;
-    const pendingRow = {
-      isbn,
-      storage_path: null,
-      cover_storage_backend: null,
-      image_sha256: null,
-      cover_source: cover?.source ?? null,
-      cover_max_width: null,
-      openlibrary_cover_id:
-        cover?.openLibraryCoverId ?? metadata.openlibrary_cover_id ?? null,
-      google_volume_id:
-        cover?.googleVolumeId ?? metadata.google_volume_id ?? null,
-      source_url: metadata.source_url ?? null,
-      title: metadata.title ?? null,
-      author: metadata.author ?? null,
-      description: metadata.description ?? null,
-      description_raw: metadata.description_raw ?? null,
-      description_provider: metadata.description_provider ?? null,
-      published_date: metadata.published_date ?? null,
-      publisher: metadata.publisher ?? null,
-      page_count: metadata.page_count ?? null,
-      language: metadata.language ?? null,
-      subjects: metadata.subjects ?? null,
-      series_name: metadata.series_name ?? null,
-      series_position: metadata.series_position ?? null,
-      isbn_10: metadata.isbn_10 ?? null,
-      fetched_at: now.toISOString(),
-      last_attempted_at: now.toISOString(),
-      attempt_count: (existing?.attempt_count ?? 0) + 1,
-      gb_pdf_available: audit.gb_pdf_available,
-      gb_viewability: audit.gb_viewability,
-      gb_image_link_tiers: audit.gb_image_link_tiers,
-      cover_aspect: audit.cover_aspect,
-      cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
-      pending_storage: pending,
-    };
+    const coverStateInUpsert = coverShouldAttempt && cover === null;
 
-    // Partial unique index requires `INSERT ... ON CONFLICT (col) WHERE pred`.
-    // supabase-js .upsert() does not pass the WHERE through; route via RPC.
+    const pendingRow = buildPendingRow({
+      isbn,
+      normalizedTitleAuthor: null,
+      cover,
+      coverStateInUpsert,
+      coverFailReason,
+      metadata,
+      existing,
+      fieldResults,
+      audit,
+      pending,
+      now,
+    });
+
     const { error: pendingErr } = await supabase.rpc(
       "upsert_book_catalog_by_isbn",
       { p_row: pendingRow },
@@ -1012,8 +1109,8 @@ export async function resolveIsbn(
     if (pendingErr)
       throw new Error(`book_catalog initial upsert: ${pendingErr.message}`);
 
-    // 7. Upload bytes (with byte-level dedup). On throw we leave the
-    //    pending row behind for the next resolve to retry.
+    // 10. Upload + finalize for positive cover. Writes cover_attempted_at
+    //     + cover_fail_reason = NULL alongside storage + clears pending.
     let storage: Awaited<ReturnType<typeof persistCover>> = null;
     if (cover) {
       storage = await persistCover(
@@ -1021,12 +1118,6 @@ export async function resolveIsbn(
         { bytes: cover.bytes, mime: cover.mime },
         upload,
       );
-
-      // 8. Finalize: plain UPDATE writes storage fields and clears pending.
-      //    No RPC needed — row provably exists post-step-6, predicate
-      //    unambiguous. On throw the row stays pending; next feed render
-      //    retries: persistCover sha lookup misses (image_sha256=NULL),
-      //    CF 409 idempotent branch re-runs, finalize UPDATE retries.
       const { error: finalErr } = await supabase
         .from("book_catalog")
         .update({
@@ -1035,16 +1126,16 @@ export async function resolveIsbn(
           image_sha256: storage?.image_sha256 ?? null,
           cover_max_width: cover.width,
           pending_storage: false,
+          cover_attempted_at: now.toISOString(),
+          cover_fail_reason: null,
+          cover_attempts:
+            ((existing?.cover_attempts as number | undefined) ?? 0) + 1,
         })
         .eq("isbn", isbn);
       if (finalErr)
         throw new Error(`book_catalog storage finalize: ${finalErr.message}`);
     }
 
-    // Sentry warning: GB cover passed the pdf.isAvailable filter (Task 8)
-    // but bytes-per-pixel is below threshold — likely whitespace-template
-    // false negative. See Task 10 / plan 2026-05-18. Outlier-only signal;
-    // tune threshold from production audit data once weeks of history.
     await reportSuspectLowBpp(cover, audit, { isbn });
 
     const resultRow = {
@@ -1059,6 +1150,148 @@ export async function resolveIsbn(
   } finally {
     await mutex.release(lockKey);
   }
+}
+
+// Composes the upsert payload from cover + walker + audit + metadata.
+// Shared by resolveIsbn and resolveTitleAuthor — payload shape is
+// identical except for the key columns (isbn vs normalized_title_author).
+// Cover state writes follow the dual-shape rule (see resolveIsbn step 9
+// comment): when cover === null, attempted_at + fail_reason land here;
+// when cover !== null, the finalize UPDATE writes them post-upload.
+interface BuildPendingRowArgs {
+  isbn: string | null;
+  normalizedTitleAuthor: string | null;
+  cover: CoverResolution | null;
+  coverStateInUpsert: boolean;
+  coverFailReason: FailReason | null;
+  metadata: CatalogMetadata;
+  existing: Partial<BookCatalogRowFields> | null | undefined;
+  fieldResults: Partial<Record<TrackedField, ChainResult<unknown>>>;
+  audit: ResolveAuditFields;
+  pending: boolean;
+  now: Date;
+}
+
+function buildPendingRow(args: BuildPendingRowArgs): Record<string, unknown> {
+  const {
+    isbn,
+    normalizedTitleAuthor,
+    cover,
+    coverStateInUpsert,
+    coverFailReason,
+    metadata,
+    existing,
+    fieldResults,
+    audit,
+    pending,
+    now,
+  } = args;
+
+  const fieldValue = <T>(field: TrackedField): T | null => {
+    const r = fieldResults[field];
+    return (r?.value as T | null | undefined) ?? null;
+  };
+  const fieldProvider = (field: TrackedField): FieldProvider | null => {
+    const r = fieldResults[field];
+    return (r?.provider as FieldProvider | null | undefined) ?? null;
+  };
+  const stateAttemptedAt = (field: TrackedField): string | null =>
+    fieldResults[field] ? now.toISOString() : null;
+  const stateFailReason = (field: TrackedField): FailReason | null =>
+    fieldResults[field]?.fail_reason ?? null;
+  const stateAttempts = (field: TrackedField): number => {
+    if (!fieldResults[field]) return 0;
+    const prior =
+      (existing?.[`${field}_attempts` as keyof BookCatalogRowFields] as
+        | number
+        | undefined) ?? 0;
+    return prior + 1;
+  };
+
+  // description column may still have the OL-extracted value when
+  // shouldAttempt was false (existing populated row, walker skipped).
+  // For walked-description, prefer the walker's result; otherwise leave
+  // null so COALESCE preserves any prior value on existing rows.
+  const descriptionValue = fieldResults.description
+    ? (fieldValue<string>("description") as string | null)
+    : null;
+  const publisherValue = fieldResults.publisher
+    ? (fieldValue<string>("publisher") as string | null)
+    : null;
+  const publishedDateValue = fieldResults.published_date
+    ? (fieldValue<string>("published_date") as string | null)
+    : null;
+  const pageCountValue = fieldResults.page_count
+    ? (fieldValue<number>("page_count") as number | null)
+    : null;
+  const subjectsValue = fieldResults.subjects
+    ? (fieldValue<string[]>("subjects") as string[] | null)
+    : null;
+
+  return {
+    isbn,
+    ...(normalizedTitleAuthor !== null
+      ? { normalized_title_author: normalizedTitleAuthor }
+      : {}),
+    storage_path: null,
+    cover_storage_backend: null,
+    image_sha256: null,
+    cover_source: cover?.source ?? null,
+    cover_max_width: null,
+    openlibrary_cover_id:
+      cover?.openLibraryCoverId ?? metadata.openlibrary_cover_id ?? null,
+    google_volume_id:
+      cover?.googleVolumeId ?? metadata.google_volume_id ?? null,
+    source_url: metadata.source_url ?? null,
+    title: metadata.title ?? null,
+    author: metadata.author ?? null,
+    description: descriptionValue,
+    description_raw: metadata.description_raw ?? null,
+    description_provider: fieldProvider("description"),
+    published_date: publishedDateValue,
+    publisher: publisherValue,
+    page_count: pageCountValue,
+    language: metadata.language ?? null,
+    subjects: subjectsValue,
+    series_name: metadata.series_name ?? null,
+    series_position: metadata.series_position ?? null,
+    isbn_10: metadata.isbn_10 ?? null,
+    fetched_at: now.toISOString(),
+    last_attempted_at: now.toISOString(),
+    attempt_count: (existing?.attempt_count ?? 0) + 1,
+    gb_pdf_available: audit.gb_pdf_available,
+    gb_viewability: audit.gb_viewability,
+    gb_image_link_tiers: audit.gb_image_link_tiers,
+    cover_aspect: audit.cover_aspect,
+    cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
+    pending_storage: pending,
+    // Per-field state. cover writes here only when cover === null (the
+    // negative-cache shape); positive cover state lands in finalize UPDATE.
+    cover_attempted_at: coverStateInUpsert ? now.toISOString() : null,
+    cover_fail_reason: coverStateInUpsert ? coverFailReason : null,
+    cover_attempts: coverStateInUpsert
+      ? ((existing?.cover_attempts as number | undefined) ?? 0) + 1
+      : 0,
+    description_attempted_at: stateAttemptedAt("description"),
+    description_fail_reason: stateFailReason("description"),
+    description_attempts: stateAttempts("description"),
+    publisher_attempted_at: stateAttemptedAt("publisher"),
+    publisher_fail_reason: stateFailReason("publisher"),
+    publisher_attempts: stateAttempts("publisher"),
+    publisher_provider: fieldProvider("publisher"),
+    published_date_attempted_at: stateAttemptedAt("published_date"),
+    published_date_fail_reason: stateFailReason("published_date"),
+    published_date_attempts: stateAttempts("published_date"),
+    published_date_provider: fieldProvider("published_date"),
+    subjects_attempted_at: stateAttemptedAt("subjects"),
+    subjects_fail_reason: stateFailReason("subjects"),
+    subjects_attempts: stateAttempts("subjects"),
+    subjects_provider: fieldProvider("subjects"),
+    page_count_attempted_at: stateAttemptedAt("page_count"),
+    page_count_fail_reason: stateFailReason("page_count"),
+    page_count_attempts: stateAttempts("page_count"),
+    page_count_provider: fieldProvider("page_count"),
+  };
 }
 
 export class InvalidTitleAuthorError extends Error {
@@ -1089,15 +1322,12 @@ export async function resolveTitleAuthor(
 
   const existing =
     existingRaw as unknown as Partial<BookCatalogRowFields> | null;
-  // pending_storage=TRUE means a prior round wrote the metadata row but
-  // never finalized the storage fields (upload throw or finalize UPDATE
-  // throw). Treat as miss so this round retries the upload + finalize.
-  // Feed-driven re-resolve is the retry trigger; see spec
-  // 2026-05-18-catalog-cover-upload-ordering-design.
+  // Per-field gating short-circuit. Refit 2026-05-27. Matches resolveIsbn
+  // logic — see that function's step 1 comment for the rationale.
   if (
     existing &&
     !existing.pending_storage &&
-    (existing.storage_path || isFreshNegative(existing, now))
+    TRACKED_FIELDS.every((f) => !shouldAttempt(f, existing, now))
   ) {
     return { cached: true, rateLimited: false, row: existing };
   }
@@ -1127,7 +1357,10 @@ export async function resolveTitleAuthor(
       };
     }
 
-    // 1. OL search by title/author — metadata source
+    // 1. OL search by title/author — metadata source. TA path has no
+    //    OL data doc or work doc (those are ISBN-keyed); walker OL legs
+    //    therefore see olData=null + olWork=null and aggregate to
+    //    `no_data`. Only the GB legs can succeed on TA resolves.
     let search: Awaited<ReturnType<typeof searchOpenLibraryByTitleAuthor>> =
       null;
     try {
@@ -1151,7 +1384,7 @@ export async function resolveTitleAuthor(
     if (search?.author_name?.length)
       metadata.author = search.author_name.join(", ");
 
-    // Memoized GB volume fetcher (issue #203) — see resolveIsbn for design.
+    // Memoized GB volume fetcher (issue #203 + refit 2026-05-27).
     const gbMemo = memoizeGoogleBooksVolume(deps, () =>
       fetchGoogleBooksByTitleAuthor(title, author, {
         fetchFn: deps.fetchFn,
@@ -1159,63 +1392,154 @@ export async function resolveTitleAuthor(
       }),
     );
 
-    // 2. Resolve cover via chain (title/author flow has no ISBN → no iTunes;
-    //    chain falls through to OL via search.cover_i)
-    const cover = await resolveCoverWithTiering(deps, {
-      title,
-      author,
-      openLibraryCoverId: search?.cover_i ?? undefined,
-      fetchGbVolume: gbMemo.fetch,
-    });
+    // 2. Cover via chain (TA path has no ISBN → no iTunes leg in the
+    //    cover chain; falls through to OL via search.cover_i). Gated on
+    //    shouldAttempt('cover').
+    const coverShouldAttempt = shouldAttempt("cover", existing ?? {}, now);
+    const cover = coverShouldAttempt
+      ? await resolveCoverWithTiering(deps, {
+          title,
+          author,
+          openLibraryCoverId: search?.cover_i ?? undefined,
+          fetchGbVolume: gbMemo.fetch,
+        })
+      : null;
 
-    // 3. Description fallback via GB
-    await enrichDescriptionWithGoogleBooks(metadata, gbMemo.fetch, {
-      do_not_refetch_description: existing?.do_not_refetch_description ?? false,
-      logCtx: { title, author },
-    });
+    // 3. Prime GB memo if any non-cover field needs walking.
+    const nonCoverNeedsWalk = TRACKED_FIELDS.some(
+      (f) => f !== "cover" && shouldAttempt(f, existing ?? {}, now),
+    );
+    if (
+      nonCoverNeedsWalk &&
+      gbMemo.outcome() === null &&
+      deps.googleBooksApiKey
+    ) {
+      await gbMemo.fetch();
+    }
 
-    // 4. Compute audit fields BEFORE any storage I/O so the pending-row
-    //    upsert carries the full audit shape even if upload later fails.
-    //    GB metadata is captured unconditionally whenever a GB volume was
-    //    fetched during this resolve — even if GB was filtered out as the
-    //    cover source — so production SQL can validate the pdf.isAvailable
-    //    filter without log scraping. `snapshot()` reads the memo
-    //    synchronously, never burning a fresh GB token.
+    const gbState: GbState = !deps.googleBooksApiKey
+      ? { apiKeySet: false }
+      : {
+          apiKeySet: true,
+          outcome: gbMemo.outcome() ?? { kind: "empty" },
+        };
+
+    // 4. Walk each non-cover tracked field. iTunes description leg is
+    //    disabled on TA path (no ISBN to query by); OL legs see null
+    //    upstream and aggregate to no_data.
+    const fieldResults: Partial<Record<TrackedField, ChainResult<unknown>>> =
+      {};
+
+    if (shouldAttempt("description", existing ?? {}, now)) {
+      const doNotRefetch = existing?.do_not_refetch_description ?? false;
+      if (doNotRefetch) {
+        logger().warn(
+          {
+            event: "catalog_description_skipped_takedown_flag",
+            title,
+            author,
+          },
+          "catalog_description_skipped_takedown_flag",
+        );
+      } else {
+        fieldResults.description = await walkChain<string>(
+          {
+            field: "description",
+            legs: [
+              async () => classifyDescriptionFromOpenLibrary(null),
+              async () => classifyDescriptionFromGoogleBooks(gbState),
+              async () => classifyDescriptionFromItunes({ hasIsbn: false }),
+            ],
+          },
+          {},
+        );
+      }
+    }
+    if (shouldAttempt("publisher", existing ?? {}, now)) {
+      fieldResults.publisher = await walkChain<string>(
+        {
+          field: "publisher",
+          legs: [
+            async () => classifyPublisherFromOpenLibrary(null),
+            async () => classifyPublisherFromGoogleBooks(gbState),
+          ],
+        },
+        {},
+      );
+    }
+    if (shouldAttempt("published_date", existing ?? {}, now)) {
+      fieldResults.published_date = await walkChain<string>(
+        {
+          field: "published_date",
+          legs: [
+            async () => classifyPublishedDateFromOpenLibrary(null),
+            async () => classifyPublishedDateFromGoogleBooks(gbState),
+          ],
+        },
+        {},
+      );
+    }
+    if (shouldAttempt("subjects", existing ?? {}, now)) {
+      fieldResults.subjects = await walkChain<string[]>(
+        {
+          field: "subjects",
+          legs: [
+            async () => classifySubjectsFromOpenLibrary(null, null),
+            async () => classifySubjectsFromGoogleBooks(gbState),
+          ],
+        },
+        {},
+      );
+    }
+    if (shouldAttempt("page_count", existing ?? {}, now)) {
+      fieldResults.page_count = await walkChain<number>(
+        {
+          field: "page_count",
+          legs: [
+            async () => classifyPageCountFromOpenLibrary(null),
+            async () => classifyPageCountFromGoogleBooks(gbState),
+          ],
+        },
+        {},
+      );
+    }
+
+    if (
+      fieldResults.description?.provider === "google_books" &&
+      gbMemo.snapshot()?.volumeInfo?.description
+    ) {
+      metadata.description_raw = gbMemo.snapshot()!.volumeInfo!.description!;
+    }
+    if (gbMemo.snapshot()?.id) {
+      metadata.google_volume_id = gbMemo.snapshot()!.id;
+    }
+
+    let coverFailReason: FailReason | null = null;
+    if (coverShouldAttempt && !cover) {
+      const gbOut = gbMemo.outcome();
+      if (gbOut?.kind === "rate_limited") coverFailReason = "rate_limited";
+      else if (gbOut?.kind === "transient") coverFailReason = "transient_error";
+      else coverFailReason = "exhausted";
+    }
+
     const audit = computeAuditFields(gbMemo.snapshot(), cover);
-
-    // 5. Initial upsert: metadata + audit; storage fields NULL;
-    //    pending_storage=TRUE iff we have cover bytes to upload.
-    //    See spec 2026-05-18-catalog-cover-upload-ordering-design and
-    //    issue #218 — the orphan-prevention contract.
     const pending = cover !== null;
+    const coverStateInUpsert = coverShouldAttempt && cover === null;
 
-    const pendingRow = {
-      isbn: null as string | null,
-      normalized_title_author: key,
-      storage_path: null,
-      cover_storage_backend: null,
-      image_sha256: null,
-      cover_source: cover?.source ?? null,
-      cover_max_width: null,
-      title: metadata.title ?? null,
-      author: metadata.author ?? null,
-      description: metadata.description ?? null,
-      description_raw: metadata.description_raw ?? null,
-      description_provider: metadata.description_provider ?? null,
-      google_volume_id: metadata.google_volume_id ?? null,
-      fetched_at: now.toISOString(),
-      last_attempted_at: now.toISOString(),
-      attempt_count: (existing?.attempt_count ?? 0) + 1,
-      gb_pdf_available: audit.gb_pdf_available,
-      gb_viewability: audit.gb_viewability,
-      gb_image_link_tiers: audit.gb_image_link_tiers,
-      cover_aspect: audit.cover_aspect,
-      cover_bytes_per_pixel: audit.cover_bytes_per_pixel,
-      pending_storage: pending,
-    };
+    const pendingRow = buildPendingRow({
+      isbn: null,
+      normalizedTitleAuthor: key,
+      cover,
+      coverStateInUpsert,
+      coverFailReason,
+      metadata,
+      existing,
+      fieldResults,
+      audit,
+      pending,
+      now,
+    });
 
-    // Partial unique index requires `INSERT ... ON CONFLICT (col) WHERE pred`.
-    // supabase-js .upsert() does not pass the WHERE through; route via RPC.
     const { error: pendingErr } = await supabase.rpc(
       "upsert_book_catalog_by_title_author",
       { p_row: pendingRow },
@@ -1223,8 +1547,6 @@ export async function resolveTitleAuthor(
     if (pendingErr)
       throw new Error(`book_catalog initial upsert: ${pendingErr.message}`);
 
-    // 6. Upload bytes (with byte-level dedup). On throw we leave the
-    //    pending row behind for the next resolve to retry.
     let storage: Awaited<ReturnType<typeof persistCover>> = null;
     if (cover) {
       storage = await persistCover(
@@ -1232,13 +1554,6 @@ export async function resolveTitleAuthor(
         { bytes: cover.bytes, mime: cover.mime },
         upload,
       );
-
-      // 7. Finalize: plain UPDATE writes storage fields and clears pending.
-      //    No RPC needed — row provably exists post-step-5, predicate
-      //    unambiguous (.is('isbn', null) scopes to the partial unique
-      //    index's ISBN-null partition). On throw the row stays pending;
-      //    next feed render retries: persistCover sha lookup misses
-      //    (image_sha256=NULL), upload re-runs idempotently, finalize retries.
       const { error: finalErr } = await supabase
         .from("book_catalog")
         .update({
@@ -1247,6 +1562,10 @@ export async function resolveTitleAuthor(
           image_sha256: storage?.image_sha256 ?? null,
           cover_max_width: cover.width,
           pending_storage: false,
+          cover_attempted_at: now.toISOString(),
+          cover_fail_reason: null,
+          cover_attempts:
+            ((existing?.cover_attempts as number | undefined) ?? 0) + 1,
         })
         .is("isbn", null)
         .eq("normalized_title_author", key);
@@ -1254,10 +1573,6 @@ export async function resolveTitleAuthor(
         throw new Error(`book_catalog storage finalize: ${finalErr.message}`);
     }
 
-    // Sentry warning: GB cover passed the pdf.isAvailable filter (Task 8)
-    // but bytes-per-pixel is below threshold — likely whitespace-template
-    // false negative. See Task 10 / plan 2026-05-18. Outlier-only signal;
-    // tune threshold from production audit data once weeks of history.
     await reportSuspectLowBpp(cover, audit, { normalizedTitleAuthor: key });
 
     const resultRow = {

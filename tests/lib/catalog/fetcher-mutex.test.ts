@@ -141,7 +141,18 @@ describe("resolveIsbn — per-ISBN mutex (audit #12)", () => {
     const supabase = createMockSupabase();
     supabase._results.set("book_catalog.select", {
       data: [
-        { isbn: "9780743273565", storage_path: "x/y.jpg", title: "Gatsby" },
+        // Fully-cached row: every tracked field populated. Refit 2026-05-27.
+        {
+          isbn: "9780743273565",
+          storage_path: "x/y.jpg",
+          cover_storage_backend: "supabase",
+          title: "Gatsby",
+          description: "filled",
+          publisher: "filled",
+          published_date: "2020",
+          subjects: ["fiction"],
+          page_count: 200,
+        },
       ],
       error: null,
     });
@@ -158,12 +169,27 @@ describe("resolveIsbn — per-ISBN mutex (audit #12)", () => {
 
   it("fresh negative cache short-circuits before mutex acquire", async () => {
     const supabase = createMockSupabase();
+    const recent = "2026-04-25T00:00:00Z"; // 7 days before fixture "now"
     supabase._results.set("book_catalog.select", {
       data: [
         {
           isbn: "9780743273565",
           storage_path: null,
-          last_attempted_at: "2026-04-25T00:00:00Z", // 7 days ago
+          last_attempted_at: recent,
+          // Per-field gating treats null fields as needing attempt unless
+          // attempted_at + fail_reason fall inside the TTL. Refit 2026-05-27.
+          cover_attempted_at: recent,
+          cover_fail_reason: "provider_no_data",
+          description_attempted_at: recent,
+          description_fail_reason: "provider_no_data",
+          publisher_attempted_at: recent,
+          publisher_fail_reason: "provider_no_data",
+          published_date_attempted_at: recent,
+          published_date_fail_reason: "provider_no_data",
+          subjects_attempted_at: recent,
+          subjects_fail_reason: "provider_no_data",
+          page_count_attempted_at: recent,
+          page_count_fail_reason: "provider_no_data",
         },
       ],
       error: null,

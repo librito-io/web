@@ -371,6 +371,51 @@ export type Database = {
           },
         ]
       }
+      catalog_fill_rate_history: {
+        Row: {
+          desc_from_google_books: number
+          desc_from_itunes: number
+          desc_from_manual: number
+          desc_from_openlibrary: number
+          missing_cover: number
+          missing_description: number
+          missing_page_count: number
+          missing_published_date: number
+          missing_publisher: number
+          missing_subjects: number
+          snapshot_at: string
+          total_rows: number
+        }
+        Insert: {
+          desc_from_google_books: number
+          desc_from_itunes: number
+          desc_from_manual: number
+          desc_from_openlibrary: number
+          missing_cover: number
+          missing_description: number
+          missing_page_count: number
+          missing_published_date: number
+          missing_publisher: number
+          missing_subjects: number
+          snapshot_at?: string
+          total_rows: number
+        }
+        Update: {
+          desc_from_google_books?: number
+          desc_from_itunes?: number
+          desc_from_manual?: number
+          desc_from_openlibrary?: number
+          missing_cover?: number
+          missing_description?: number
+          missing_page_count?: number
+          missing_published_date?: number
+          missing_publisher?: number
+          missing_subjects?: number
+          snapshot_at?: string
+          total_rows?: number
+        }
+        Relationships: []
+      }
       devices: {
         Row: {
           api_token_hash: string
@@ -614,6 +659,22 @@ export type Database = {
           device_name: string
           expired: boolean
           won: boolean
+        }[]
+      }
+      compute_catalog_fill_rate: {
+        Args: never
+        Returns: {
+          desc_from_google_books: number
+          desc_from_itunes: number
+          desc_from_manual: number
+          desc_from_openlibrary: number
+          missing_cover: number
+          missing_description: number
+          missing_page_count: number
+          missing_published_date: number
+          missing_publisher: number
+          missing_subjects: number
+          total_rows: number
         }[]
       }
       ensure_realtime: { Args: { p_table: unknown }; Returns: undefined }

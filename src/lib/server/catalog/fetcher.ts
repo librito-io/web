@@ -335,9 +335,20 @@ async function persistCover(
 // Width thresholds for tiered floor. Largest variant we serve is xlarge
 // (1200×1800). Premium tier = native xlarge support. Basic tier = native
 // thumbnail/medium/large support but xlarge would upscale (handled via
-// variant fallback in cover-storage.ts). Below basic = reject; negative-cache.
+// variant fallback in cover-storage.ts). Salvage tier = native thumbnail
+// only; xlarge / large / medium all upscale via resolveVariant fallback
+// (cover-storage.ts already downgrades requested variants to the largest
+// natively-supported one).
+//
+// Salvage tier matches the feed-card render target (240×360 actual pixels)
+// — books with only thumbnail-grade upstream sources render fuzzy but
+// distinguishable, strictly better than the placeholder. GB
+// `pdf.isAvailable=false` filter stays tight at salvage tier (issue #209
+// anti-wrong-bytes — a small wrong cover renders fuzzy AND wrong, worse
+// than no cover). Refit 2026-05-27.
 const FLOOR_PREMIUM = 1200;
 const FLOOR_BASIC = 300;
+const FLOOR_SALVAGE = 240;
 
 /**
  * Known Google Books "generic placeholder" cover sha256s (issue #207).
@@ -742,34 +753,34 @@ async function resolveCoverChain(
   );
 }
 
-/** Two-pass: try premium floor (1200), fall back to basic floor (300).
+/** Three-pass tiering: premium (1200) → basic (300) → salvage (240).
  *
- * Worst-case budget consumption per ISBN is 8 upstream cover attempts
- * (4 chain tiers × 2 passes). Rate-limit tokens are NOT consumed per
- * attempt — they have different memoization patterns:
+ * Worst-case budget per ISBN: 12 upstream cover attempts (4 sources × 3
+ * passes). Per-source token consumption unchanged:
  *   - OL: 1 token total. Acquired once in resolveIsbn/resolveTitleAuthor
- *     before the chain enters; shared by both OL tiers (direct-ISBN +
- *     cover-id) on both passes.
+ *     before the chain enters; shared by every OL tier across all passes.
  *   - GB: 1 token total. Memoized by memoizeGoogleBooksVolume; only the
- *     first call to fetchGbVolume consumes a token, regardless of how
- *     many chain tiers or the description path call it.
- *   - iTunes: up to 2 tokens. tryAcquire runs inside tryItunes per
- *     invocation, and tryItunes can be called twice (premium + basic
- *     passes).
- * Worst-case: 1 + 1 + 2 = 4 tokens per ISBN.
- * Acceptable trade-off because: (a) most popular books succeed at the
- * premium pass first try (one attempt per source), (b) the alternative
- * of a single liberal floor would store low-res sources that fail the
- * `xlarge` variant requirement, (c) per-source limiters fail-OPEN —
- * exhaustion doesn't lock callers out. See issue #199 design notes for
- * full tier rationale. */
+ *     first call to fetchGbVolume consumes a token across cover + walker
+ *     consumers.
+ *   - iTunes: up to 3 tokens (one per pass that reaches the iTunes leg).
+ *     Cover-side only — the walker's iTunes description leg has its own
+ *     separate token budget (see fetchItunesDescription).
+ * Worst-case cover budget: 1 + 1 + 3 = 5 tokens per ISBN.
+ *
+ * Salvage tier accepts down to 240 px — matches the feed-card render
+ * target (240×360 actual pixels). Books where the upstream best is
+ * thumbnail-grade (250-299 px) now resolve to a soft-but-distinguishable
+ * cover instead of the placeholder. GB `pdf.isAvailable=false` filter
+ * applies at all three tiers (issue #209 anti-wrong-bytes mechanism
+ * preserved at every tier — not anti-low-res). Refit 2026-05-27. */
 async function resolveCoverWithTiering(
   deps: ResolveDeps,
   ctx: CoverChainContext,
 ): Promise<CoverResolution | null> {
   return (
     (await resolveCoverChain(deps, ctx, FLOOR_PREMIUM)) ??
-    (await resolveCoverChain(deps, ctx, FLOOR_BASIC))
+    (await resolveCoverChain(deps, ctx, FLOOR_BASIC)) ??
+    (await resolveCoverChain(deps, ctx, FLOOR_SALVAGE))
   );
 }
 

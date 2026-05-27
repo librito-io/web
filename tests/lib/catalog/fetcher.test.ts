@@ -60,6 +60,9 @@ function loadFixture(name: string): Uint8Array<ArrayBuffer> {
 const FIXTURE_600x900 = loadFixture("600x900.jpg");
 // 1500×2250 — passes premium floor (1200)
 const FIXTURE_1500x2250 = loadFixture("1500x2250.jpg");
+// 250×375 — passes salvage floor (240) but fails basic floor (300). Used
+// to validate the third-pass tier added in refit 2026-05-27.
+const FIXTURE_250x375 = loadFixture("250x375.jpg");
 // 143×218 — fails OL minBytes (1024) → effectively below any floor
 const FIXTURE_143x218 = loadFixture("143x218.jpg");
 
@@ -939,6 +942,115 @@ describe("resolveIsbn – resolver chain cover", () => {
     expect(p_row.cover_max_width).toBeNull();
     expect(p_row.last_attempted_at).toBeTruthy();
     expect(p_row.attempt_count).toBeGreaterThan(0);
+  });
+
+  it("accepts a 250 px cover via salvage tier when basic+premium both fail", async () => {
+    // OL direct-ISBN returns 250×375 bytes — below basic floor (300) but
+    // above salvage floor (240). Three-pass tiering enabled by refit
+    // 2026-05-27 should pick this up on the salvage pass after the
+    // first two passes reject it.
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(FIXTURE_250x375, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(gbVolumesResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("itunes.apple.com/lookup")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await resolveIsbn(
+      supabase as never,
+      "9780743273565",
+      deps({ fetchFn }),
+    );
+
+    expect(result.row.cover_source).toBe("openlibrary_isbn_direct");
+    expect(result.row.cover_max_width).toBe(250);
+    expect(result.row.storage_path).not.toBeNull();
+  });
+
+  it("rejects a 200 px cover below salvage floor → negative-cache", async () => {
+    // 200×300 source bytes are below the 240 salvage floor; every tier
+    // rejects → cover === null → negative-cache row with no
+    // storage_path.
+    const supabase = coldMissSupabase();
+    const FIXTURE_200x300 = loadFixture("200x300.jpg");
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(FIXTURE_200x300, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(gbVolumesResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("itunes.apple.com/lookup")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await resolveIsbn(
+      supabase as never,
+      "9780743273565",
+      deps({ fetchFn }),
+    );
+
+    expect(result.row.storage_path).toBeNull();
+    expect(result.row.cover_source).toBeNull();
   });
 
   it("rate-limited GB skips to iTunes; iTunes resolves", async () => {

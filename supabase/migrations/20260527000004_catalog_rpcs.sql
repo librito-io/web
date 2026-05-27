@@ -13,6 +13,12 @@
 -- IMMUTABLE) because it calls now() — Postgres rejects IMMUTABLE wrappers
 -- over STABLE functions. Inlined CASE keeps the predicate transparent and
 -- avoids an interval-as-arg pattern that complicated an earlier draft.
+--
+-- Boundary semantics: strict `>` is intentional — a row exactly at its
+-- TTL becomes due on the NEXT cron tick rather than the current one.
+-- At cron cadence (daily) the one-tick latency is invisible. Mirrors
+-- the > comparison in shouldAttempt() in src/lib/server/catalog/chain.ts
+-- (PR2) so SQL + TS predicates agree on boundary rows.
 CREATE FUNCTION public._field_replay_due(
   p_attempted_at timestamptz, p_fail_reason text
 ) RETURNS boolean LANGUAGE sql STABLE
@@ -34,32 +40,49 @@ GRANT  EXECUTE ON FUNCTION public._field_replay_due(timestamptz, text) TO servic
 
 -- Replay-cron candidates. Returns id + lookup keys + replay_fields (the
 -- subset of tracked fields whose TTL is up) so the cron can scope its
--- requeue precisely. Ordered by last_attempted_at ASC NULLS FIRST (rows
--- never attempted come first, then oldest).
+-- requeue precisely. Ordered by last_attempted_at ASC (oldest first;
+-- last_attempted_at is NOT NULL DEFAULT now() so no NULL branch).
+--
+-- CTE materialises each <field>_due boolean once per row so the
+-- SELECT-side replay_fields construction and the WHERE filter reference
+-- the same predicate. Avoids drift between SELECT and WHERE on future
+-- TTL or field-semantic edits.
 CREATE FUNCTION public.select_replay_candidates(p_limit int)
 RETURNS TABLE (
   id uuid, isbn text, normalized_title_author text,
   title text, author text, replay_fields text[]
 ) LANGUAGE sql STABLE SECURITY INVOKER
 SET search_path = public AS $$
+  WITH due AS (
+    SELECT
+      bc.id, bc.isbn, bc.normalized_title_author, bc.title, bc.author,
+      bc.last_attempted_at,
+      (bc.storage_path   IS NULL AND _field_replay_due(bc.cover_attempted_at,          bc.cover_fail_reason))          AS cover_due,
+      (bc.description    IS NULL AND _field_replay_due(bc.description_attempted_at,    bc.description_fail_reason))    AS description_due,
+      (bc.publisher      IS NULL AND _field_replay_due(bc.publisher_attempted_at,      bc.publisher_fail_reason))      AS publisher_due,
+      (bc.published_date IS NULL AND _field_replay_due(bc.published_date_attempted_at, bc.published_date_fail_reason)) AS published_date_due,
+      (bc.subjects       IS NULL AND _field_replay_due(bc.subjects_attempted_at,       bc.subjects_fail_reason))       AS subjects_due,
+      (bc.page_count     IS NULL AND _field_replay_due(bc.page_count_attempted_at,     bc.page_count_fail_reason))     AS page_count_due
+    FROM book_catalog bc
+  )
   SELECT
-    bc.id, bc.isbn, bc.normalized_title_author, bc.title, bc.author,
+    due.id, due.isbn, due.normalized_title_author, due.title, due.author,
     ARRAY_REMOVE(ARRAY[
-      CASE WHEN bc.storage_path     IS NULL AND _field_replay_due(bc.cover_attempted_at,          bc.cover_fail_reason)          THEN 'cover'          END,
-      CASE WHEN bc.description      IS NULL AND _field_replay_due(bc.description_attempted_at,    bc.description_fail_reason)    THEN 'description'    END,
-      CASE WHEN bc.publisher        IS NULL AND _field_replay_due(bc.publisher_attempted_at,      bc.publisher_fail_reason)      THEN 'publisher'      END,
-      CASE WHEN bc.published_date   IS NULL AND _field_replay_due(bc.published_date_attempted_at, bc.published_date_fail_reason) THEN 'published_date' END,
-      CASE WHEN bc.subjects         IS NULL AND _field_replay_due(bc.subjects_attempted_at,       bc.subjects_fail_reason)       THEN 'subjects'       END,
-      CASE WHEN bc.page_count       IS NULL AND _field_replay_due(bc.page_count_attempted_at,     bc.page_count_fail_reason)     THEN 'page_count'     END
+      CASE WHEN due.cover_due          THEN 'cover'          END,
+      CASE WHEN due.description_due    THEN 'description'    END,
+      CASE WHEN due.publisher_due      THEN 'publisher'      END,
+      CASE WHEN due.published_date_due THEN 'published_date' END,
+      CASE WHEN due.subjects_due       THEN 'subjects'       END,
+      CASE WHEN due.page_count_due     THEN 'page_count'     END
     ], NULL) AS replay_fields
-  FROM book_catalog bc
-  WHERE (bc.storage_path   IS NULL AND _field_replay_due(bc.cover_attempted_at,          bc.cover_fail_reason))
-     OR (bc.description    IS NULL AND _field_replay_due(bc.description_attempted_at,    bc.description_fail_reason))
-     OR (bc.publisher      IS NULL AND _field_replay_due(bc.publisher_attempted_at,      bc.publisher_fail_reason))
-     OR (bc.published_date IS NULL AND _field_replay_due(bc.published_date_attempted_at, bc.published_date_fail_reason))
-     OR (bc.subjects       IS NULL AND _field_replay_due(bc.subjects_attempted_at,       bc.subjects_fail_reason))
-     OR (bc.page_count     IS NULL AND _field_replay_due(bc.page_count_attempted_at,     bc.page_count_fail_reason))
-  ORDER BY bc.last_attempted_at ASC NULLS FIRST
+  FROM due
+  WHERE due.cover_due
+     OR due.description_due
+     OR due.publisher_due
+     OR due.published_date_due
+     OR due.subjects_due
+     OR due.page_count_due
+  ORDER BY due.last_attempted_at ASC
   LIMIT p_limit;
 $$;
 
@@ -102,6 +125,14 @@ GRANT  EXECUTE ON FUNCTION public.promote_ta_to_isbn(text, text) TO service_role
 -- Supabase Storage objects behind. sha256 dedup in persistCover prevents
 -- double-upload on identical bytes; differing bytes create a new object.
 -- Acceptable pre-launch; sweeper deferred (follow-up).
+--
+-- *_attempts semantics: lifetime counter — intentionally NOT reset by
+-- requeue. PR2's resolver finalize increments existing+1 on every walk;
+-- the column accumulates the all-time attempt count so the replay
+-- system can observe pathological retry loops (a row whose attempts
+-- climb without ever populating signals a structural data gap). If a
+-- future audit-doc decides per-resolve semantics is wanted, switch
+-- here AND in the resolver applyFieldResult helper together.
 CREATE FUNCTION public.requeue_catalog_resolve(p_id uuid, p_fields text[])
 RETURNS void LANGUAGE plpgsql SECURITY INVOKER
 SET search_path = public AS $$
@@ -208,6 +239,17 @@ BEGIN
              description_attempted_at   = now()
        WHERE id = p_catalog_id;
     WHEN 'upload_cover' THEN
+      -- Required-key validation. Without these guards an empty {} patch
+      -- would null every storage column while flipping cover_source =
+      -- 'manual' + pending_storage = FALSE, leaving the row claiming a
+      -- manual cover with no storage backing (and emitting a misleading
+      -- success audit).
+      IF p_patch_jsonb->>'storage_path' IS NULL
+         OR p_patch_jsonb->>'cover_storage_backend' IS NULL
+         OR p_patch_jsonb->>'image_sha256' IS NULL
+         OR p_patch_jsonb->>'cover_max_width' IS NULL THEN
+        RAISE EXCEPTION 'upload_cover requires non-null storage_path / cover_storage_backend / image_sha256 / cover_max_width in p_patch_jsonb';
+      END IF;
       UPDATE book_catalog
          SET storage_path           = p_patch_jsonb->>'storage_path',
              cover_storage_backend  = p_patch_jsonb->>'cover_storage_backend',
@@ -225,10 +267,23 @@ BEGIN
       IF v_ta_key IS NULL THEN
         RAISE EXCEPTION 'set_isbn requires normalized_title_author on row';
       END IF;
+      -- Without this guard, promote_ta_to_isbn(NULL, v_ta_key) would
+      -- match the TA row (the UPDATE's `isbn IS NULL` predicate is
+      -- satisfied), perform a NULL→NULL no-op write, return true, and
+      -- emit an audit row claiming a successful set_isbn with
+      -- after_jsonb.isbn = NULL.
+      IF p_patch_jsonb->>'isbn' IS NULL THEN
+        RAISE EXCEPTION 'set_isbn requires non-null isbn in p_patch_jsonb';
+      END IF;
       IF NOT (SELECT promote_ta_to_isbn(p_patch_jsonb->>'isbn', v_ta_key)) THEN
         RAISE EXCEPTION 'promote_ta_to_isbn returned false (ISBN already exists or no TA row matched)';
       END IF;
     WHEN 'requeue' THEN
+      -- requeue_catalog_resolve already validates each field name via
+      -- its own allowlist; nothing additional to check here. An empty
+      -- p_patch_jsonb->'fields' (missing or empty array) results in a
+      -- no-op UPDATE — acceptable as a no-op admin action; the audit
+      -- row records the empty fields list.
       PERFORM requeue_catalog_resolve(
         p_catalog_id,
         ARRAY(SELECT jsonb_array_elements_text(p_patch_jsonb->'fields'))

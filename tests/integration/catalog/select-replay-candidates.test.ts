@@ -176,48 +176,24 @@ describe.skipIf(!process.env.INTEGRATION)(
 
     it("respects p_limit and orders by last_attempted_at ASC (oldest first)", async () => {
       const now = Date.now();
-      const seedRows = Array.from({ length: 5 }).map((_, i) =>
-        rowWithAllFieldsParked({
-          isbn: `978000000005${i}`,
-          description: null,
-          description_attempted_at: new Date(
-            now - (10 - i) * DAY,
-          ).toISOString(),
-          description_fail_reason: "provider_empty_field",
-          last_attempted_at: new Date(now - (10 - i) * DAY).toISOString(),
-        }),
-      );
-      await admin.from("book_catalog").insert(seedRows);
-
-      // description_fail_reason = provider_empty_field has 30d TTL —
-      // every seeded row is 6-10 days old, so none would qualify on
-      // description alone. But the cover branch's parked rate_limited
-      // (5min ago) keeps each row OUT. Switch one field to a 91-day-old
-      // provider_no_data so the rows surface.
-      // Actually simpler: re-seed with the cover field tripped instead.
-      await admin.from("book_catalog").delete().like("isbn", "97800000000%");
-      const olderSeed = Array.from({ length: 5 }).map((_, i) =>
+      // Five cover-null rows aged 6-10 days with cover_fail_reason =
+      // provider_disabled (24h TTL → due). All five surface; ORDER BY
+      // last_attempted_at ASC puts the 10-day-old row first.
+      const rows = Array.from({ length: 5 }).map((_, i) =>
         rowWithAllFieldsParked({
           isbn: `978000000005${i}`,
           storage_path: null,
           cover_attempted_at: new Date(now - (10 - i) * DAY).toISOString(),
-          cover_fail_reason: "provider_no_data",
+          cover_fail_reason: "provider_disabled",
           last_attempted_at: new Date(now - (10 - i) * DAY).toISOString(),
         }),
       );
-      // cover predicate ladder for provider_no_data is 90d — 6-10d not due.
-      // Use provider_empty_field with 30d ladder, but rows still under 30d.
-      // Simplest path: use provider_disabled (24h ladder).
-      olderSeed.forEach((row) => {
-        row.cover_fail_reason = "provider_disabled";
-      });
-      await admin.from("book_catalog").insert(olderSeed);
+      await admin.from("book_catalog").insert(rows);
 
       const { data: picked } = await admin.rpc("select_replay_candidates", {
         p_limit: 3,
       });
       expect(picked).toHaveLength(3);
-      // Oldest last_attempted_at first → ...50 (10d old) before ...54 (6d).
       expect(picked![0].isbn).toBe("9780000000050");
       expect(picked![1].isbn).toBe("9780000000051");
       expect(picked![2].isbn).toBe("9780000000052");

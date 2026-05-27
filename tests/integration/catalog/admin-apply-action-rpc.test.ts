@@ -161,4 +161,133 @@ describe.skipIf(!process.env.INTEGRATION)("admin_apply_action RPC", () => {
     });
     expect(error?.message).toMatch(/catalog row not found/i);
   });
+
+  it("upload_cover writes storage cols + audit on full patch", async () => {
+    const { data: auditId, error } = await admin.rpc("admin_apply_action", {
+      p_admin_user_id: adminUserId,
+      p_catalog_id: rowId,
+      p_action: "upload_cover",
+      p_patch_jsonb: {
+        storage_path: "ab/abc.jpg",
+        cover_storage_backend: "cloudflare-images",
+        image_sha256: "f".repeat(64),
+        cover_max_width: 1200,
+      },
+    });
+    expect(error).toBeNull();
+    expect(auditId).toBeTruthy();
+
+    const { data: row } = await admin
+      .from("book_catalog")
+      .select(
+        "storage_path, cover_storage_backend, image_sha256, cover_max_width, cover_source, pending_storage, cover_fail_reason",
+      )
+      .eq("id", rowId)
+      .single();
+    expect(row?.storage_path).toBe("ab/abc.jpg");
+    expect(row?.cover_storage_backend).toBe("cloudflare-images");
+    expect(row?.image_sha256).toBe("f".repeat(64));
+    expect(row?.cover_max_width).toBe(1200);
+    expect(row?.cover_source).toBe("manual");
+    expect(row?.pending_storage).toBe(false);
+    expect(row?.cover_fail_reason).toBeNull();
+  });
+
+  it("upload_cover raises on empty patch (would null storage cols)", async () => {
+    const { error } = await admin.rpc("admin_apply_action", {
+      p_admin_user_id: adminUserId,
+      p_catalog_id: rowId,
+      p_action: "upload_cover",
+      p_patch_jsonb: {},
+    });
+    expect(error?.message).toMatch(
+      /upload_cover requires non-null storage_path/i,
+    );
+  });
+
+  it("upload_cover raises on partial patch (missing one required key)", async () => {
+    const { error } = await admin.rpc("admin_apply_action", {
+      p_admin_user_id: adminUserId,
+      p_catalog_id: rowId,
+      p_action: "upload_cover",
+      p_patch_jsonb: {
+        storage_path: "cd/ef.jpg",
+        cover_storage_backend: "supabase",
+        image_sha256: "a".repeat(64),
+        // cover_max_width missing
+      },
+    });
+    expect(error?.message).toMatch(/cover_max_width/i);
+  });
+
+  it("set_isbn raises on null isbn in patch (would no-op promote with NULL)", async () => {
+    const { data: taRow } = await admin
+      .from("book_catalog")
+      .insert({
+        isbn: null,
+        normalized_title_author: "set-isbn-null-probe|author",
+        title: "Null Patch Probe",
+        author: "Author",
+      })
+      .select("id")
+      .single();
+
+    const { error } = await admin.rpc("admin_apply_action", {
+      p_admin_user_id: adminUserId,
+      p_catalog_id: taRow!.id,
+      p_action: "set_isbn",
+      p_patch_jsonb: {},
+    });
+    expect(error?.message).toMatch(/set_isbn requires non-null isbn/i);
+
+    // Row + audit unchanged.
+    const { data: rowAfter } = await admin
+      .from("book_catalog")
+      .select("isbn")
+      .eq("id", taRow!.id)
+      .single();
+    expect(rowAfter?.isbn).toBeNull();
+
+    const { data: audits } = await admin
+      .from("catalog_admin_actions")
+      .select("id")
+      .eq("catalog_id", taRow!.id);
+    expect(audits ?? []).toHaveLength(0);
+  });
+
+  it("requeue forwards fields to requeue_catalog_resolve + writes audit", async () => {
+    await admin
+      .from("book_catalog")
+      .update({
+        publisher: "Stale",
+        publisher_provider: "openlibrary",
+        publisher_attempted_at: new Date().toISOString(),
+      })
+      .eq("id", rowId);
+
+    const { data: auditId, error } = await admin.rpc("admin_apply_action", {
+      p_admin_user_id: adminUserId,
+      p_catalog_id: rowId,
+      p_action: "requeue",
+      p_patch_jsonb: { fields: ["publisher"] },
+    });
+    expect(error).toBeNull();
+    expect(auditId).toBeTruthy();
+
+    const { data: row } = await admin
+      .from("book_catalog")
+      .select("publisher, publisher_provider, publisher_attempted_at")
+      .eq("id", rowId)
+      .single();
+    expect(row?.publisher).toBeNull();
+    expect(row?.publisher_provider).toBeNull();
+    expect(row?.publisher_attempted_at).toBeNull();
+
+    const { data: audit } = await admin
+      .from("catalog_admin_actions")
+      .select("action")
+      .eq("id", auditId as unknown as string)
+      .single();
+    expect(audit?.action).toBe("requeue");
+  });
 });

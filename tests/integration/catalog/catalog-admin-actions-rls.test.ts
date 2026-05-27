@@ -121,4 +121,54 @@ describe.skipIf(!process.env.INTEGRATION)("catalog_admin_actions RLS", () => {
       .select("admin_user_id");
     expect(rows?.length).toBe(2);
   });
+
+  // Write-denial sweep — RLS denies by default when no INSERT/UPDATE/DELETE
+  // policy exists, but a future "let admins manage their own actions" diff
+  // could accidentally add an over-broad ALL policy. These assertions
+  // backstop the table's intended posture: authenticated callers cannot
+  // touch catalog_admin_actions at all; only service_role writes.
+  it("admin cannot INSERT a catalog_admin_actions row directly", async () => {
+    await expect(
+      asAuthUser(aliceId, async (txn) => {
+        await txn`
+          INSERT INTO catalog_admin_actions
+            (admin_user_id, catalog_id, isbn, action, before_jsonb, after_jsonb)
+          VALUES
+            (${aliceId}, ${catalogId}, ${"9780000000200"}, ${"takedown"}, ${"{}"}::jsonb, ${"{}"}::jsonb)
+        `;
+      }),
+    ).rejects.toThrow(/new row violates row-level security/i);
+  });
+
+  it("admin cannot UPDATE a catalog_admin_actions row directly", async () => {
+    await asAuthUser(aliceId, async (txn) => {
+      const result = await txn`
+        UPDATE catalog_admin_actions SET action = 'takedown' WHERE admin_user_id = ${aliceId}
+      `;
+      // RLS USING denies the row from the UPDATE's row set → 0 rows
+      // updated, no error. Defence-in-depth: assert the row stayed
+      // unchanged via the service_role admin client.
+      expect(result.count).toBe(0);
+    });
+    const { data: row } = await getAdmin()
+      .from("catalog_admin_actions")
+      .select("action")
+      .eq("admin_user_id", aliceId)
+      .single();
+    expect(row?.action).toBe("takedown"); // unchanged from seed
+  });
+
+  it("admin cannot DELETE a catalog_admin_actions row directly", async () => {
+    await asAuthUser(aliceId, async (txn) => {
+      const result = await txn`
+        DELETE FROM catalog_admin_actions WHERE admin_user_id = ${aliceId}
+      `;
+      expect(result.count).toBe(0);
+    });
+    const { data: rows } = await getAdmin()
+      .from("catalog_admin_actions")
+      .select("id")
+      .eq("admin_user_id", aliceId);
+    expect(rows?.length).toBe(1); // still there
+  });
 });

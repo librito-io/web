@@ -249,6 +249,16 @@ Shared per-ISBN `book_catalog` table backing the highlight viewer. Code in `src/
 
 **Audit columns** (5 fields on `book_catalog`, populated every resolve): `gb_pdf_available`, `gb_viewability`, `gb_image_link_tiers` (GB-fetched only), `cover_aspect`, `cover_bytes_per_pixel` (acceptance-computed). Query patterns in `scripts/data/README.md`. Sentry warning `catalog_cover_suspect_low_bpp` at `bytes_per_pixel < 0.05` — outlier signal, expected single-digits/day.
 
+### Field-state model (introduced 2026-05-27)
+
+`book_catalog` carries per-field state — `<field>_attempted_at`, `<field>_attempts`, `<field>_fail_reason`, `<field>_provider` — for the six tracked fields: cover, description, publisher, published_date, subjects, page_count. Resolver gates per-field via `shouldAttempt(field, row, now)` (`src/lib/server/catalog/fetcher.ts`); chain walker (`src/lib/server/catalog/chain.ts`) aggregates per-leg `LegOutcome` into one `FailReason` per field. TTL ladder lives in SQL via `_field_replay_due()` (migration `20260527000004`) and in TS via `TTL_MS` — keep both in sync manually when editing the buckets. The tracked-field literal set + `FailReason` union live in [`src/lib/catalog/tracked-fields.ts`](src/lib/catalog/tracked-fields.ts) — under `$lib/catalog/`, NOT `$lib/server/catalog/`, so the admin `+page.svelte` files can value-import without tripping SvelteKit's server-only-bundle boundary.
+
+**Replay surface**: `select_replay_candidates(p_limit)` powers the nightly `/api/cron/catalog-replay` cron (4 UTC). `requeue_catalog_resolve(id, fields[])` nulls value + state columns per field AND resets `do_not_refetch_description=FALSE` for description — memory `feedback_catalog_reset_sql_misses_flag` is the failure mode this prevents.
+
+**Admin surface**: [`/app/admin`](src/routes/app/admin/) gated on `profiles.is_admin` (404 on non-admin so route existence doesn't leak). Five form actions (`saveDescription`, `takedown`, `uploadCover`, `setIsbn`, `requeue`) all route through `admin_apply_action(admin_user_id, catalog_id, action, patch_jsonb)` RPC — single transaction, UPDATE + audit INSERT into `catalog_admin_actions` with full-row JSONB before/after snapshots. Audit history view at `/app/admin/catalog/[id]/history`; fill-rate table at `/app/admin/fill-rate` (reads `catalog_fill_rate_history`, populated weekly by `/api/cron/catalog-fill-rate`).
+
+**Observability**: `@sentry/sveltekit` ≥10 removed `Sentry.metrics.*`; durable `catalog_fill_rate_history` table is the path. Weekly snapshot row + admin-readable RLS policy. Sparkline visualization deferred — table renders the same data without a charting dep.
+
 ## Cron handlers
 
 Cron paths are declared in `vercel.ts` (`crons[]`) and live under `src/routes/api/cron/*/+server.ts`. Two invariants every cron handler must hold:

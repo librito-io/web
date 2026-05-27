@@ -47,6 +47,8 @@ const resolveIsbnSpy = vi.fn(
     _supabase: unknown,
     _isbn: string,
     _deps: { mutex?: unknown },
+    _ctx?: { title?: string; author?: string },
+    _fields?: string[],
   ): Promise<{ cached: boolean; rateLimited: boolean; row: unknown }> => ({
     cached: false,
     rateLimited: false,
@@ -59,6 +61,7 @@ const resolveTitleAuthorSpy = vi.fn(
     _title: string,
     _author: string,
     _deps: { mutex?: unknown },
+    _fields?: string[],
   ): Promise<{ cached: boolean; rateLimited: boolean; row: unknown }> => ({
     cached: false,
     rateLimited: false,
@@ -475,29 +478,19 @@ describe("enrichFeedRowsWithCovers", () => {
       expect(userLimitMock).not.toHaveBeenCalled();
     });
 
-    it("falls through to TA cover when ISBN-bearing row has no ISBN-catalog entry but a TA-catalog row exists (issue #427)", async () => {
-      // Scenario: book first synced ISBN-less created a TA-keyed catalog row
-      // with a usable cover. A later sync filled `books.isbn`, but the TA
-      // row was never linked to the ISBN. Feed must still display the TA
-      // cover instead of placeholder.
+    it("schedules resolveIsbn with title+author ctx when ISBN-bearing row has no ISBN-catalog entry (issue #427)", async () => {
+      // Scenario (issue #427): book first synced ISBN-less created a
+      // TA-keyed catalog row. A later sync filled `books.isbn`, but the
+      // TA row was never linked to the ISBN. PR3 closes this at the data
+      // layer via promote-on-resolve: the resolver stamps the TA row with
+      // the new ISBN when called with title+author ctx. The display-side
+      // fallthrough that previously masked the gap was removed in PR3, so
+      // the row renders placeholder for one cycle while the background
+      // resolve consolidates.
       const supabase = createMockSupabase();
-      // Two awaits hit `book_catalog.select` in order: the ISBN-batch lookup
-      // first, then the TA-batch lookup. Queue the per-query results.
-      supabase._resultsQueue.set("book_catalog.select", [
-        // ISBN query: no row for the ISBN (cold miss).
-        { data: [], error: null },
-        // TA query: row exists with a usable cover under the normalized key.
-        {
-          data: [
-            {
-              normalized_title_author: "some book|some author",
-              storage_path: "covers/fallthrough",
-              cover_storage_backend: "supabase",
-            },
-          ],
-          error: null,
-        },
-      ]);
+      // No TA-batch lookup runs for ISBN-bearing rows post-PR3, so only
+      // the ISBN-batch lookup hits book_catalog.
+      supabase._results.set("book_catalog.select", { data: [], error: null });
 
       const items = await enrichFeedRowsWithCovers(supabase, USER_ID, [
         row({
@@ -508,11 +501,12 @@ describe("enrichFeedRowsWithCovers", () => {
       ]);
 
       expect(items).toHaveLength(1);
-      expect(items[0].coverUrl).toContain("covers/fallthrough");
+      // Display-side fallthrough is gone — placeholder this cycle.
+      expect(items[0].coverUrl).toBeNull();
 
-      // Scheduling: ISBN-bearing row schedules `resolveIsbn` only — the TA
-      // path is purely a display fallthrough for rows that already have an
-      // ISBN, so we must NOT also schedule `resolveTitleAuthor` for it.
+      // Scheduling: ISBN-bearing row schedules `resolveIsbn` only. ctx
+      // (position 3 — supabase, isbn, deps, ctx, fields) carries
+      // title+author so the resolver can promote the TA row.
       expect(runInBackgroundSpy).toHaveBeenCalledTimes(1);
       for (const call of runInBackgroundSpy.mock.calls) {
         const work = call[0] as () => Promise<unknown>;
@@ -520,12 +514,17 @@ describe("enrichFeedRowsWithCovers", () => {
       }
       expect(resolveIsbnSpy).toHaveBeenCalledTimes(1);
       expect(resolveIsbnSpy.mock.calls[0][1]).toBe(ISBN_A);
+      expect(resolveIsbnSpy.mock.calls[0][3]).toEqual({
+        title: "Some Book",
+        author: "Some Author",
+      });
       expect(resolveTitleAuthorSpy).not.toHaveBeenCalled();
     });
 
-    it("returns null when ISBN-bearing row has no ISBN-catalog entry and no TA-catalog row (issue #427 — TA cache miss)", async () => {
+    it("returns null and schedules resolveIsbn with ctx when ISBN-bearing row has no ISBN-catalog entry (issue #427 — TA cache miss)", async () => {
       const supabase = createMockSupabase();
-      // Both lookups empty: no ISBN row, no TA row.
+      // ISBN lookup empty; TA lookup is no longer issued for ISBN-bearing
+      // rows post-PR3 (taPairsByKey skips them at construction).
       supabase._results.set("book_catalog.select", { data: [], error: null });
 
       const items = await enrichFeedRowsWithCovers(supabase, USER_ID, [
@@ -544,6 +543,13 @@ describe("enrichFeedRowsWithCovers", () => {
         await work();
       }
       expect(resolveIsbnSpy).toHaveBeenCalledTimes(1);
+      // ctx carries title+author so promote_ta_to_isbn fires even when no
+      // TA row currently exists — promote returns false in that case and
+      // resolve continues to cold-resolve cleanly.
+      expect(resolveIsbnSpy.mock.calls[0][3]).toEqual({
+        title: "Some Book",
+        author: "Some Author",
+      });
       expect(resolveTitleAuthorSpy).not.toHaveBeenCalled();
     });
 

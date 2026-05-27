@@ -42,24 +42,23 @@ export async function enrichFeedRowsWithCovers(
   }
   const uniqueCanon = Array.from(new Set(canonByRaw.values()));
 
-  // Title/author candidates. Every row with title+author goes into the
-  // lookup map so the per-row map can fall through to the TA cache when the
-  // ISBN branch misses (issue #427: a book first synced ISBN-less builds a
-  // TA-keyed catalog row; a later sync that fills `books.isbn` would
-  // otherwise render placeholder forever even though the TA row already has
-  // a usable cover). Scheduling is a separate concern — only ISBN-null
-  // rows go into `taSchedulingKeys`, because rows with ISBN should resolve
-  // through the canonical ISBN path, not duplicate via TA.
+  // Title/author candidates. Only ISBN-less rows populate the TA map —
+  // ISBN-bearing rows resolve through the canonical ISBN path, and the
+  // display-side TA fallthrough that previously masked the duplicate-row
+  // gap (issue #427) was removed in the PR3 refit. The data-layer fix is
+  // promote-on-resolve: resolveIsbn now stamps the TA-keyed catalog row
+  // with the new ISBN when the caller supplies title+author ctx, so the
+  // TA cache lookup is no longer needed at render time for ISBN-bearing
+  // rows.
   const taPairsByKey = new Map<string, { title: string; author: string }>();
-  const taSchedulingKeys = new Set<string>();
   for (const r of rows) {
     if (!r.book_title || !r.book_author) continue;
+    if (r.book_isbn) continue;
     const key = normalizeTitleAuthor(r.book_title, r.book_author);
     if (!key) continue;
     if (!taPairsByKey.has(key)) {
       taPairsByKey.set(key, { title: r.book_title, author: r.book_author });
     }
-    if (!r.book_isbn) taSchedulingKeys.add(key);
   }
   const uniqueTaKeys = Array.from(taPairsByKey.keys());
 
@@ -123,17 +122,35 @@ export async function enrichFeedRowsWithCovers(
         (c) => !coverUrlsByCanon.has(c) && !negativeIsbns.has(c),
       )
     : [];
-  // Only schedule TA resolves for rows that lack an ISBN. Rows with an
-  // ISBN resolve through the canonical ISBN path (`missingIsbns` above);
-  // their TA-key lookup is purely a display fallthrough.
+  // TA scheduling tracks every key in taPairsByKey because the ISBN-bearing
+  // skip already happened during map construction — every entry here is an
+  // ISBN-less row that should resolve through the TA path.
   const missingTaKeys = taLookupOk
-    ? Array.from(taSchedulingKeys).filter(
+    ? uniqueTaKeys.filter(
         (k) => !coverUrlsByTa.has(k) && !negativeTaKeys.has(k),
       )
     : [];
 
   const work: CatalogResolveWork[] = [];
-  for (const isbn of missingIsbns) work.push({ kind: "isbn", isbn });
+  // Build a sample-row lookup keyed by canonical ISBN so we can hand the
+  // resolver the title+author from the source row. The resolver uses ctx
+  // to attempt promote_ta_to_isbn, which closes the duplicate-row gap
+  // (issue #427) at the data layer.
+  const sampleRowByCanon = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) {
+    if (!r.book_isbn) continue;
+    const canon = canonByRaw.get(r.book_isbn);
+    if (!canon || sampleRowByCanon.has(canon)) continue;
+    sampleRowByCanon.set(canon, r);
+  }
+  for (const isbn of missingIsbns) {
+    const sample = sampleRowByCanon.get(isbn);
+    const ctx =
+      sample?.book_title && sample?.book_author
+        ? { title: sample.book_title, author: sample.book_author }
+        : undefined;
+    work.push({ kind: "isbn", isbn, ctx });
+  }
   for (const key of missingTaKeys) {
     const pair = taPairsByKey.get(key);
     if (pair) work.push({ kind: "ta", title: pair.title, author: pair.author });
@@ -143,18 +160,7 @@ export async function enrichFeedRowsWithCovers(
   return rows.map((r) => {
     if (r.book_isbn) {
       const isbnCover = coverUrlsByCanon.get(canonByRaw.get(r.book_isbn) ?? "");
-      if (isbnCover) return { ...r, coverUrl: isbnCover };
-      // Issue #427 fallthrough: ISBN-bearing book whose ISBN isn't in
-      // book_catalog yet may still have a TA-keyed row from an earlier
-      // ISBN-less sync. Try the TA cache before giving up.
-      if (r.book_title && r.book_author) {
-        const key = normalizeTitleAuthor(r.book_title, r.book_author);
-        if (key) {
-          const taCover = coverUrlsByTa.get(key);
-          if (taCover) return { ...r, coverUrl: taCover };
-        }
-      }
-      return { ...r, coverUrl: null };
+      return { ...r, coverUrl: isbnCover ?? null };
     }
     if (r.book_title && r.book_author) {
       const key = normalizeTitleAuthor(r.book_title, r.book_author);

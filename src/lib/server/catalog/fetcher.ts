@@ -887,6 +887,11 @@ export async function resolveIsbn(
   rawIsbn: string,
   deps: ResolveDeps,
   ctx?: ResolveCtx,
+  // PR4 consumer: replay cron passes the subset of tracked fields whose
+  // TTL is up so the resolver only walks those legs. Currently wired
+  // through scheduling but not consumed by the walker yet (PR3 lands
+  // the param; PR4 lands the gating).
+  _fields?: TrackedField[],
 ): Promise<ResolveResult> {
   const isbn = canonicalizeIsbn(rawIsbn);
   if (!isbn) throw new InvalidIsbnError(rawIsbn);
@@ -896,6 +901,51 @@ export async function resolveIsbn(
   const mutex = deps.mutex ?? noopMutex;
 
   const existing = await selectByIsbn(supabase, isbn);
+
+  // Promote-on-resolve (refit 2026-05-27 PR3, issue #427). When no ISBN
+  // row exists yet but the caller supplied title+author context, attempt
+  // to claim a pre-existing TA-keyed row by stamping its `isbn`. Closes
+  // the duplicate-row gap at the data layer — previously masked by a
+  // display-side fallthrough in feed-enrichment that has since been
+  // removed. Runs pre-mutex so warm-cache reads (which have non-null
+  // `existing`) pay no extra Upstash RTT.
+  //
+  // Failure modes:
+  //   - promote=false (no TA row OR ISBN-keyed row already exists via
+  //     unique_violation caught inside the RPC) → fall through to fresh
+  //     cold-resolve as if no TA row existed.
+  //   - RPC throws → log and fall through; resolve continues without
+  //     promotion. No throw, no recurse.
+  if (!existing && ctx?.title && ctx?.author) {
+    const taKey = normalizeTitleAuthor(ctx.title, ctx.author);
+    if (taKey) {
+      const { data: promoted, error: promoteErr } = await supabase.rpc(
+        "promote_ta_to_isbn",
+        { p_isbn: isbn, p_ta_key: taKey },
+      );
+      if (promoteErr) {
+        logger().warn(
+          {
+            event: "catalog_promote_failed",
+            isbn,
+            ta_key: taKey,
+            error: promoteErr.message,
+          },
+          "catalog_promote_failed",
+        );
+      } else if (promoted === true) {
+        logger().info(
+          { event: "catalog_row_promoted", isbn, ta_key: taKey },
+          "catalog_row_promoted",
+        );
+        // Recurse — next selectByIsbn hits the now-ISBN-keyed row and
+        // the resolver continues normally (cache short-circuit if every
+        // field populated; per-field walk otherwise).
+        return resolveIsbn(supabase, isbn, deps, ctx, _fields);
+      }
+    }
+  }
+
   // Cache short-circuit replaced by per-field gating (refit 2026-05-27).
   // Row is "cached" only when every tracked field is populated OR within
   // its fail_reason TTL window. pending_storage=TRUE always falls through
@@ -1340,6 +1390,8 @@ export async function resolveTitleAuthor(
   title: string,
   author: string,
   deps: ResolveDeps,
+  // PR4 consumer; see resolveIsbn for rationale.
+  _fields?: TrackedField[],
 ): Promise<ResolveResult> {
   const key = normalizeTitleAuthor(title, author);
   if (!key) throw new InvalidTitleAuthorError();

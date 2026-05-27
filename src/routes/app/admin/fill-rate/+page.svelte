@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { TRACKED_FIELDS } from "$lib/server/catalog/tracked-fields";
+  import { TRACKED_FIELDS } from "$lib/catalog/tracked-fields";
   let { data } = $props();
 
   type HistoryRow = (typeof data.history)[number];

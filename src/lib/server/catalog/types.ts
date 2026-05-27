@@ -1,7 +1,7 @@
 // Upstream API response shapes — shared across catalog modules
 
 import type { Database } from "$lib/types/database";
-import type { FailReason } from "./tracked-fields";
+import type { FailReason } from "$lib/catalog/tracked-fields";
 
 export interface OpenLibraryAuthor {
   name?: string;
@@ -255,8 +255,8 @@ export function hasCoverStorage<
 // Re-exported from `./tracked-fields` so the operator CLI under
 // `scripts/data/` can pull the canonical literal union via relative path
 // without dragging $lib resolution through tsx.
-export type { FailReason } from "./tracked-fields";
-export { FAIL_REASONS } from "./tracked-fields";
+export type { FailReason } from "$lib/catalog/tracked-fields";
+export { FAIL_REASONS } from "$lib/catalog/tracked-fields";
 
 // Provider provenance for textual fields (publisher / published_date /
 // subjects / page_count). Cover uses the narrower CoverSource union;
@@ -270,8 +270,8 @@ export type FieldProvider =
 // Fields the per-field walker tracks state for. Re-exported from
 // `./tracked-fields` so the operator CLI under `scripts/data/` can pull
 // the canonical literal union without $lib resolution.
-export type { TrackedField } from "./tracked-fields";
-export { TRACKED_FIELDS } from "./tracked-fields";
+export type { TrackedField } from "$lib/catalog/tracked-fields";
+export { TRACKED_FIELDS } from "$lib/catalog/tracked-fields";
 
 // Optional context the caller hands to resolveIsbn so the resolver can
 // reconcile a previously-TA-keyed row to ISBN on cold-resolve (PR3).

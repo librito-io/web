@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { TRACKED_FIELDS } from "$lib/server/catalog/tracked-fields";
+  import { TRACKED_FIELDS } from "$lib/catalog/tracked-fields";
   let { data, form } = $props();
   const row = $derived(data.row);
 </script>

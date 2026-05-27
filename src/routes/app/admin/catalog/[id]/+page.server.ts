@@ -10,7 +10,7 @@ import {
   type CatalogResolveWork,
 } from "$lib/server/catalog/scheduling";
 import { SERVICE_USER_ID } from "$lib/server/catalog/constants";
-import { TRACKED_FIELDS } from "$lib/server/catalog/tracked-fields";
+import { TRACKED_FIELDS } from "$lib/catalog/tracked-fields";
 
 const COVER_MAX_BYTES = 5 * 1024 * 1024;
 const COVER_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);

@@ -4,6 +4,11 @@
 // import via relative path without dragging in the SvelteKit-only env
 // resolution chain.
 //
+// Lives under `$lib/catalog/` (not `$lib/server/catalog/`) because the
+// admin UI renders the field list inside `+page.svelte` and SvelteKit's
+// `$lib/server/*` boundary forbids client-bundle imports from there.
+// No env reads, no DB code, no secrets — safe to ship into the browser.
+//
 // Editors of these literal unions: bump the DB CHECK constraints in
 // migration 20260527000001 + every {field}_fail_reason CHECK; bump
 // _field_replay_due in migration 20260527000004; bump the resolver's

@@ -103,7 +103,17 @@ export const load: PageServerLoad = async (event) => {
     if (view && view.cover_url !== null) {
       catalog = projectCatalogView(view);
     } else if (view === null) {
-      await scheduleCatalogResolveIfAllowed(userId, [{ kind: "isbn", isbn }]);
+      // ctx carries title+author so the resolver can promote a pre-existing
+      // TA-keyed catalog row to ISBN-keyed instead of creating a duplicate
+      // (issue #427, refit PR3). bookRow.title + .author are guaranteed
+      // non-null by the books schema.
+      await scheduleCatalogResolveIfAllowed(userId, [
+        {
+          kind: "isbn",
+          isbn,
+          ctx: { title: bookRow.title, author: bookRow.author },
+        },
+      ]);
     }
   } else if (
     bookRow.title &&

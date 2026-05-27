@@ -81,6 +81,11 @@ export const GET: RequestHandler = async (event) => {
 
   if (!catalogView || catalogView.cover_url === null) {
     const mutex = await getCatalogMutex();
+    // ctx omitted: this endpoint takes an ISBN URL param with no book row
+    // attached, so it can't supply title+author. Promote-on-resolve relies
+    // on the feed-enrichment and book-detail loader paths, which both
+    // carry ctx — those run alongside this endpoint for any ISBN a user
+    // has actually synced.
     runInBackground(() =>
       resolveIsbn(supabase, isbn, {
         rateLimiters: {

@@ -38,6 +38,9 @@ async function runWarmup(
   let rateLimited = 0;
   for (const isbn of toResolve) {
     try {
+      // ctx omitted: warmup walks bestseller / operator-supplied ISBN
+      // lists. No user has synced these books yet, so there's no TA-keyed
+      // catalog row to promote — promote-on-resolve is a no-op here.
       const r = await resolveIsbn(supabase, isbn, {
         rateLimiters: {
           openLibrary: catalogOpenLibraryLimiter,

@@ -16,7 +16,7 @@ export interface OpenLibraryDataDoc {
   publishers?: OpenLibraryPublisher[];
   number_of_pages?: number;
   publish_date?: string;
-  subjects?: { name: string }[] | string[];
+  subjects?: (string | { name: string })[];
   cover?: { large?: string; medium?: string; small?: string };
   url?: string;
   identifiers?: { isbn_10?: string[]; [key: string]: string[] | undefined };
@@ -168,11 +168,42 @@ export interface CatalogMetadata {
  */
 export type BookCatalogRowFields = Omit<
   Database["public"]["Tables"]["book_catalog"]["Row"],
-  "cover_storage_backend" | "description_provider" | "cover_source"
+  | "cover_storage_backend"
+  | "description_provider"
+  | "cover_source"
+  | "publisher_provider"
+  | "published_date_provider"
+  | "subjects_provider"
+  | "page_count_provider"
+  | "cover_fail_reason"
+  | "description_fail_reason"
+  | "publisher_fail_reason"
+  | "published_date_fail_reason"
+  | "subjects_fail_reason"
+  | "page_count_fail_reason"
 > & {
   cover_storage_backend: CoverStorageBackend | null;
   description_provider: DescriptionProvider | null;
   cover_source: CoverSource | null;
+  // Per-field provider overrides — the generated row widens these to
+  // `string | null` because the DB CHECK constraint isn't visible to the
+  // gen:types extractor. cover_source carries the cover provider; the
+  // four below carry the other tracked-field providers. description
+  // provider stays on the existing DescriptionProvider alias since it
+  // predates the refit.
+  publisher_provider: FieldProvider | null;
+  published_date_provider: FieldProvider | null;
+  subjects_provider: FieldProvider | null;
+  page_count_provider: FieldProvider | null;
+  // Per-field fail buckets — likewise narrowed back to the literal union
+  // the DB CHECK enforces. Drives the TTL ladder in shouldAttempt() and
+  // _field_replay_due().
+  cover_fail_reason: FailReason | null;
+  description_fail_reason: FailReason | null;
+  publisher_fail_reason: FailReason | null;
+  published_date_fail_reason: FailReason | null;
+  subjects_fail_reason: FailReason | null;
+  page_count_fail_reason: FailReason | null;
 };
 
 export type PositiveBookCatalogRow = Omit<

@@ -49,6 +49,36 @@ describe("classifyDescriptionFromOpenLibrary", () => {
       provider: "openlibrary",
     });
   });
+
+  it("trims leading/trailing whitespace from string description", () => {
+    expect(
+      classifyDescriptionFromOpenLibrary({
+        description: "  A novel about...\n\n",
+      }),
+    ).toEqual({
+      kind: "success",
+      value: "A novel about...",
+      provider: "openlibrary",
+    });
+  });
+
+  it("trims OL {value: ...} object description", () => {
+    expect(
+      classifyDescriptionFromOpenLibrary({
+        description: { value: "\n\tNested with whitespace\n" },
+      }),
+    ).toEqual({
+      kind: "success",
+      value: "Nested with whitespace",
+      provider: "openlibrary",
+    });
+  });
+
+  it("whitespace-only description folds into empty", () => {
+    expect(
+      classifyDescriptionFromOpenLibrary({ description: "   \n\t  " }),
+    ).toEqual({ kind: "empty", provider: "openlibrary" });
+  });
 });
 
 describe("classifyDescriptionFromGoogleBooks", () => {
@@ -174,6 +204,30 @@ describe("classifyPublisherFromOpenLibrary", () => {
     ).toEqual({ kind: "success", value: "Penguin", provider: "openlibrary" });
   });
 
+  it("joins multi-publisher names with ', '", () => {
+    expect(
+      classifyPublisherFromOpenLibrary({
+        publishers: [{ name: "Penguin" }, { name: "Random House" }],
+      }),
+    ).toEqual({
+      kind: "success",
+      value: "Penguin, Random House",
+      provider: "openlibrary",
+    });
+  });
+
+  it("filters blank entries from multi-publisher set", () => {
+    expect(
+      classifyPublisherFromOpenLibrary({
+        publishers: [{ name: "Penguin" }, {}, { name: "Random House" }],
+      }),
+    ).toEqual({
+      kind: "success",
+      value: "Penguin, Random House",
+      provider: "openlibrary",
+    });
+  });
+
   it("no_data when olData is null", () => {
     expect(classifyPublisherFromOpenLibrary(null)).toEqual({
       kind: "no_data",
@@ -181,7 +235,7 @@ describe("classifyPublisherFromOpenLibrary", () => {
     });
   });
 
-  it("empty when publishers missing or first.name blank", () => {
+  it("empty when publishers missing or every entry blank", () => {
     expect(classifyPublisherFromOpenLibrary({})).toEqual({
       kind: "empty",
       provider: "openlibrary",
@@ -307,6 +361,21 @@ describe("classifySubjectsFromOpenLibrary", () => {
       kind: "empty",
       provider: "openlibrary",
     });
+  });
+
+  it("caps merged subjects at 30 entries (matches pre-refit extract.ts)", () => {
+    const fromData = Array.from({ length: 25 }).map(
+      (_, i) => `data-subject-${i}`,
+    );
+    const fromWork = Array.from({ length: 25 }).map(
+      (_, i) => `work-subject-${i}`,
+    );
+    const r = classifySubjectsFromOpenLibrary(
+      { subjects: fromData },
+      { subjects: fromWork },
+    );
+    expect(r.kind).toBe("success");
+    expect((r as { value: string[] }).value).toHaveLength(30);
   });
 });
 

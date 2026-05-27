@@ -38,8 +38,14 @@ export function classifyDescriptionFromOpenLibrary(
       : raw && typeof raw === "object" && "value" in raw
         ? raw.value
         : null;
-  if (!text) return { kind: "empty", provider: "openlibrary" };
-  return { kind: "success", value: text, provider: "openlibrary" };
+  // OL description values arrive with leading/trailing whitespace from the
+  // MARC pipeline (often a trailing newline on `description.value` strings).
+  // Match the pre-refit `extractOpenLibraryMetadata` behaviour — trim before
+  // returning, fold whitespace-only into the empty branch so the walker
+  // advances to the next leg rather than persisting blank-ish text.
+  const trimmed = text?.trim();
+  if (!trimmed) return { kind: "empty", provider: "openlibrary" };
+  return { kind: "success", value: trimmed, provider: "openlibrary" };
 }
 
 export function classifyDescriptionFromGoogleBooks(
@@ -81,9 +87,16 @@ export function classifyPublisherFromOpenLibrary(
   olData: OpenLibraryDataDoc | null,
 ): LegOutcome<string> {
   if (olData == null) return { kind: "no_data", provider: "openlibrary" };
-  const name = olData.publishers?.[0]?.name;
-  if (!name) return { kind: "empty", provider: "openlibrary" };
-  return { kind: "success", value: name, provider: "openlibrary" };
+  // Multi-imprint / co-publisher OL records (academic editions, translations)
+  // carry every publisher name in `publishers[]`. Pre-refit
+  // `extractOpenLibraryMetadata` joined them with ", "; match that so a
+  // record like Penguin + Random House persists as "Penguin, Random House"
+  // rather than just the first entry.
+  const names = (olData.publishers ?? [])
+    .map((p) => p.name)
+    .filter((n): n is string => !!n);
+  if (names.length === 0) return { kind: "empty", provider: "openlibrary" };
+  return { kind: "success", value: names.join(", "), provider: "openlibrary" };
 }
 
 export function classifyPublisherFromGoogleBooks(
@@ -155,6 +168,13 @@ export function classifyPageCountFromGoogleBooks(
 
 // ── subjects (union OL.subjects ⨁ OL.work.subjects, then GB categories) ─────
 
+// Cap OL subjects at 30 entries to match pre-refit
+// `extractOpenLibraryMetadata` behaviour. MARC-derived bibliographies on
+// OL sometimes return hundreds of subjects; book_catalog.subjects is a
+// text[] with no hard cap, but the feed-card chip rows truncate visually
+// and 30+ subjects bloat the row payload on every read.
+const OL_SUBJECTS_CAP = 30;
+
 export function classifySubjectsFromOpenLibrary(
   olData: OpenLibraryDataDoc | null,
   olWork: OpenLibraryWork | null,
@@ -165,7 +185,10 @@ export function classifySubjectsFromOpenLibrary(
     .map((s) => (typeof s === "string" ? s : s.name))
     .filter((s): s is string => !!s);
   const fromWork = olWork?.subjects ?? [];
-  const merged = Array.from(new Set([...fromData, ...fromWork]));
+  const merged = Array.from(new Set([...fromData, ...fromWork])).slice(
+    0,
+    OL_SUBJECTS_CAP,
+  );
   if (merged.length === 0) return { kind: "empty", provider: "openlibrary" };
   return { kind: "success", value: merged, provider: "openlibrary" };
 }

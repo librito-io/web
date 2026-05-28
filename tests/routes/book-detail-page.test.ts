@@ -287,6 +287,94 @@ describe("load /app/book/[bookHash] — title/author fallback (no ISBN)", () => 
   });
 });
 
+describe("load /app/book/[bookHash] — metadata renders when cover missing (issue #462)", () => {
+  it("ISBN branch: projects description + placeholder cover when storage_path is null", async () => {
+    supabase._results.set("books.select", { data: [bookRow], error: null });
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: ISBN,
+          title: "Gatsby",
+          author: "Fitzgerald",
+          description: "A novel about the Roaring Twenties.",
+          description_provider: "google_books",
+          publisher: "Scribner",
+          page_count: 180,
+          subjects: ["Fiction"],
+          published_date: "1925",
+          language: "en",
+          series_name: null,
+          series_position: null,
+          // Negative-cache row: cover chain exhausted but metadata populated.
+          storage_path: null,
+          cover_storage_backend: null,
+          cover_max_width: null,
+        },
+      ],
+      error: null,
+    });
+
+    const result = await loadResult(buildEvent());
+
+    expect(result.catalog.cover_url).toBe("/cover-placeholder.svg");
+    expect(result.catalog.description).toBe(
+      "A novel about the Roaring Twenties.",
+    );
+    expect(result.catalog.description_provider).toBe("google_books");
+    expect(result.catalog.publisher).toBe("Scribner");
+    expect(result.catalog.page_count).toBe(180);
+    expect(result.catalog.subjects).toEqual(["Fiction"]);
+    expect(result.catalog.published_date).toBe("1925");
+    // Row exists — must NOT re-schedule resolve. Replay cron owns TTL retry.
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+    expect(userLimitMock).not.toHaveBeenCalled();
+  });
+
+  it("title/author branch: projects description + placeholder cover when storage_path is null", async () => {
+    const SIDELOADED_BOOK = {
+      id: "book-2",
+      book_hash: BOOK_HASH,
+      title: "Sideloaded Book",
+      author: "Some Author",
+      isbn: null,
+    };
+    supabase._results.set("books.select", {
+      data: [SIDELOADED_BOOK],
+      error: null,
+    });
+    supabase._results.set("book_catalog.select", {
+      data: [
+        {
+          isbn: null,
+          title: SIDELOADED_BOOK.title,
+          author: SIDELOADED_BOOK.author,
+          description: "blurb",
+          description_provider: "openlibrary",
+          publisher: null,
+          page_count: null,
+          subjects: null,
+          published_date: null,
+          language: null,
+          series_name: null,
+          series_position: null,
+          storage_path: null,
+          cover_storage_backend: null,
+          cover_max_width: null,
+        },
+      ],
+      error: null,
+    });
+
+    const result = await loadResult(buildEvent());
+
+    expect(result.catalog.cover_url).toBe("/cover-placeholder.svg");
+    expect(result.catalog.description).toBe("blurb");
+    expect(result.catalog.description_provider).toBe("openlibrary");
+    expect(runInBackgroundSpy).not.toHaveBeenCalled();
+    expect(userLimitMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("load /app/book/[bookHash] — feed-card cover enrichment (issue #111)", () => {
   it("populates coverUrl on each highlight card via enrichFeedRowsWithCovers", async () => {
     // Book-detail page must render per-card thumbnails matching the home

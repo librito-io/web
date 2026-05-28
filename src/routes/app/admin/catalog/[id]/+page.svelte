@@ -95,6 +95,9 @@
         {f}
       </label>
     {/each}
+    {#each data.dlqArchive as r (r.id)}
+      <input type="hidden" name="dlq_archive_id" value={r.id} />
+    {/each}
     <button type="submit" style="margin-top:0.5rem;">Requeue selected</button>
   </form>
 </section>

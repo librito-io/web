@@ -19,9 +19,11 @@ vi.mock("$lib/server/supabase", () => ({
 
 const sentryCaptureMessageSpy = vi.fn();
 const sentryCaptureExceptionSpy = vi.fn();
+const sentryFlushSpy = vi.fn(async () => true);
 vi.mock("@sentry/sveltekit", () => ({
   captureMessage: sentryCaptureMessageSpy,
   captureException: sentryCaptureExceptionSpy,
+  flush: sentryFlushSpy,
 }));
 
 const listMessagesSpy = vi.fn();
@@ -61,6 +63,8 @@ beforeEach(() => {
   deleteMessageSpy.mockReset();
   sentryCaptureMessageSpy.mockReset();
   sentryCaptureExceptionSpy.mockReset();
+  sentryFlushSpy.mockReset();
+  sentryFlushSpy.mockResolvedValue(true);
   adminSupabase._results.clear();
 });
 

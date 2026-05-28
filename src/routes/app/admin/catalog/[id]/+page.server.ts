@@ -11,6 +11,7 @@ import {
 } from "$lib/server/catalog/scheduling";
 import { SERVICE_USER_ID } from "$lib/server/catalog/constants";
 import { TRACKED_FIELDS } from "$lib/catalog/tracked-fields";
+import { logger } from "$lib/server/log";
 
 const COVER_MAX_BYTES = 5 * 1024 * 1024;
 const COVER_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -37,10 +38,15 @@ export const load: PageServerLoad = async ({ params }) => {
 
   // Find matching DLQ archive rows. Two lookup paths matching the producer's
   // payload shape: ISBN-keyed (payload.item.isbn) or TA-keyed
-  // (payload.item.title + payload.item.author). Limited to 50 — surface
-  // bounded; older entries inspectable via Supabase Studio if needed.
-  const dlqLookups: Promise<unknown>[] = [];
-  let dlqArchive: Array<{
+  // (payload.item.title + payload.item.author). A DLQ entry can satisfy both
+  // when the producer published an ISBN payload whose row also has a
+  // (title, author) — dedupe by id to keep Svelte's keyed {#each} happy and
+  // to keep the row list at one entry per DLQ record.
+  //
+  // Lookup limited to 50 per branch — surface bounded; older entries
+  // inspectable via Supabase Studio if needed.
+
+  type DlqArchiveRow = {
     id: number;
     message_id: string;
     first_failed_at: string;
@@ -48,41 +54,55 @@ export const load: PageServerLoad = async ({ params }) => {
     archived_at: string;
     manually_requeued_at: string | null;
     payload: unknown;
-  }> = [];
+  };
+  const DLQ_COLS =
+    "id, message_id, first_failed_at, fail_reason, archived_at, manually_requeued_at, payload";
+
+  const dlqQueries = [] as Promise<{
+    data: DlqArchiveRow[] | null;
+    error: unknown;
+  }>[];
   if (row.isbn) {
-    dlqLookups.push(
-      Promise.resolve(
-        admin
-          .from("catalog_dlq_archive")
-          .select(
-            "id, message_id, first_failed_at, fail_reason, archived_at, manually_requeued_at, payload",
-          )
-          .filter("payload->item->>isbn", "eq", row.isbn)
-          .order("archived_at", { ascending: false })
-          .limit(50),
-      ).then(({ data }) => {
-        if (data) dlqArchive = dlqArchive.concat(data);
-      }),
+    dlqQueries.push(
+      admin
+        .from("catalog_dlq_archive")
+        .select(DLQ_COLS)
+        .filter("payload->item->>isbn", "eq", row.isbn)
+        .order("archived_at", { ascending: false })
+        .limit(50) as unknown as Promise<{
+        data: DlqArchiveRow[] | null;
+        error: unknown;
+      }>,
     );
   }
   if (row.title && row.author) {
-    dlqLookups.push(
-      Promise.resolve(
-        admin
-          .from("catalog_dlq_archive")
-          .select(
-            "id, message_id, first_failed_at, fail_reason, archived_at, manually_requeued_at, payload",
-          )
-          .filter("payload->item->>title", "eq", row.title)
-          .filter("payload->item->>author", "eq", row.author)
-          .order("archived_at", { ascending: false })
-          .limit(50),
-      ).then(({ data }) => {
-        if (data) dlqArchive = dlqArchive.concat(data);
-      }),
+    dlqQueries.push(
+      admin
+        .from("catalog_dlq_archive")
+        .select(DLQ_COLS)
+        .filter("payload->item->>title", "eq", row.title)
+        .filter("payload->item->>author", "eq", row.author)
+        .order("archived_at", { ascending: false })
+        .limit(50) as unknown as Promise<{
+        data: DlqArchiveRow[] | null;
+        error: unknown;
+      }>,
     );
   }
-  if (dlqLookups.length > 0) await Promise.all(dlqLookups);
+  const dlqResults = await Promise.all(dlqQueries);
+  for (const r of dlqResults) {
+    if (r.error) {
+      logger().error(
+        { event: "admin.catalog.dlq_lookup_failed", error: String(r.error) },
+        "admin.catalog.dlq_lookup_failed",
+      );
+    }
+  }
+  const dlqArchive: DlqArchiveRow[] = Array.from(
+    new Map(
+      dlqResults.flatMap((r) => r.data ?? []).map((r) => [r.id, r]),
+    ).values(),
+  );
 
   return { row, dlqArchive };
 };
@@ -174,6 +194,15 @@ export const actions: Actions = {
       return fail(400, { message: "select at least one field" });
     }
 
+    // Read the DLQ archive IDs the operator saw on this page (passed via
+    // hidden inputs in the requeue form). Used to scope the stamp UPDATE to
+    // only the rows the operator actually reviewed, preventing cross-catalog
+    // contamination during set_isbn races.
+    const dlqArchiveIds = fd
+      .getAll("dlq_archive_id")
+      .map((v) => Number(v))
+      .filter((n) => Number.isFinite(n));
+
     const admin = createAdminClient();
     const { error: rpcErr } = await admin.rpc("admin_apply_action", {
       p_admin_user_id: user.id,
@@ -210,24 +239,19 @@ export const actions: Actions = {
         }),
       );
 
-      // Stamp matching DLQ archive rows so the admin UI reflects the
-      // re-queue. Gated on work.length > 0 — when the row has neither an
-      // ISBN nor a usable (title, author), no resolve is scheduled, and
-      // stamping would lie about state. Discrimination mirrors the load
-      // query: ISBN path takes precedence; otherwise (title, author).
-      if (row?.isbn) {
-        await admin
+      // Stamp ONLY the DLQ rows the operator actually saw on this page.
+      // Scoping to dlqArchiveIds prevents touching DLQ rows that belong to
+      // a different catalog row sharing the same ISBN (transient state
+      // during set_isbn races, partial-unique constraint window).
+      if (dlqArchiveIds.length > 0) {
+        const { error: stampErr } = await admin
           .from("catalog_dlq_archive")
           .update({ manually_requeued_at: new Date().toISOString() })
           .is("manually_requeued_at", null)
-          .filter("payload->item->>isbn", "eq", row.isbn);
-      } else if (row?.title && row.author) {
-        await admin
-          .from("catalog_dlq_archive")
-          .update({ manually_requeued_at: new Date().toISOString() })
-          .is("manually_requeued_at", null)
-          .filter("payload->item->>title", "eq", row.title)
-          .filter("payload->item->>author", "eq", row.author);
+          .in("id", dlqArchiveIds);
+        if (stampErr) {
+          return fail(500, { message: stampErr.message });
+        }
       }
     }
 

@@ -42,12 +42,18 @@ export const GET: RequestHandler = async ({ request, url }) => {
   if (url.searchParams.get("probe") === "1") {
     return jsonSuccess({ probe: true });
   }
-  if (!privateEnv.QSTASH_TOKEN) {
+  // QSTASH_URL pins the region endpoint (EU-tenant tokens 401 against the
+  // SDK's global default https://qstash.upstash.io). Skip when either leg
+  // is missing — same self-hoster gate posture as QSTASH_TOKEN-only.
+  if (!privateEnv.QSTASH_TOKEN || !privateEnv.QSTASH_URL) {
     return jsonSuccess({ skipped: true });
   }
 
   const start = Date.now();
-  const qstash = new QStashClient({ token: privateEnv.QSTASH_TOKEN });
+  const qstash = new QStashClient({
+    token: privateEnv.QSTASH_TOKEN,
+    baseUrl: privateEnv.QSTASH_URL,
+  });
   const admin = createAdminClient();
 
   let messages: DlqMessage[];

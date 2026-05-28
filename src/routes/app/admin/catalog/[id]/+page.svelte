@@ -17,11 +17,17 @@
   >
 </p>
 
-{#if form?.message}
+{#if form && "message" in form && form.message}
   <p style="color:red;">{form.message}</p>
 {/if}
-{#if form?.ok}
+{#if form && "ok" in form && form.ok}
   <p style="color:green;">Saved.</p>
+  {#if "scheduledBgResolve" in form && form.scheduledBgResolve === false}
+    <p style="color:#a16207;">
+      Note: requeue stored, but no background resolve scheduled — this row has
+      neither ISBN nor a usable title+author pair. Set one before re-requeueing.
+    </p>
+  {/if}
 {/if}
 
 <section>

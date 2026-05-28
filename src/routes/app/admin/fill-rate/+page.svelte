@@ -45,39 +45,37 @@
   </table>
 
   <h2 style="margin-top:2rem;">Description provider distribution (latest)</h2>
-  {#if data.history.length > 0}
-    {@const latest = data.history[data.history.length - 1]}
-    <table style="border-collapse:collapse;">
-      <thead>
-        <tr>
-          <th style="text-align:left; padding-right:1rem;">Provider</th>
-          <th style="text-align:right;">Count</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          ><td>openlibrary</td><td style="text-align:right;"
-            >{latest.desc_from_openlibrary}</td
-          ></tr
-        >
-        <tr
-          ><td>google_books</td><td style="text-align:right;"
-            >{latest.desc_from_google_books}</td
-          ></tr
-        >
-        <tr
-          ><td>itunes</td><td style="text-align:right;"
-            >{latest.desc_from_itunes}</td
-          ></tr
-        >
-        <tr
-          ><td>manual</td><td style="text-align:right;"
-            >{latest.desc_from_manual}</td
-          ></tr
-        >
-      </tbody>
-    </table>
-  {/if}
+  {@const latest = data.history[data.history.length - 1]}
+  <table style="border-collapse:collapse;">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding-right:1rem;">Provider</th>
+        <th style="text-align:right;">Count</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr
+        ><td>openlibrary</td><td style="text-align:right;"
+          >{latest.desc_from_openlibrary}</td
+        ></tr
+      >
+      <tr
+        ><td>google_books</td><td style="text-align:right;"
+          >{latest.desc_from_google_books}</td
+        ></tr
+      >
+      <tr
+        ><td>itunes</td><td style="text-align:right;"
+          >{latest.desc_from_itunes}</td
+        ></tr
+      >
+      <tr
+        ><td>manual</td><td style="text-align:right;"
+          >{latest.desc_from_manual}</td
+        ></tr
+      >
+    </tbody>
+  </table>
 {/if}
 
 <p style="margin-top:2rem; color:#666;">

@@ -21,7 +21,7 @@ export const load: PageServerLoad = async ({ url }) => {
   const { data, error } = await admin
     .from("book_catalog")
     .select("id, isbn, title, author, storage_path, description")
-    .or(`isbn.ilike.${q}%,title.ilike.${q}%`)
+    .or(`isbn.ilike.${q}%,title.ilike.${q}%,author.ilike.${q}%`)
     .order("last_attempted_at", { ascending: false, nullsFirst: false })
     .limit(50);
   if (error) throw error;

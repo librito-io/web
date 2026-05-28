@@ -1,15 +1,9 @@
 import { Client as QStashClient } from "@upstash/qstash";
 import * as Sentry from "@sentry/sveltekit";
-import { dispatchResolve } from "./dispatch";
+import { catalogRateLimiters, dispatchResolve } from "./dispatch";
 import { getCatalogMutex } from "./mutex";
 import type { ResolveCtx, TrackedField } from "./types";
-import {
-  catalogOpenLibraryLimiter,
-  catalogGoogleBooksLimiter,
-  catalogITunesLimiter,
-  catalogUserLimiter,
-  safeLimit,
-} from "$lib/server/ratelimit";
+import { catalogUserLimiter, safeLimit } from "$lib/server/ratelimit";
 import { runInBackground } from "$lib/server/wait-until";
 import { createAdminClient } from "$lib/server/supabase";
 import { logger } from "$lib/server/log";
@@ -96,12 +90,6 @@ export async function scheduleCatalogResolveIfAllowed(
   }
   if (permitted.length === 0) return;
 
-  const rateLimiters = {
-    openLibrary: catalogOpenLibraryLimiter,
-    googleBooks: catalogGoogleBooksLimiter,
-    itunes: catalogITunesLimiter,
-  };
-
   // Inline fallback: both env vars required. QSTASH_TOKEN alone with no
   // CONSUMER_URL would publish to "", and a preview deploy with only
   // QSTASH_TOKEN set would publish to wherever — refusing to attempt
@@ -113,7 +101,11 @@ export async function scheduleCatalogResolveIfAllowed(
     for (const item of permitted) {
       runInBackground(async () => {
         const mutex = await mutexPromise;
-        const deps = { rateLimiters, mutex, googleBooksApiKey };
+        const deps = {
+          rateLimiters: catalogRateLimiters,
+          mutex,
+          googleBooksApiKey,
+        };
         await dispatchResolve(admin, deps, userId, item);
       });
     }

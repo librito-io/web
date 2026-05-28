@@ -255,6 +255,44 @@ describe.skipIf(!process.env.INTEGRATION)("admin_apply_action RPC", () => {
     expect(audits ?? []).toHaveLength(0);
   });
 
+  it("rejects non-admin p_admin_user_id (defense-in-depth gate)", async () => {
+    const nonAdmin = await createTestUser("admin-apply-action-non-admin");
+    try {
+      const { error } = await admin.rpc("admin_apply_action", {
+        p_admin_user_id: nonAdmin.id,
+        p_catalog_id: rowId,
+        p_action: "takedown",
+        p_patch_jsonb: {},
+      });
+      expect(error?.message).toMatch(/is not an admin/i);
+
+      const { data: rowAfter } = await admin
+        .from("book_catalog")
+        .select("description")
+        .eq("id", rowId)
+        .single();
+      expect(rowAfter?.description).toBe("original description");
+
+      const { data: audits } = await admin
+        .from("catalog_admin_actions")
+        .select("id")
+        .eq("catalog_id", rowId);
+      expect(audits ?? []).toHaveLength(0);
+    } finally {
+      await deleteTestUser(nonAdmin.id).catch(() => undefined);
+    }
+  });
+
+  it("rejects unknown p_admin_user_id (no profiles row)", async () => {
+    const { error } = await admin.rpc("admin_apply_action", {
+      p_admin_user_id: "00000000-0000-0000-0000-000000000000",
+      p_catalog_id: rowId,
+      p_action: "takedown",
+      p_patch_jsonb: {},
+    });
+    expect(error?.message).toMatch(/is not an admin/i);
+  });
+
   it("requeue forwards fields to requeue_catalog_resolve + writes audit", async () => {
     await admin
       .from("book_catalog")

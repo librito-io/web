@@ -29,6 +29,7 @@ import {
   type FieldProvider,
   type GoogleBooksItem,
   type OpenLibraryDataDoc,
+  type OpenLibrarySearchDoc,
   type OpenLibraryWork,
   type ResolveCtx,
   type TrackedField,
@@ -826,6 +827,11 @@ const TITLE_STOPWORDS = new Set([
   "for",
   "is",
   "are",
+  "at",
+  "by",
+  "with",
+  "from",
+  "as",
 ]);
 
 /**
@@ -833,37 +839,45 @@ const TITLE_STOPWORDS = new Set([
  * don't accept a wrong book's cover when OL ranking returns a near-miss.
  *
  * Require BOTH:
- *   - Author surname token overlap (last whitespace token of any
- *     `doc.author_name` matches any author token from ctx)
- *   - First significant (non-stopword) title token overlap
+ *   - Title-token overlap: at least min(2, ctxTitleTokens.length) significant
+ *     (non-stopword) tokens in common. Two-token requirement prevents a single
+ *     generic token ("story", "memoir") from passing the gate; the floor of
+ *     min(2, len) keeps single-significant-token titles ("Annie Bot" reduced
+ *     to "annie bot", "Beloved") gateable when ctx is short.
+ *   - Author surname overlap: last whitespace token of any `doc.author_name`
+ *     entry matches any surname extracted from ctx.author (last whitespace
+ *     token per comma/semicolon/ampersand-split fragment). Surname-to-surname
+ *     only — a doc author whose first name coincides with ctx's surname
+ *     (or vice-versa) must NOT pass.
  */
 function acceptableMatch(
-  doc: { title?: string; author_name?: string[] },
+  doc: Pick<OpenLibrarySearchDoc, "title" | "author_name">,
   ctx: { title: string; author: string },
 ): boolean {
   const ctxTitleTokens = matchTokens(ctx.title).filter(
     (t) => !TITLE_STOPWORDS.has(t),
   );
+  if (ctxTitleTokens.length === 0) return false;
   const docTitleTokens = matchTokens(doc.title ?? "").filter(
     (t) => !TITLE_STOPWORDS.has(t),
   );
-  const titleOverlap = ctxTitleTokens.some((t) => docTitleTokens.includes(t));
-  if (!titleOverlap) return false;
+  const overlapCount = ctxTitleTokens.filter((t) =>
+    docTitleTokens.includes(t),
+  ).length;
+  const required = Math.min(2, ctxTitleTokens.length);
+  if (overlapCount < required) return false;
 
-  const ctxAuthorTokens = matchTokens(ctx.author);
   const ctxSurnames = new Set(
     ctx.author
       .split(/[,;&]/)
       .map((part) => matchTokens(part).at(-1))
       .filter((t): t is string => Boolean(t)),
   );
+  if (ctxSurnames.size === 0) return false;
   const docSurnames = (doc.author_name ?? [])
     .map((name) => matchTokens(name).at(-1))
     .filter((t): t is string => Boolean(t));
-  const surnameOverlap = docSurnames.some(
-    (s) => ctxSurnames.has(s) || ctxAuthorTokens.includes(s),
-  );
-  return surnameOverlap;
+  return docSurnames.some((s) => ctxSurnames.has(s));
 }
 
 /**

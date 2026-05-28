@@ -3605,6 +3605,67 @@ describe("resolveIsbn – OL title/author cover_id fall-through (#450)", () => {
     expect(p_row.openlibrary_cover_id).toBeNull();
   });
 
+  it("rejects TA result when doc author's first-name coincides with ctx surname (surname-only gate)", async () => {
+    // Pins the surname-only branch: the doc surname is "meg" (last
+    // whitespace token of "Some Person Meg"), which happens to be
+    // ctx.author's first name. Surname-to-surname comparison correctly
+    // rejects because ctxSurnames = {"josephson"}.
+    const supabase = coldMissSupabase();
+    const fetchFn = makeFetch({
+      numFound: 1,
+      docs: [
+        {
+          cover_i: 77777,
+          title: "Are You Mad at Me?",
+          author_name: ["Some Person Meg"],
+          key: "/works/OL77777W",
+        },
+      ],
+    });
+
+    await resolveIsbn(supabase as never, "9781668082461", deps({ fetchFn }), {
+      title: "Are You Mad at Me?",
+      author: "Meg Josephson",
+    });
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.openlibrary_cover_id).toBeNull();
+  });
+
+  it("rejects TA result when only a single generic title token overlaps (≥2 floor)", async () => {
+    // Pins the min(2, len) title-overlap floor: ctx has 4 significant
+    // tokens ("long","story","family","life"); doc shares only "story"
+    // — a generic word that would have falsely passed an any-token gate.
+    const supabase = coldMissSupabase();
+    const fetchFn = makeFetch({
+      numFound: 1,
+      docs: [
+        {
+          cover_i: 66666,
+          title: "Short Story Collection",
+          author_name: ["Meg Josephson"],
+          key: "/works/OL66666W",
+        },
+      ],
+    });
+
+    await resolveIsbn(supabase as never, "9781668082461", deps({ fetchFn }), {
+      title: "The Long Story of Family Life",
+      author: "Meg Josephson",
+    });
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.openlibrary_cover_id).toBeNull();
+  });
+
   it("does not fire TA search when ctx is absent", async () => {
     const supabase = coldMissSupabase();
     const fetchFn = makeFetch({

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { TRACKED_FIELDS } from "$lib/catalog/tracked-fields";
+  import DlqArchiveSection from "./DlqArchiveSection.svelte";
   let { data, form } = $props();
   const row = $derived(data.row);
 </script>
@@ -94,6 +95,9 @@
         {f}
       </label>
     {/each}
+    {#each data.dlqArchive as r (r.id)}
+      <input type="hidden" name="dlq_archive_id" value={r.id} />
+    {/each}
     <button type="submit" style="margin-top:0.5rem;">Requeue selected</button>
   </form>
 </section>
@@ -101,3 +105,5 @@
 <p style="margin-top:2rem;">
   <a href="/app/admin/catalog/{row.id}/history">View action history →</a>
 </p>
+
+<DlqArchiveSection rows={data.dlqArchive} />

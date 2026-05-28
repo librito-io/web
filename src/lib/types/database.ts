@@ -371,6 +371,36 @@ export type Database = {
           },
         ]
       }
+      catalog_dlq_archive: {
+        Row: {
+          archived_at: string
+          fail_reason: string | null
+          first_failed_at: string
+          id: number
+          manually_requeued_at: string | null
+          message_id: string
+          payload: Json
+        }
+        Insert: {
+          archived_at?: string
+          fail_reason?: string | null
+          first_failed_at: string
+          id?: number
+          manually_requeued_at?: string | null
+          message_id: string
+          payload: Json
+        }
+        Update: {
+          archived_at?: string
+          fail_reason?: string | null
+          first_failed_at?: string
+          id?: number
+          manually_requeued_at?: string | null
+          message_id?: string
+          payload?: Json
+        }
+        Relationships: []
+      }
       catalog_fill_rate_history: {
         Row: {
           desc_from_google_books: number

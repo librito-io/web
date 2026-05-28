@@ -8,13 +8,28 @@ export interface E2EUser {
   password: string;
 }
 
+export interface CreateE2EUserOpts {
+  /**
+   * When true, the helper sets `profiles.is_admin = true` after creating
+   * the user — single place to mutate so future hardening (e.g., audit-row
+   * write on grant) lands here instead of being inlined across every admin
+   * spec. The profile row is created by the `handle_new_user` trigger on
+   * auth.users INSERT, so the UPDATE always finds the row.
+   */
+  isAdmin?: boolean;
+}
+
 // Create a fresh confirmed user via the admin API. Each test gets its own
 // user so flows like rename/unpair don't collide on shared state. Caller is
 // responsible for `cleanupUser(user.id)` in `test.afterEach`.
-export async function createE2EUser(label: string): Promise<E2EUser> {
+export async function createE2EUser(
+  label: string,
+  opts: CreateE2EUserOpts = {},
+): Promise<E2EUser> {
   const email = `e2e-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@librito.test`;
   const password = `pw-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-  const { data, error } = await getAdmin().auth.admin.createUser({
+  const admin = getAdmin();
+  const { data, error } = await admin.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
@@ -23,6 +38,15 @@ export async function createE2EUser(label: string): Promise<E2EUser> {
     throw new Error(
       `createE2EUser failed: ${error?.message ?? "no user returned"}`,
     );
+  }
+  if (opts.isAdmin) {
+    const { error: grantErr } = await admin
+      .from("profiles")
+      .update({ is_admin: true })
+      .eq("id", data.user.id);
+    if (grantErr) {
+      throw new Error(`createE2EUser isAdmin grant: ${grantErr.message}`);
+    }
   }
   return { id: data.user.id, email, password };
 }

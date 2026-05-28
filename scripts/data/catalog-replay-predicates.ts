@@ -5,15 +5,15 @@
 // coverage (operator-facing surface, one slip drops the wrong rows).
 //
 // Relative-path import: `tsx` running this file from `scripts/data/`
-// resolves `../../src/lib/server/catalog/tracked-fields.ts` through
-// node ESM filesystem resolution without needing `$lib` paths.
+// resolves `../../src/lib/catalog/tracked-fields.ts` through node ESM
+// filesystem resolution without needing `$lib` paths.
 
 import {
   TRACKED_FIELDS,
   FAIL_REASONS,
   type TrackedField,
   type FailReason,
-} from "../../src/lib/server/catalog/tracked-fields";
+} from "../../src/lib/catalog/tracked-fields";
 
 export { TRACKED_FIELDS, FAIL_REASONS };
 export type { TrackedField, FailReason };

@@ -48,6 +48,33 @@ export function requireUser(event: RequestEvent): User {
   return event.locals.user;
 }
 
+// Form actions on /app/admin/** routes need the is_admin gate too —
+// SvelteKit only re-runs parent layout loads AFTER an action returns
+// (for re-render), never before. So an action that only calls
+// `requireUser` accepts any authenticated user. `requireAdmin` joins
+// `profiles` on every action so the gate posture matches the layout's
+// GET path. 404 not 403 — same posture as the layout, so the route's
+// existence does not leak via an action probe either.
+export async function requireAdmin(event: RequestEvent): Promise<User> {
+  const user = requireUser(event);
+  const { data: prof, error: profErr } = await event.locals.supabase
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (profErr) error(500, "profile lookup failed");
+  if (!prof?.is_admin) error(404);
+  return user;
+}
+
+// Reject malformed catalog IDs at the boundary so PostgREST does not
+// surface a 22P02 invalid_text_representation as a 500 with the raw
+// Postgres error message. 404 matches the row-not-found path.
+export function requireUuidParam(id: string): string {
+  if (!UUID_RE.test(id)) error(404);
+  return id;
+}
+
 export async function authenticateDevice(
   request: Request,
   supabase: SupabaseClient,

@@ -146,8 +146,17 @@ test.describe("font loading", () => {
       // document.fonts.check returns true only if a real face matching
       // the weight is loaded. Synthetic bold (faked off 600) returns
       // false here — the precise regression class this assertion guards.
-      const real700 = await page.evaluate(() =>
-        document.fonts.check('700 1em "Inter"'),
+      // The header h1 family stack ([app.css:189](src/app.css#L189))
+      // picks InterVariable first (covers 100-900) and falls back to
+      // static Inter@700; either covering 700 means no synth bold.
+      // Pre-InterVariable adoption the static face was the only path;
+      // post-adoption (#421) the variable face is the rendered one for
+      // h1 and the static-only assertion was a side-effect that only
+      // passed while an unrelated 700-weight rule existed elsewhere.
+      const real700 = await page.evaluate(
+        () =>
+          document.fonts.check('700 1em "InterVariable"') ||
+          document.fonts.check('700 1em "Inter"'),
       );
       expect(real700).toBe(true);
     } finally {

@@ -33,20 +33,20 @@ Durable runbook for cutting `librito.io` over to QStash for catalog cold-miss re
 
 For each variable below: `vercel env add <NAME> production` (or via the Vercel dashboard → Project Settings → Environment Variables). Mark each as **Sensitive**.
 
-- `QSTASH_TOKEN` — from QStash dashboard
-- `QSTASH_URL` — region endpoint (e.g. `https://qstash-eu-central-1.upstash.io` for EU tenants). The SDK default is `https://qstash.upstash.io` (global); a region-tenant token routed to global returns 401 "invalid token". Producer + DLQ-drain pass this as `baseUrl` to `QStashClient`. Required for both code-paths to publish.
-- `QSTASH_CONSUMER_URL` — `https://web-ten-mocha-59.vercel.app/api/queue/catalog-resolve` (pre-launch) or `https://librito.io/api/queue/catalog-resolve` (post-DNS-flip). Consumer-side also reads this var to bind the QStash signature verification to the publisher-signed URL — set on BOTH the producer-runtime AND the consumer-runtime (same Vercel project, same env).
-- `QSTASH_CURRENT_SIGNING_KEY` — from QStash dashboard
-- `QSTASH_NEXT_SIGNING_KEY` — from QStash dashboard
+- `QSTASH_TOKEN` — from QStash dashboard. Mark **Sensitive**.
+- `QSTASH_URL` — region endpoint (e.g. `https://qstash-eu-central-1.upstash.io` for EU tenants). The SDK default is `https://qstash.upstash.io` (global); a region-tenant token routed to global returns 401 "invalid token". Producer + DLQ-drain pass this as `baseUrl` to `QStashClient`. Required for both code-paths to publish. Mark **Encrypted** — public Upstash endpoint, not a secret; Encrypted lets `vercel env pull` read it back for drift checks (the value that just bit us would have been visible).
+- `QSTASH_CONSUMER_URL` — `https://web-ten-mocha-59.vercel.app/api/queue/catalog-resolve` (pre-launch) or `https://librito.io/api/queue/catalog-resolve` (post-DNS-flip). Consumer-side also reads this var to bind the QStash signature verification to the publisher-signed URL — set on BOTH the producer-runtime AND the consumer-runtime (same Vercel project, same env). Mark **Sensitive**.
+- `QSTASH_CURRENT_SIGNING_KEY` — from QStash dashboard. Mark **Sensitive**.
+- `QSTASH_NEXT_SIGNING_KEY` — from QStash dashboard. Mark **Sensitive**.
 
-> **Verify all five are Sensitive.**
+> **Verify the four secret vars are Sensitive and `QSTASH_URL` is Encrypted.**
 >
 > ```
 > npx vercel env ls -F json production \
 >   | jq '.envs[] | select(.key | startswith("QSTASH_")) | { key, type }'
 > ```
 >
-> Expected: every entry has `"type": "sensitive"`. If any is `"encrypted"`, delete + re-add as Sensitive.
+> Expected: `QSTASH_URL` is `"encrypted"`; the other four (`QSTASH_TOKEN`, `QSTASH_CONSUMER_URL`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`) are `"sensitive"`. Any mismatch: delete + re-add with the correct type.
 
 ### Step 3: Trigger a deploy
 

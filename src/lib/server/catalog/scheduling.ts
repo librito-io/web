@@ -11,6 +11,13 @@ import { logger } from "$lib/server/log";
 // (GOOGLE_BOOKS_API_KEY etc.) follow the same rule. Read at runtime via
 // dynamic/private — `vercel pull` redacts Sensitive vars to empty strings
 // and static/private would bake the empty into prebuilt deploys.
+//
+// QSTASH_URL pins the region endpoint (e.g. https://qstash-eu-central-1.
+// upstash.io for our EU-tenant project). SDK default is the global
+// https://qstash.upstash.io — an EU-tenant token routed there returns 401
+// "invalid token". Passed explicitly to QStashClient below (not via the
+// SDK's process.env fallback) so the dependency is visible at code level
+// and insulated from upstream env-name drift.
 import { env as privateEnv } from "$env/dynamic/private";
 
 // ISBN-keyed work item carries optional `ctx` (title + author) so the
@@ -90,11 +97,17 @@ export async function scheduleCatalogResolveIfAllowed(
   }
   if (permitted.length === 0) return;
 
-  // Inline fallback: both env vars required. QSTASH_TOKEN alone with no
-  // CONSUMER_URL would publish to "", and a preview deploy with only
-  // QSTASH_TOKEN set would publish to wherever — refusing to attempt
-  // publish when either is missing is the safe default.
-  if (!privateEnv.QSTASH_TOKEN || !privateEnv.QSTASH_CONSUMER_URL) {
+  // Inline fallback: all three env vars required. QSTASH_TOKEN alone with
+  // no CONSUMER_URL would publish to "", a preview deploy with only
+  // QSTASH_TOKEN set would publish to wherever, and an EU-tenant token
+  // with no QSTASH_URL would 401 against the SDK's global default
+  // endpoint — refusing to attempt publish when any leg of the triplet
+  // is missing is the safe default.
+  if (
+    !privateEnv.QSTASH_TOKEN ||
+    !privateEnv.QSTASH_CONSUMER_URL ||
+    !privateEnv.QSTASH_URL
+  ) {
     const admin = createAdminClient();
     const mutexPromise = getCatalogMutex();
     const googleBooksApiKey = privateEnv.GOOGLE_BOOKS_API_KEY;
@@ -125,7 +138,10 @@ export async function scheduleCatalogResolveIfAllowed(
   // round-trip; each message has its own retry budget + DLQ slot.
   // flowControl pins parallelism per queue key — replaces the deprecated
   // queue-upsert `parallelism` config, so no provisioning step is needed.
-  const qstash = new QStashClient({ token: privateEnv.QSTASH_TOKEN });
+  const qstash = new QStashClient({
+    token: privateEnv.QSTASH_TOKEN,
+    baseUrl: privateEnv.QSTASH_URL,
+  });
   try {
     await qstash.batchJSON(
       permitted.map((item) => ({

@@ -25,6 +25,7 @@ Durable runbook for cutting `librito.io` over to QStash for catalog cold-miss re
 4. Enable DLQ on the queue.
 5. Note from the project dashboard:
    - `QSTASH_TOKEN` (publisher auth)
+   - `QSTASH_URL` (region endpoint — e.g. `https://qstash-eu-central-1.upstash.io` for EU tenants). Visible on the project page under "Quick Start" / region header. SDK default is the global `https://qstash.upstash.io`; a region-tenant token routed to global returns 401 "invalid token" (see "Common failures").
    - `QSTASH_CURRENT_SIGNING_KEY`
    - `QSTASH_NEXT_SIGNING_KEY`
 
@@ -33,11 +34,12 @@ Durable runbook for cutting `librito.io` over to QStash for catalog cold-miss re
 For each variable below: `vercel env add <NAME> production` (or via the Vercel dashboard → Project Settings → Environment Variables). Mark each as **Sensitive**.
 
 - `QSTASH_TOKEN` — from QStash dashboard
+- `QSTASH_URL` — region endpoint (e.g. `https://qstash-eu-central-1.upstash.io` for EU tenants). The SDK default is `https://qstash.upstash.io` (global); a region-tenant token routed to global returns 401 "invalid token". Producer + DLQ-drain pass this as `baseUrl` to `QStashClient`. Required for both code-paths to publish.
 - `QSTASH_CONSUMER_URL` — `https://web-ten-mocha-59.vercel.app/api/queue/catalog-resolve` (pre-launch) or `https://librito.io/api/queue/catalog-resolve` (post-DNS-flip). Consumer-side also reads this var to bind the QStash signature verification to the publisher-signed URL — set on BOTH the producer-runtime AND the consumer-runtime (same Vercel project, same env).
 - `QSTASH_CURRENT_SIGNING_KEY` — from QStash dashboard
 - `QSTASH_NEXT_SIGNING_KEY` — from QStash dashboard
 
-> **Verify all four are Sensitive.**
+> **Verify all five are Sensitive.**
 >
 > ```
 > npx vercel env ls -F json production \
@@ -98,9 +100,14 @@ Reversing the order would land every message carrying the new field in DLQ (4xx 
 
 ### Revert to inline mode
 
-Unset either `QSTASH_TOKEN` or `QSTASH_CONSUMER_URL` in Vercel production. Trigger a deploy. The producer falls back to the inline `runInBackground` path on next request. No code rollback needed. The consumer route stays live but receives no traffic.
+Unset any of `QSTASH_TOKEN`, `QSTASH_CONSUMER_URL`, or `QSTASH_URL` in Vercel production. Trigger a deploy. The producer falls back to the inline `runInBackground` path on next request. No code rollback needed. The consumer route stays live but receives no traffic.
 
 DLQ archive contents remain in `catalog_dlq_archive` indefinitely (audit log).
+
+### Common failures
+
+- **`QstashError: unable to authenticate: invalid token` (HTTP 401)** from `POST qstash.upstash.io/v2/batch` — region mismatch. The SDK default endpoint is the global `https://qstash.upstash.io`; a token issued for a region-specific tenant (e.g. EU `qstash-eu-central-1.upstash.io`) is unknown to the global endpoint and rejected. Verify `QSTASH_URL` is set on the production target and matches the project's region as shown in the Upstash console. Producer code passes this explicitly as `baseUrl` to `QStashClient`; missing the env var degrades to the inline fallback via the triplet gate in `scheduling.ts`.
+- **`QstashError: unable to authenticate: invalid token` (HTTP 401)** with `QSTASH_URL` correct — paste error in `QSTASH_TOKEN`. Sensitive vars are write-only post-creation, so a one-char truncation or stray `Bearer ` prefix is invisible until first publish. Remove + re-add the var with a fresh paste from the Upstash console.
 
 ## Tier + cost notes
 

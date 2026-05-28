@@ -11,8 +11,9 @@ import type { TrackedField } from "$lib/catalog/tracked-fields";
  * (`/api/queue/catalog-resolve`). One definition guarantees both paths
  * produce identical resolver behavior.
  *
- * `userId` is logged for attribution upstream; not read inside the
- * resolver.
+ * `_userId` is reserved for future use (provenance threading into
+ * resolver-side logging); not currently read here or by callers. Kept
+ * in the signature so adding it later is a no-op for call sites.
  */
 export async function dispatchResolve(
   admin: SupabaseClient,
@@ -77,7 +78,7 @@ export function parseWorkPayload(body: string): ParsedPayload {
   const it = item as Record<string, unknown>;
 
   if (it.kind === "isbn") {
-    if (typeof it.isbn !== "string" || it.isbn.length === 0) {
+    if (typeof it.isbn !== "string" || it.isbn.trim().length === 0) {
       return { ok: false, error: "isbn missing" };
     }
     let parsedCtx: { title?: string; author?: string } | undefined;
@@ -108,10 +109,10 @@ export function parseWorkPayload(body: string): ParsedPayload {
   }
 
   if (it.kind === "ta") {
-    if (typeof it.title !== "string" || it.title.length === 0) {
+    if (typeof it.title !== "string" || it.title.trim().length === 0) {
       return { ok: false, error: "title missing" };
     }
-    if (typeof it.author !== "string" || it.author.length === 0) {
+    if (typeof it.author !== "string" || it.author.trim().length === 0) {
       return { ok: false, error: "author missing" };
     }
     let fields: TrackedField[] | undefined;

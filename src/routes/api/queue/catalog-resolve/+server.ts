@@ -40,7 +40,7 @@ export const POST: RequestHandler = async ({ request }) => {
   // Receiver.verify rejects on bad signature in some SDK versions, resolves
   // to false in others. .catch(() => false) handles both — do not "simplify".
   const valid = await receiver
-    .verify({ signature: signature ?? "", body })
+    .verify({ signature: signature ?? "", body, url: request.url })
     .catch(() => false);
   if (!valid) return jsonError(401, "invalid_signature", "signature rejected");
 
@@ -75,7 +75,7 @@ export const POST: RequestHandler = async ({ request }) => {
         kind: item.kind,
         key:
           item.kind === "isbn" ? item.isbn : `${item.title} | ${item.author}`,
-        duration_ms: Date.now() - startedAt,
+        durationMs: Date.now() - startedAt,
         ok: true,
       },
       "catalog.queue.resolved",
@@ -88,19 +88,21 @@ export const POST: RequestHandler = async ({ request }) => {
       {
         event: "catalog.queue.resolve_failed",
         userId,
-        item,
-        duration_ms: Date.now() - startedAt,
+        kind: item.kind,
+        key:
+          item.kind === "isbn" ? item.isbn : `${item.title} | ${item.author}`,
+        durationMs: Date.now() - startedAt,
         error: err instanceof Error ? err.message : String(err),
       },
       "catalog.queue.resolve_failed",
     );
     // 5xx tells QStash to retry. 4xx would route to DLQ permanently — used
-    // only for malformed-payload + signature failures above.
-    return jsonError(
-      503,
-      "transient_failure",
-      err instanceof Error ? err.message : String(err),
-    );
+    // only for malformed-payload + signature failures above. Body message is
+    // a static string; QStash persists the response body in delivery logs +
+    // DLQ inspection UI, so leaking raw Supabase/Sentry exception text would
+    // land internal table/column/hostname fragments in third-party retention.
+    // The full err.message is captured in Sentry + the structured log above.
+    return jsonError(503, "transient_failure", "resolve threw");
   } finally {
     span.end();
   }

@@ -157,4 +157,17 @@ describe("POST /api/queue/catalog-resolve", () => {
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ error: "transient_failure" });
   });
+
+  it('missing upstash-signature header → 401 (signature coerced to "")', async () => {
+    verifySpy.mockResolvedValueOnce(false);
+    const body = JSON.stringify({
+      userId: "u",
+      item: { kind: "isbn", isbn: "9780000000000" },
+    });
+    const res = await POST({ request: makeReq(body) } as any);
+    expect(res.status).toBe(401);
+    expect(verifySpy).toHaveBeenCalledTimes(1);
+    // Receiver.verify still called with empty-string signature (the ?? "" fallback)
+    expect(verifySpy.mock.calls[0][0]).toMatchObject({ signature: "" });
+  });
 });

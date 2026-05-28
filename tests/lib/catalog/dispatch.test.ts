@@ -162,4 +162,28 @@ describe("parseWorkPayload", () => {
     );
     expect(r.ok).toBe(false);
   });
+
+  it("whitespace-only isbn/title/author rejected", () => {
+    expect(
+      parseWorkPayload(
+        JSON.stringify({ userId: "u", item: { kind: "isbn", isbn: "   " } }),
+      ).ok,
+    ).toBe(false);
+    expect(
+      parseWorkPayload(
+        JSON.stringify({
+          userId: "u",
+          item: { kind: "ta", title: " ", author: "A" },
+        }),
+      ).ok,
+    ).toBe(false);
+    expect(
+      parseWorkPayload(
+        JSON.stringify({
+          userId: "u",
+          item: { kind: "ta", title: "T", author: "\t" },
+        }),
+      ).ok,
+    ).toBe(false);
+  });
 });

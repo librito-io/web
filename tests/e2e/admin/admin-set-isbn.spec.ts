@@ -32,7 +32,7 @@ test("admin promotes TA-keyed catalog row to ISBN via Set ISBN form", async ({
     await page.getByLabel("ISBN").fill("9780000000802");
     await page.getByRole("button", { name: /set isbn/i }).click();
 
-    await expect(page.getByText("Saved.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
 
     const { data: after } = await admin
       .from("book_catalog")

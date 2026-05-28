@@ -41,7 +41,7 @@ test("admin requeue clears description field state and writes audit row", async 
     // (aria-label="Description") — disambiguate via role.
     await page.getByRole("checkbox", { name: "description" }).check();
     await page.getByRole("button", { name: /requeue selected/i }).click();
-    await expect(page.getByText("Saved.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
 
     // Assert DB state IMMEDIATELY — `admin_apply_action` runs synchronously
     // before the form action returns "Saved.", but the background resolver

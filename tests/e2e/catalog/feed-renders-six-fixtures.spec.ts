@@ -21,9 +21,38 @@ test("six fixtures render cover + description on feed", async ({ page }) => {
   const admin = getAdmin();
   const user = await createE2EUser("feed-six-fixtures");
   const seededBookIds: string[] = [];
+  // Scope cold-start delete to THIS suite's fixture keys — unconditional
+  // `delete().not("id","is",null)` would erase any unrelated catalog
+  // state on the local Supabase, which is shared across specs and dev
+  // sessions. ISBN-keyed fixtures by ISBN; TA-keyed fixtures by the
+  // resolver's normalized_title_author key (inlined so the helper file
+  // doesn't have to pull $lib/server/catalog/* into the e2e harness).
+  const stripTA = (s: string) =>
+    s
+      .normalize("NFKD")
+      .replace(/[^\p{L}\p{N}\s]+/gu, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  const fixtureIsbns: string[] = [];
+  const fixtureTAKeys: string[] = [];
+  for (const fix of Object.values(FIXTURES)) {
+    if ("isbn" in fix && fix.isbn) {
+      fixtureIsbns.push(fix.isbn);
+    } else {
+      fixtureTAKeys.push(`${stripTA(fix.title)}|${stripTA(fix.author)}`);
+    }
+  }
   try {
-    // Cold start: clear book_catalog so resolves run fresh.
-    await admin.from("book_catalog").delete().not("id", "is", null);
+    if (fixtureIsbns.length > 0) {
+      await admin.from("book_catalog").delete().in("isbn", fixtureIsbns);
+    }
+    if (fixtureTAKeys.length > 0) {
+      await admin
+        .from("book_catalog")
+        .delete()
+        .in("normalized_title_author", fixtureTAKeys);
+    }
 
     // Per fixture: seed `books` row + resolve catalog via seedFixture +
     // seed one `highlights` row (feed renders books that have highlights).
@@ -77,14 +106,24 @@ test("six fixtures render cover + description on feed", async ({ page }) => {
       await expect(page.getByText(fix.author, { exact: true })).toBeVisible();
     }
 
-    const { data: rows } = await admin
-      .from("book_catalog")
-      .select("isbn, normalized_title_author, storage_path, description");
-    expect(rows?.length).toBeGreaterThanOrEqual(6);
-    for (const r of rows ?? []) {
-      const label = r.isbn ?? r.normalized_title_author ?? "(unknown)";
-      expect(r.storage_path, `cover for ${label}`).not.toBeNull();
-      expect(r.description, `description for ${label}`).not.toBeNull();
+    // Scoped per-fixture assert — querying the whole book_catalog
+    // table would catch unrelated rows on a shared local Supabase.
+    for (const fix of Object.values(FIXTURES)) {
+      const q = admin.from("book_catalog").select("storage_path, description");
+      const { data } =
+        "isbn" in fix && fix.isbn
+          ? await q.eq("isbn", fix.isbn).maybeSingle()
+          : await q
+              .eq(
+                "normalized_title_author",
+                `${stripTA(fix.title)}|${stripTA(fix.author)}`,
+              )
+              .maybeSingle();
+      const label =
+        "isbn" in fix && fix.isbn ? fix.isbn : `${fix.title}|${fix.author}`;
+      expect(data, `catalog row for ${label}`).not.toBeNull();
+      expect(data?.storage_path, `cover for ${label}`).not.toBeNull();
+      expect(data?.description, `description for ${label}`).not.toBeNull();
     }
   } finally {
     for (const id of seededBookIds) {

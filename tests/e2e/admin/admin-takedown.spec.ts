@@ -28,7 +28,7 @@ test("admin takedown clears description, locks refetch, writes audit row", async
     await awaitHydration(page);
 
     await page.getByRole("button", { name: /takedown/i }).click();
-    await expect(page.getByText("Saved.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
 
     const { data: after } = await admin
       .from("book_catalog")

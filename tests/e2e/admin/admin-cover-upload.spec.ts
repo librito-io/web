@@ -39,7 +39,7 @@ test("admin upload cover persists storage_path, source=manual, writes audit row"
       .locator('input[type="file"][name="cover"]')
       .setInputFiles("tests/e2e/fixtures/sample-cover.jpg");
     await page.getByRole("button", { name: /upload cover/i }).click();
-    await expect(page.getByText("Saved.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
 
     const { data: after } = await admin
       .from("book_catalog")

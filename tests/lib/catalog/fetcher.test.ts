@@ -3422,6 +3422,221 @@ describe("resolveIsbn – ctx title/author override (#449)", () => {
   });
 });
 
+describe("resolveIsbn – OL title/author cover_id fall-through (#450)", () => {
+  // AYMaM-style fixture: queried-ISBN edition has no cover on OL; OL
+  // ISBN-keyed search returns zero docs (cross-work stub case); the only
+  // discovery path is title+author search. Verifies the Phase 1 fix from
+  // issue #450: discoverOpenLibraryCoverId falls through to TA search and
+  // adopts the cover_id when acceptableMatch passes.
+
+  function coldMissSupabase() {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+    return supabase;
+  }
+
+  /** Build a fetchFn that surfaces OL-side state under operator control.
+   *  @param taSearch — body returned for the title+author search. Set
+   *  numFound:0 to simulate the absent-cover case; supply docs[] with
+   *  cover_i to exercise the fall-through.
+   *  @param olCoverHandler — handler for /b/id/{id}-L.jpg. */
+  function makeFetch(
+    taSearch: { numFound: number; docs: unknown[] },
+    olCoverHandler: (url: string) => Response | null = () => null,
+  ) {
+    return vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      // OL data document — no cover field.
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(
+          JSON.stringify({
+            "ISBN:9781668082461": { title: "Untitled MJ" },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      // ISBN-keyed search returns no docs — the cross-work stub case
+      // (Pattern B from #450). TA fall-through is the only discovery
+      // path left.
+      if (url.includes("openlibrary.org/search.json?q=isbn:")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json?title=")) {
+        return new Response(JSON.stringify(taSearch), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // OL direct-ISBN cover — 404 so the chain has to use cover_id.
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(null, { status: 404 });
+      }
+      if (url.startsWith("https://covers.openlibrary.org/b/id/")) {
+        const handled = olCoverHandler(url);
+        if (handled) return handled;
+        return new Response(null, { status: 404 });
+      }
+      // GB — no imageLinks so the cover chain stays on OL.
+      if (url.includes("googleapis.com/books")) {
+        return new Response(gbVolumesResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("itunes.apple.com/lookup")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  it("adopts cover_id from TA search when acceptableMatch passes", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = makeFetch(
+      {
+        numFound: 1,
+        docs: [
+          {
+            cover_i: 15201691,
+            title: "Are You Mad at Me?",
+            author_name: ["Meg Josephson"],
+            key: "/works/OL44545421W",
+          },
+        ],
+      },
+      (url) =>
+        url.includes("/b/id/15201691")
+          ? new Response(FIXTURE_1500x2250, {
+              status: 200,
+              headers: { "content-type": "image/jpeg" },
+            })
+          : null,
+    );
+
+    await resolveIsbn(supabase as never, "9781668082461", deps({ fetchFn }), {
+      title: "Are You Mad at Me?",
+      author: "Meg Josephson",
+    });
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.openlibrary_cover_id).toBe(15201691);
+    expect(p_row.cover_source).toBe("openlibrary_isbn");
+  });
+
+  it("rejects TA result when author surname does not overlap (acceptableMatch)", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = makeFetch({
+      numFound: 1,
+      docs: [
+        {
+          cover_i: 99999,
+          title: "Are You Mad at Me?",
+          author_name: ["John Smith"],
+          key: "/works/OL99999W",
+        },
+      ],
+    });
+
+    await resolveIsbn(supabase as never, "9781668082461", deps({ fetchFn }), {
+      title: "Are You Mad at Me?",
+      author: "Meg Josephson",
+    });
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.openlibrary_cover_id).toBeNull();
+    expect(p_row.cover_source).toBeNull();
+  });
+
+  it("rejects TA result when title token does not overlap (acceptableMatch)", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = makeFetch({
+      numFound: 1,
+      docs: [
+        {
+          cover_i: 88888,
+          title: "Completely Different Memoir",
+          author_name: ["Meg Josephson"],
+          key: "/works/OL88888W",
+        },
+      ],
+    });
+
+    await resolveIsbn(supabase as never, "9781668082461", deps({ fetchFn }), {
+      title: "Are You Mad at Me?",
+      author: "Meg Josephson",
+    });
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.openlibrary_cover_id).toBeNull();
+  });
+
+  it("does not fire TA search when ctx is absent", async () => {
+    const supabase = coldMissSupabase();
+    const fetchFn = makeFetch({
+      // Even if this would match, no ctx means we should never call it.
+      numFound: 1,
+      docs: [
+        {
+          cover_i: 15201691,
+          title: "Are You Mad at Me?",
+          author_name: ["Meg Josephson"],
+        },
+      ],
+    });
+
+    await resolveIsbn(supabase as never, "9781668082461", deps({ fetchFn }));
+
+    const taSearchCalls = (
+      fetchFn as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((args: unknown[]) =>
+      String(args[0]).includes("openlibrary.org/search.json?title="),
+    );
+    expect(taSearchCalls).toHaveLength(0);
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.openlibrary_cover_id).toBeNull();
+  });
+});
+
 describe("resolveTitleAuthor – caller args override stub metadata (#449)", () => {
   function coldMissTaSupabase() {
     const supabase = createMockSupabase();

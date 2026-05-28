@@ -32,6 +32,11 @@ split into:
    Operator workflow in `scripts/data/README.md` (curl with `CRON_SECRET`).
    `MAX_PER_RUN=100` per invocation; rate-limit pacing means large lists
    need chunked invocations.
+4. **QStash queue (production, when provisioned)** — when `QSTASH_TOKEN +
+QSTASH_CONSUMER_URL` are set, paths (1)–(3) publish to the queue
+   instead of firing `runInBackground` inline. Consumer route is
+   `/api/queue/catalog-resolve`; DLQ drain cron archives permanent
+   failures to `catalog_dlq_archive`. See § Resolve queue below.
 
 RPCs `upsert_book_catalog_by_isbn` / `upsert_book_catalog_by_title_author`
 wrap the partial-unique-index upsert (supabase-js `.upsert()` doesn't
@@ -68,6 +73,33 @@ fleet, and an Upstash blip each have a distinct mitigation:
 Self-hosters: leave `COVER_STORAGE_BACKEND` unset (defaults to `supabase`).
 The cron is opt-in (`CATALOG_WARMUP_ENABLED=false`); without it, the
 catalog populates entirely lazily as users open books.
+
+## Resolve queue (Upstash QStash)
+
+Cold-miss resolves can route through Upstash QStash, decoupling worker
+lifecycle from user requests:
+
+- **Producer** — `scheduling.ts` branches on `QSTASH_TOKEN +
+QSTASH_CONSUMER_URL`. Both set → `batchJSON` publish (one message per
+  work item, `flowControl` parallelism=2, retries=2). Either unset →
+  today's inline `runInBackground` fan-out.
+- **Consumer** — `/api/queue/catalog-resolve` (POST) verifies
+  `Upstash-Signature` (bound to `QSTASH_CONSUMER_URL`, not
+  `request.url`) and dispatches via shared `dispatch.ts`. 200 ack, 4xx →
+  DLQ (permanent), 5xx → retry → DLQ on exhaust.
+- **DLQ archive** — `catalog_dlq_archive` table; `/api/cron/catalog-dlq-drain`
+  (daily 05:00 UTC) ingests with 23505-tolerant INSERT. Operator
+  inspection + manual re-queue via `/app/admin/catalog/[id]` (stamp
+  scoped to the loaded archive IDs to prevent cross-catalog touches
+  during `set_isbn` races).
+
+The cosmetic-enrichment posture (failed lookups → placeholder, never
+error page) is preserved on the queue path — `batchJSON` publish
+failures are logged + Sentry-captured + swallowed; the nightly replay
+cron is the value-level recovery layer.
+
+Operator runbook + cutover procedure:
+[`docs/operations/qstash-runbook.md`](../../../../docs/operations/qstash-runbook.md).
 
 ## Audit columns (plan 2026-05-18)
 

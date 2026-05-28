@@ -1,5 +1,5 @@
-import { resolveIsbn, resolveTitleAuthor } from "./fetcher";
 import { getCatalogMutex } from "./mutex";
+import { dispatchResolve } from "./dispatch";
 import type { ResolveCtx, TrackedField } from "./types";
 import {
   catalogOpenLibraryLimiter,
@@ -96,17 +96,7 @@ export async function scheduleCatalogResolveIfAllowed(
     runInBackground(async () => {
       const mutex = await mutexPromise;
       const innerDeps = { rateLimiters, mutex, googleBooksApiKey };
-      if (item.kind === "isbn") {
-        await resolveIsbn(admin, item.isbn, innerDeps, item.ctx, item.fields);
-      } else {
-        await resolveTitleAuthor(
-          admin,
-          item.title,
-          item.author,
-          innerDeps,
-          item.fields,
-        );
-      }
+      await dispatchResolve(admin, innerDeps, userId, item);
     });
   }
 }

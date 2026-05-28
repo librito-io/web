@@ -1,5 +1,6 @@
 <script lang="ts">
   import { TRACKED_FIELDS } from "$lib/catalog/tracked-fields";
+  import DlqArchiveSection from "./DlqArchiveSection.svelte";
   let { data, form } = $props();
   const row = $derived(data.row);
 </script>
@@ -101,3 +102,5 @@
 <p style="margin-top:2rem;">
   <a href="/app/admin/catalog/{row.id}/history">View action history →</a>
 </p>
+
+<DlqArchiveSection rows={data.dlqArchive} />

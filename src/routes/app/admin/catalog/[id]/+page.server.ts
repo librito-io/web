@@ -34,7 +34,57 @@ export const load: PageServerLoad = async ({ params }) => {
     .maybeSingle();
   if (err) error(500, err.message);
   if (!row) error(404, "catalog row not found");
-  return { row };
+
+  // Find matching DLQ archive rows. Two lookup paths matching the producer's
+  // payload shape: ISBN-keyed (payload.item.isbn) or TA-keyed
+  // (payload.item.title + payload.item.author). Limited to 50 — surface
+  // bounded; older entries inspectable via Supabase Studio if needed.
+  const dlqLookups: Promise<unknown>[] = [];
+  let dlqArchive: Array<{
+    id: number;
+    message_id: string;
+    first_failed_at: string;
+    fail_reason: string | null;
+    archived_at: string;
+    manually_requeued_at: string | null;
+    payload: unknown;
+  }> = [];
+  if (row.isbn) {
+    dlqLookups.push(
+      Promise.resolve(
+        admin
+          .from("catalog_dlq_archive")
+          .select(
+            "id, message_id, first_failed_at, fail_reason, archived_at, manually_requeued_at, payload",
+          )
+          .filter("payload->item->>isbn", "eq", row.isbn)
+          .order("archived_at", { ascending: false })
+          .limit(50),
+      ).then(({ data }) => {
+        if (data) dlqArchive = dlqArchive.concat(data);
+      }),
+    );
+  }
+  if (row.title && row.author) {
+    dlqLookups.push(
+      Promise.resolve(
+        admin
+          .from("catalog_dlq_archive")
+          .select(
+            "id, message_id, first_failed_at, fail_reason, archived_at, manually_requeued_at, payload",
+          )
+          .filter("payload->item->>title", "eq", row.title)
+          .filter("payload->item->>author", "eq", row.author)
+          .order("archived_at", { ascending: false })
+          .limit(50),
+      ).then(({ data }) => {
+        if (data) dlqArchive = dlqArchive.concat(data);
+      }),
+    );
+  }
+  if (dlqLookups.length > 0) await Promise.all(dlqLookups);
+
+  return { row, dlqArchive };
 };
 
 export const actions: Actions = {
@@ -159,6 +209,26 @@ export const actions: Actions = {
           bypassUserLimit: true,
         }),
       );
+
+      // Stamp matching DLQ archive rows so the admin UI reflects the
+      // re-queue. Gated on work.length > 0 — when the row has neither an
+      // ISBN nor a usable (title, author), no resolve is scheduled, and
+      // stamping would lie about state. Discrimination mirrors the load
+      // query: ISBN path takes precedence; otherwise (title, author).
+      if (row?.isbn) {
+        await admin
+          .from("catalog_dlq_archive")
+          .update({ manually_requeued_at: new Date().toISOString() })
+          .is("manually_requeued_at", null)
+          .filter("payload->item->>isbn", "eq", row.isbn);
+      } else if (row?.title && row.author) {
+        await admin
+          .from("catalog_dlq_archive")
+          .update({ manually_requeued_at: new Date().toISOString() })
+          .is("manually_requeued_at", null)
+          .filter("payload->item->>title", "eq", row.title)
+          .filter("payload->item->>author", "eq", row.author);
+      }
     }
 
     return { ok: true, scheduledBgResolve: work.length > 0 };

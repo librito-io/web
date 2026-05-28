@@ -58,11 +58,20 @@ beforeEach(() => {
   dispatchSpy.mockReset();
   dynPrivate.QSTASH_CURRENT_SIGNING_KEY = "cur";
   dynPrivate.QSTASH_NEXT_SIGNING_KEY = "nxt";
+  dynPrivate.QSTASH_CONSUMER_URL =
+    "https://qstash-consumer.test/api/queue/catalog-resolve";
 });
 
 describe("POST /api/queue/catalog-resolve", () => {
   it("missing signing keys → 500 server_misconfigured", async () => {
     delete dynPrivate.QSTASH_CURRENT_SIGNING_KEY;
+    const res = await POST({ request: makeReq("{}") } as any);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "server_misconfigured" });
+  });
+
+  it("missing QSTASH_CONSUMER_URL → 500 server_misconfigured", async () => {
+    delete dynPrivate.QSTASH_CONSUMER_URL;
     const res = await POST({ request: makeReq("{}") } as any);
     expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "server_misconfigured" });

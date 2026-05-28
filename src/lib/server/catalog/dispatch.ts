@@ -4,6 +4,22 @@ import type { ResolveDeps } from "./fetcher";
 import type { CatalogResolveWork } from "./scheduling";
 import { TRACKED_FIELDS } from "$lib/catalog/tracked-fields";
 import type { TrackedField } from "$lib/catalog/tracked-fields";
+import {
+  catalogOpenLibraryLimiter,
+  catalogGoogleBooksLimiter,
+  catalogITunesLimiter,
+} from "$lib/server/ratelimit";
+
+/**
+ * Shared rate-limiter bundle. Hoisted here so adding a fourth source
+ * lands in one place instead of two (scheduling.ts inline fallback +
+ * consumer route deps object).
+ */
+export const catalogRateLimiters = {
+  openLibrary: catalogOpenLibraryLimiter,
+  googleBooks: catalogGoogleBooksLimiter,
+  itunes: catalogITunesLimiter,
+};
 
 /**
  * Per-item dispatch shared by the inline producer branch
@@ -45,6 +61,18 @@ export type ParsedPayload =
 function isFieldsArray(x: unknown): x is TrackedField[] {
   if (!Array.isArray(x)) return false;
   return x.every((f) => typeof f === "string" && TRACKED_FIELD_SET.has(f));
+}
+
+type ParseFieldsResult =
+  | { ok: true; value: TrackedField[] | undefined }
+  | { ok: false; error: string };
+
+function parseFields(raw: unknown): ParseFieldsResult {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (!isFieldsArray(raw)) {
+    return { ok: false, error: "fields contains unknown tracked field" };
+  }
+  return { ok: true, value: raw };
 }
 
 /**
@@ -92,13 +120,9 @@ export function parseWorkPayload(body: string): ParsedPayload {
         ...(typeof c.author === "string" ? { author: c.author } : {}),
       };
     }
-    let fields: TrackedField[] | undefined;
-    if (it.fields !== undefined) {
-      if (!isFieldsArray(it.fields)) {
-        return { ok: false, error: "fields contains unknown tracked field" };
-      }
-      fields = it.fields;
-    }
+    const fieldsResult = parseFields(it.fields);
+    if (!fieldsResult.ok) return { ok: false, error: fieldsResult.error };
+    const fields = fieldsResult.value;
     return {
       ok: true,
       value: {
@@ -115,13 +139,9 @@ export function parseWorkPayload(body: string): ParsedPayload {
     if (typeof it.author !== "string" || it.author.trim().length === 0) {
       return { ok: false, error: "author missing" };
     }
-    let fields: TrackedField[] | undefined;
-    if (it.fields !== undefined) {
-      if (!isFieldsArray(it.fields)) {
-        return { ok: false, error: "fields contains unknown tracked field" };
-      }
-      fields = it.fields;
-    }
+    const fieldsResult = parseFields(it.fields);
+    if (!fieldsResult.ok) return { ok: false, error: fieldsResult.error };
+    const fields = fieldsResult.value;
     return {
       ok: true,
       value: {

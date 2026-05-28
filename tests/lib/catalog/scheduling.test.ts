@@ -8,13 +8,12 @@ vi.mock("$env/static/private", () => ({
 vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_URL: "https://supabase.example.co",
 }));
-vi.mock("$env/dynamic/private", () => ({
-  env: {
-    COVER_STORAGE_BACKEND: "supabase",
-    CLOUDFLARE_ACCOUNT_ID: "acct",
-    CLOUDFLARE_IMAGES_API_TOKEN: "tok",
-  },
-}));
+const dynPrivate: Record<string, string | undefined> = {
+  COVER_STORAGE_BACKEND: "supabase",
+  CLOUDFLARE_ACCOUNT_ID: "acct",
+  CLOUDFLARE_IMAGES_API_TOKEN: "tok",
+};
+vi.mock("$env/dynamic/private", () => ({ env: dynPrivate }));
 vi.mock("$env/dynamic/public", () => ({
   env: { PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc" },
 }));
@@ -69,6 +68,36 @@ vi.mock("$lib/server/catalog/mutex", () => ({
   getCatalogMutex: vi.fn(async () => mutexSentinel),
 }));
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const batchJSONSpy = vi.fn(
+  async (_entries: unknown): Promise<any> => undefined,
+);
+class FakeQstashClient {
+  constructor(public opts: unknown) {}
+  batchJSON(entries: unknown) {
+    return batchJSONSpy(entries);
+  }
+}
+vi.mock("@upstash/qstash", () => ({
+  Client: FakeQstashClient,
+  Receiver: class {},
+}));
+
+const sentryCaptureSpy = vi.fn();
+// Defensive stubs across the Sentry surface scheduling.ts MIGHT reach
+// today only captureException, but stubs prevent future Sentry.* calls
+// from crashing with `undefined is not a function`.
+vi.mock("@sentry/sveltekit", () => ({
+  captureException: sentryCaptureSpy,
+  captureMessage: vi.fn(),
+  startInactiveSpan: vi.fn(() => ({
+    setStatus: vi.fn(),
+    end: vi.fn(),
+  })),
+  flush: vi.fn(async () => true),
+  withMonitor: vi.fn(async <T>(_name: string, fn: () => Promise<T>) => fn()),
+}));
+
 const { scheduleCatalogResolveIfAllowed } =
   await import("$lib/server/catalog/scheduling");
 
@@ -83,6 +112,11 @@ beforeEach(() => {
     limit: 10,
     remaining: 9,
   });
+  delete dynPrivate.QSTASH_TOKEN;
+  delete dynPrivate.QSTASH_CONSUMER_URL;
+  batchJSONSpy.mockClear();
+  batchJSONSpy.mockResolvedValue(undefined);
+  sentryCaptureSpy.mockClear();
 });
 
 describe("scheduleCatalogResolveIfAllowed", () => {
@@ -182,5 +216,140 @@ describe("scheduleCatalogResolveIfAllowed", () => {
     });
     expect(runInBackgroundSpy).not.toHaveBeenCalled();
     expect(userLimitMock).not.toHaveBeenCalled();
+  });
+
+  describe("qstash branch (env set)", () => {
+    beforeEach(() => {
+      dynPrivate.QSTASH_TOKEN = "qst-tok";
+      dynPrivate.QSTASH_CONSUMER_URL =
+        "https://qstash-consumer.test/api/queue/catalog-resolve";
+    });
+
+    it("single batchJSON publish, one entry per permitted item", async () => {
+      await scheduleCatalogResolveIfAllowed("user-1", [
+        { kind: "isbn", isbn: "9780000000000" },
+        { kind: "isbn", isbn: "9780000000001" },
+      ]);
+      expect(runInBackgroundSpy).not.toHaveBeenCalled();
+      expect(batchJSONSpy).toHaveBeenCalledTimes(1);
+      const entries = batchJSONSpy.mock.calls[0]![0] as Array<
+        Record<string, unknown>
+      >;
+      expect(entries).toHaveLength(2);
+      expect(entries[0]).toMatchObject({
+        queue: "catalog-resolve",
+        url: "https://qstash-consumer.test/api/queue/catalog-resolve",
+        body: {
+          userId: "user-1",
+          item: { kind: "isbn", isbn: "9780000000000" },
+        },
+        retries: 2,
+        flowControl: { key: "catalog-resolve", parallelism: 2 },
+      });
+    });
+
+    it("threads ctx + fields into ISBN message body", async () => {
+      await scheduleCatalogResolveIfAllowed(
+        "u",
+        [
+          {
+            kind: "isbn",
+            isbn: "9780000000000",
+            ctx: { title: "T", author: "A" },
+            fields: ["cover"],
+          },
+        ],
+        { bypassUserLimit: true },
+      );
+      const entries = batchJSONSpy.mock.calls[0]![0] as Array<
+        Record<string, unknown>
+      >;
+      expect((entries[0] as any).body.item).toEqual({
+        kind: "isbn",
+        isbn: "9780000000000",
+        ctx: { title: "T", author: "A" },
+        fields: ["cover"],
+      });
+    });
+
+    it("threads title/author + fields into TA message body", async () => {
+      await scheduleCatalogResolveIfAllowed(
+        "u",
+        [
+          {
+            kind: "ta",
+            title: "Ruth",
+            author: "Kate Riley",
+            fields: ["publisher"],
+          },
+        ],
+        { bypassUserLimit: true },
+      );
+      const entries = batchJSONSpy.mock.calls[0]![0] as Array<
+        Record<string, unknown>
+      >;
+      expect((entries[0] as any).body.item).toEqual({
+        kind: "ta",
+        title: "Ruth",
+        author: "Kate Riley",
+        fields: ["publisher"],
+      });
+    });
+
+    it("per-user limiter still gates and breaks on first deny", async () => {
+      userLimitMock
+        .mockResolvedValueOnce({
+          success: true,
+          reset: Date.now() + 60_000,
+          limit: 10,
+          remaining: 9,
+        })
+        .mockResolvedValueOnce({
+          success: false,
+          reset: Date.now() + 60_000,
+          limit: 10,
+          remaining: 0,
+        });
+      await scheduleCatalogResolveIfAllowed("u", [
+        { kind: "isbn", isbn: "9780000000000" },
+        { kind: "isbn", isbn: "9780000000001" },
+        { kind: "isbn", isbn: "9780000000002" },
+      ]);
+      expect(userLimitMock).toHaveBeenCalledTimes(2);
+      expect(batchJSONSpy).toHaveBeenCalledTimes(1);
+      const entries = batchJSONSpy.mock.calls[0]![0] as unknown[];
+      expect(entries).toHaveLength(1);
+    });
+
+    it("bypassUserLimit=true publishes every item without limiter calls", async () => {
+      const work = Array.from({ length: 20 }, (_, i) => ({
+        kind: "isbn" as const,
+        isbn: `978000000${i.toString().padStart(4, "0")}`,
+      }));
+      await scheduleCatalogResolveIfAllowed("svc", work, {
+        bypassUserLimit: true,
+      });
+      expect(userLimitMock).not.toHaveBeenCalled();
+      const entries = batchJSONSpy.mock.calls[0]![0] as unknown[];
+      expect(entries).toHaveLength(20);
+    });
+
+    it("empty work → no publish", async () => {
+      await scheduleCatalogResolveIfAllowed("u", [], { bypassUserLimit: true });
+      expect(batchJSONSpy).not.toHaveBeenCalled();
+    });
+
+    it("batchJSON throws → no exception escapes (cosmetic enrichment posture)", async () => {
+      batchJSONSpy.mockRejectedValueOnce(new Error("qstash unreachable"));
+      await expect(
+        scheduleCatalogResolveIfAllowed("u", [
+          { kind: "isbn", isbn: "9780000000000" },
+        ]),
+      ).resolves.toBeUndefined();
+      expect(sentryCaptureSpy).toHaveBeenCalledTimes(1);
+      expect(sentryCaptureSpy.mock.calls[0][1]).toMatchObject({
+        tags: { queue: "catalog-resolve", phase: "publish" },
+      });
+    });
   });
 });

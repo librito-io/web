@@ -222,12 +222,33 @@ export const actions: Actions = {
       .select("isbn, title, author, normalized_title_author")
       .eq("id", id)
       .maybeSingle();
+
+    // ctx must come from a device-synced `books` row, NOT from
+    // `book_catalog.title`/`.author`. The catalog row is precisely what
+    // requeue is correcting; reading ctx off it would loop a stub
+    // ("Untitled MJ" / "To Be Confirmed Gallery" for pre-pub ISBN
+    // 9781668082461) back into the resolver, which then "overrides"
+    // upstream metadata with the same stub via the issue #449 fix —
+    // no-op. The `books` table carries the EPUB-extracted title/author
+    // from device sync; that's the authoritative source. Issue #449
+    // follow-up.
+    let ctx: { title: string; author: string } | undefined;
+    if (row?.isbn) {
+      const { data: book } = await admin
+        .from("books")
+        .select("title, author")
+        .eq("isbn", row.isbn)
+        .not("title", "is", null)
+        .not("author", "is", null)
+        .limit(1)
+        .maybeSingle();
+      if (book?.title && book.author) {
+        ctx = { title: book.title, author: book.author };
+      }
+    }
+
     let work: CatalogResolveWork[] = [];
     if (row?.isbn) {
-      const ctx =
-        row.title && row.author
-          ? { title: row.title, author: row.author }
-          : undefined;
       work = [{ kind: "isbn", isbn: row.isbn, ctx, fields }];
     } else if (row?.title && row.author) {
       work = [{ kind: "ta", title: row.title, author: row.author, fields }];

@@ -1,7 +1,9 @@
 import type { PageServerLoad } from "./$types";
+import { requireUuidParam } from "$lib/server/auth";
 import { createAdminClient } from "$lib/server/supabase";
 
 export const load: PageServerLoad = async ({ params }) => {
+  const id = requireUuidParam(params.id);
   // Service-role read so the page shows ALL audit rows for the catalog
   // entry, not only the current admin's. RLS on catalog_admin_actions
   // is self-scoped (admins read own rows), which is correct for the
@@ -12,9 +14,9 @@ export const load: PageServerLoad = async ({ params }) => {
   const { data, error } = await admin
     .from("catalog_admin_actions")
     .select("*")
-    .eq("catalog_id", params.id)
+    .eq("catalog_id", id)
     .order("created_at", { ascending: false })
     .limit(50);
   if (error) throw error;
-  return { rows: data ?? [], catalogId: params.id };
+  return { rows: data ?? [], catalogId: id };
 };

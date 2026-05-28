@@ -174,6 +174,38 @@ export async function uploadCover(
     : uploadSupabase(bytes, mime, sha, deps);
 }
 
+/**
+ * Delete a Cloudflare Images object by storage_path (CF image id).
+ * Used by the admin uploadCover action's RPC-failure rollback so an
+ * orphaned image doesn't accumulate on the CF account when
+ * `admin_apply_action` fails post-upload.
+ *
+ * Idempotent on 404 (already-deleted) — CF returns 404 with a JSON
+ * error envelope rather than throwing, and we treat that as success.
+ * Non-404 non-2xx responses throw so the caller can surface the
+ * cleanup failure to Sentry.
+ */
+export async function deleteCloudflareImage(
+  storagePath: string,
+  deps: UploadDeps = {},
+): Promise<void> {
+  const accountId = privateEnv.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = privateEnv.CLOUDFLARE_IMAGES_API_TOKEN;
+  if (!accountId || !apiToken) {
+    throw new Error(
+      "deleteCloudflareImage requires CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_IMAGES_API_TOKEN env vars.",
+    );
+  }
+  const f = deps.fetchFn ?? fetch;
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${encodeURIComponent(storagePath)}`;
+  const res = await f(url, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${apiToken}` },
+  });
+  if (res.ok || res.status === 404) return;
+  throw new Error(`deleteCloudflareImage: ${res.status}`);
+}
+
 export function coverUrl(
   storagePath: string,
   backend: CoverStorageBackend,

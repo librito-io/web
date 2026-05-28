@@ -480,12 +480,15 @@ header h1 {
   transition: background 0.1s;
   cursor: pointer;
 }
+.lang-dropdown button:not(.active) {
+  color: #9e9fa2;
+}
 .lang-dropdown button:hover {
   background: #dedede;
   color: #16181b;
 }
 .lang-dropdown button.active {
-  font-weight: 700;
+  font-weight: 600;
   color: #ffffff;
 }
 .lang-dropdown button.active:hover {

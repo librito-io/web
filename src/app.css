@@ -486,6 +486,7 @@ header h1 {
 .lang-dropdown button:hover {
   background: #dedede;
   color: #16181b;
+  font-weight: 600;
 }
 .lang-dropdown button.active {
   font-weight: 600;

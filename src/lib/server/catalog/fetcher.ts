@@ -1155,6 +1155,13 @@ export async function resolveIsbn(
 
     const audit = computeAuditFields(gbMemo.snapshot(), cover);
 
+    // Caller-supplied title/author win over upstream metadata. Pre-publication
+    // stub volumes ship "Untitled X" / "To Be Confirmed Gallery" placeholders
+    // from OL and/or GB (e.g. 9781668082461 pre-launch); the device-sourced
+    // ctx values from the `books` row are authoritative. Issue #449.
+    if (ctx?.title) metadata.title = ctx.title;
+    if (ctx?.author) metadata.author = ctx.author;
+
     // 9. Build pendingRow with per-field value + state writes.
     //
     //    Cover state has two outcome shapes:
@@ -1618,6 +1625,13 @@ export async function resolveTitleAuthor(
     const audit = computeAuditFields(gbMemo.snapshot(), cover);
     const pending = cover !== null;
     const coverStateInUpsert = coverShouldAttempt && cover === null;
+
+    // Caller-supplied title/author win over OL search-normalized metadata.
+    // The function args are the device-authoritative values; OL search may
+    // return pre-publication stubs (mirrors the resolveIsbn ctx override).
+    // Issue #449.
+    metadata.title = title;
+    metadata.author = author;
 
     const pendingRow = buildPendingRow({
       isbn: null,

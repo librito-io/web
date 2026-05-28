@@ -3285,3 +3285,204 @@ describe("resolveTitleAuthor – Sentry suspect-cover warning (Task 10)", () => 
     expect(sentryCaptureMessage).not.toHaveBeenCalled();
   });
 });
+
+// ─── #449: ctx title/author overrides upstream stub metadata ────────────────
+
+describe("resolveIsbn – ctx title/author override (#449)", () => {
+  function coldMissSupabase() {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+    return supabase;
+  }
+
+  /** OL + GB both return pre-publication stub title/author for the ISBN.
+   *  GB volume otherwise valid (description fills, pdf.isAvailable=true). */
+  function stubMetadataFetch() {
+    const GB_URL =
+      "https://books.google.com/books/content?id=stubvol&img=1&zoom=0";
+    return vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(
+          JSON.stringify({
+            "ISBN:9781668082461": {
+              title: "Untitled MJ",
+              authors: [{ name: "To Be Confirmed Gallery" }],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: GB_URL },
+            {
+              title: "Untitled MJ",
+              authors: ["To Be Confirmed Gallery"],
+              description: "Real description copy from publisher.",
+            },
+            { pdf: { isAvailable: true } },
+          ),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("itunes.apple.com/lookup")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("books.google.com")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  it("writes ctx.title and ctx.author to book_catalog when supplied", async () => {
+    const supabase = coldMissSupabase();
+    const d = deps({ fetchFn: stubMetadataFetch() });
+
+    await resolveIsbn(supabase as never, "9781668082461", d, {
+      title: "Are You Mad at Me?",
+      author: "Meg Josephson",
+    });
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.title).toBe("Are You Mad at Me?");
+    expect(p_row.author).toBe("Meg Josephson");
+  });
+
+  it("falls back to upstream title/author when ctx is absent", async () => {
+    // Catalog-warmup cron path: no ctx. Resolver still writes whatever
+    // upstream supplies, even when that's a pre-pub stub. The cron-time
+    // fallback is documented as an acceptable trade-off in the issue body.
+    const supabase = coldMissSupabase();
+    const d = deps({ fetchFn: stubMetadataFetch() });
+
+    await resolveIsbn(supabase as never, "9781668082461", d);
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.title).toBe("Untitled MJ");
+    expect(p_row.author).toBe("To Be Confirmed Gallery");
+  });
+
+  it("ctx override does not disturb other resolved fields (description, cover)", async () => {
+    const supabase = coldMissSupabase();
+    const d = deps({ fetchFn: stubMetadataFetch() });
+
+    await resolveIsbn(supabase as never, "9781668082461", d, {
+      title: "Are You Mad at Me?",
+      author: "Meg Josephson",
+    });
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.description).toBe("Real description copy from publisher.");
+    expect(p_row.description_provider).toBe("google_books");
+    expect(p_row.cover_source).toBe("google_books");
+  });
+});
+
+describe("resolveTitleAuthor – caller args override stub metadata (#449)", () => {
+  function coldMissTaSupabase() {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+    return supabase;
+  }
+
+  it("writes function-arg title/author over OL search-normalized stub", async () => {
+    // OL search returns a stub title / author for the queried (title,author);
+    // the caller-supplied values are authoritative and must win.
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(
+          JSON.stringify({
+            numFound: 1,
+            docs: [
+              {
+                title: "Untitled MJ",
+                author_name: ["To Be Confirmed Gallery"],
+                cover_i: 99999,
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    const supabase = coldMissTaSupabase();
+    await resolveTitleAuthor(
+      supabase as never,
+      "Are You Mad at Me?",
+      "Meg Josephson",
+      deps({ fetchFn }),
+    );
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_title_author",
+    );
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    expect(p_row.title).toBe("Are You Mad at Me?");
+    expect(p_row.author).toBe("Meg Josephson");
+  });
+});

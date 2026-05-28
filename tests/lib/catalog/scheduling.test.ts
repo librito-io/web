@@ -8,13 +8,12 @@ vi.mock("$env/static/private", () => ({
 vi.mock("$env/static/public", () => ({
   PUBLIC_SUPABASE_URL: "https://supabase.example.co",
 }));
-vi.mock("$env/dynamic/private", () => ({
-  env: {
-    COVER_STORAGE_BACKEND: "supabase",
-    CLOUDFLARE_ACCOUNT_ID: "acct",
-    CLOUDFLARE_IMAGES_API_TOKEN: "tok",
-  },
-}));
+const dynPrivate: Record<string, string | undefined> = {
+  COVER_STORAGE_BACKEND: "supabase",
+  CLOUDFLARE_ACCOUNT_ID: "acct",
+  CLOUDFLARE_IMAGES_API_TOKEN: "tok",
+};
+vi.mock("$env/dynamic/private", () => ({ env: dynPrivate }));
 vi.mock("$env/dynamic/public", () => ({
   env: { PUBLIC_CLOUDFLARE_IMAGES_HASH: "hashabc" },
 }));
@@ -83,6 +82,8 @@ beforeEach(() => {
     limit: 10,
     remaining: 9,
   });
+  delete dynPrivate.QSTASH_TOKEN;
+  delete dynPrivate.QSTASH_CONSUMER_URL;
 });
 
 describe("scheduleCatalogResolveIfAllowed", () => {

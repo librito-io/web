@@ -7,6 +7,7 @@ import type { FeedItem, Sort } from "$lib/feed/types";
 import { canonicalizeIsbn } from "$lib/server/catalog/isbn";
 import { normalizeTitleAuthor } from "$lib/server/catalog/title-author";
 import {
+  PLACEHOLDER_COVER_URL,
   getCatalogForBrowser,
   getCatalogForBrowserByTitleAuthor,
   type BookDetailCatalog,
@@ -81,8 +82,7 @@ export const load: PageServerLoad = async (event) => {
 
   function projectCatalogView(view: CatalogView): BookDetailCatalog {
     return {
-      // Caller is expected to have branched on view.cover_url !== null.
-      cover_url: view.cover_url as string,
+      cover_url: view.cover_url ?? PLACEHOLDER_COVER_URL,
       description: view.description ?? null,
       description_provider: view.description_provider ?? null,
       publisher: view.publisher ?? null,
@@ -100,9 +100,13 @@ export const load: PageServerLoad = async (event) => {
       isbn,
       "large",
     ).catch(() => null);
-    if (view && view.cover_url !== null) {
+    if (view) {
+      // Project regardless of cover presence — a row with metadata but a
+      // null cover (negative-cache state) still carries description /
+      // publisher / etc. that the page must render. projectCatalogView
+      // substitutes the placeholder when cover_url is null (issue #462).
       catalog = projectCatalogView(view);
-    } else if (view === null) {
+    } else {
       // ctx carries title+author so the resolver can promote a pre-existing
       // TA-keyed catalog row to ISBN-keyed instead of creating a duplicate
       // (issue #427, refit PR3). title + author are non-null in practice
@@ -136,9 +140,9 @@ export const load: PageServerLoad = async (event) => {
       author,
       "large",
     ).catch(() => null);
-    if (view && view.cover_url !== null) {
+    if (view) {
       catalog = projectCatalogView(view);
-    } else if (view === null) {
+    } else {
       await scheduleCatalogResolveIfAllowed(userId, [
         { kind: "ta", title, author },
       ]);

@@ -29,6 +29,7 @@ import {
   type FieldProvider,
   type GoogleBooksItem,
   type OpenLibraryDataDoc,
+  type OpenLibrarySearchDoc,
   type OpenLibraryWork,
   type ResolveCtx,
   type TrackedField,
@@ -803,11 +804,94 @@ async function resolveCoverWithTiering(
 
 // ─── OL cover_id discovery (metadata only — no byte fetch) ───────────────────
 
+/** Tokenize for acceptableMatch — Unicode-aware, lowercase, stopword-free. */
+function matchTokens(s: string): string[] {
+  return s
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+const TITLE_STOPWORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "of",
+  "and",
+  "or",
+  "in",
+  "on",
+  "to",
+  "for",
+  "is",
+  "are",
+  "at",
+  "by",
+  "with",
+  "from",
+  "as",
+]);
+
+/**
+ * Gate a title+author OL search result against the ctx title/author so we
+ * don't accept a wrong book's cover when OL ranking returns a near-miss.
+ *
+ * Require BOTH:
+ *   - Title-token overlap: at least min(2, ctxTitleTokens.length) significant
+ *     (non-stopword) tokens in common. Two-token requirement prevents a single
+ *     generic token ("story", "memoir") from passing the gate; the floor of
+ *     min(2, len) keeps single-significant-token titles ("Annie Bot" reduced
+ *     to "annie bot", "Beloved") gateable when ctx is short.
+ *   - Author surname overlap: last whitespace token of any `doc.author_name`
+ *     entry matches any surname extracted from ctx.author (last whitespace
+ *     token per comma/semicolon/ampersand-split fragment). Surname-to-surname
+ *     only — a doc author whose first name coincides with ctx's surname
+ *     (or vice-versa) must NOT pass.
+ */
+function acceptableMatch(
+  doc: Pick<OpenLibrarySearchDoc, "title" | "author_name">,
+  ctx: { title: string; author: string },
+): boolean {
+  const ctxTitleTokens = matchTokens(ctx.title).filter(
+    (t) => !TITLE_STOPWORDS.has(t),
+  );
+  if (ctxTitleTokens.length === 0) return false;
+  const docTitleTokens = matchTokens(doc.title ?? "").filter(
+    (t) => !TITLE_STOPWORDS.has(t),
+  );
+  const overlapCount = ctxTitleTokens.filter((t) =>
+    docTitleTokens.includes(t),
+  ).length;
+  const required = Math.min(2, ctxTitleTokens.length);
+  if (overlapCount < required) return false;
+
+  const ctxSurnames = new Set(
+    ctx.author
+      .split(/[,;&]/)
+      .map((part) => matchTokens(part).at(-1))
+      .filter((t): t is string => Boolean(t)),
+  );
+  if (ctxSurnames.size === 0) return false;
+  const docSurnames = (doc.author_name ?? [])
+    .map((name) => matchTokens(name).at(-1))
+    .filter((t): t is string => Boolean(t));
+  return docSurnames.some((s) => ctxSurnames.has(s));
+}
+
 /**
  * Discover the Open Library cover_id for an ISBN from the data document or
  * the search-by-isbn endpoint. Mutates `metadata` with search-derived
  * title/author when found. Does NOT fetch cover bytes — that is the chain's
  * responsibility.
+ *
+ * When both ISBN-keyed paths exhaust and `ctx` carries title+author, fall
+ * through to `searchOpenLibraryByTitleAuthor`. Gated by `acceptableMatch`
+ * to reject OL ranking near-misses (wrong-author / different-title hits).
+ * Catches the dominant OL "missing cover" patterns where the queried
+ * edition has no cover but a sibling edition (same work OR cross-work
+ * stub) does. See issue #450.
  *
  * Returns the cover_id (for the chain context) or null when not found.
  */
@@ -816,6 +900,7 @@ async function discoverOpenLibraryCoverId(
   isbn: string,
   metadata: CatalogMetadata,
   deps: ResolveDeps,
+  ctx?: ResolveCtx,
 ): Promise<number | null> {
   let coverId: number | undefined;
 
@@ -843,6 +928,35 @@ async function discoverOpenLibraryCoverId(
       if (!metadata.title && search.title) metadata.title = search.title;
       if (!metadata.author && search.author_name?.length) {
         metadata.author = search.author_name.join(", ");
+      }
+    }
+  }
+
+  if (!coverId && ctx?.title && ctx?.author) {
+    let taSearch: Awaited<ReturnType<typeof searchOpenLibraryByTitleAuthor>> =
+      null;
+    try {
+      taSearch = await searchOpenLibraryByTitleAuthor(ctx.title, ctx.author, {
+        fetchFn: deps.fetchFn,
+      });
+    } catch (err) {
+      logger().warn(
+        {
+          event: "catalog_openlibrary_ta_search_failed",
+          isbn,
+          error: String(err),
+        },
+        "catalog_openlibrary_ta_search_failed",
+      );
+    }
+    if (
+      taSearch?.cover_i &&
+      acceptableMatch(taSearch, { title: ctx.title, author: ctx.author })
+    ) {
+      coverId = taSearch.cover_i;
+      if (!metadata.title && taSearch.title) metadata.title = taSearch.title;
+      if (!metadata.author && taSearch.author_name?.length) {
+        metadata.author = taSearch.author_name.join(", ");
       }
     }
   }
@@ -987,12 +1101,17 @@ export async function resolveIsbn(
       olWork,
     );
 
-    // 2. Discover OL cover_id for the chain's OL fallback
+    // 2. Discover OL cover_id for the chain's OL fallback. ctx threaded so
+    //    the TA fall-through fires when both ISBN-keyed paths exhaust —
+    //    catches OL editions where the queried ISBN's edition lacks a
+    //    cover but a sibling edition (same work OR cross-work stub) has
+    //    one. See issue #450.
     const openLibraryCoverId = await discoverOpenLibraryCoverId(
       olData,
       isbn,
       metadata,
       deps,
+      ctx,
     );
 
     // Memoized GB volume fetcher shared by cover chain + walker GB legs

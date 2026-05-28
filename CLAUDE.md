@@ -249,6 +249,30 @@ Shared per-ISBN `book_catalog` table backing the highlight viewer. Code in `src/
 
 **Audit columns** (5 fields on `book_catalog`, populated every resolve): `gb_pdf_available`, `gb_viewability`, `gb_image_link_tiers` (GB-fetched only), `cover_aspect`, `cover_bytes_per_pixel` (acceptance-computed). Query patterns in `scripts/data/README.md`. Sentry warning `catalog_cover_suspect_low_bpp` at `bytes_per_pixel < 0.05` — outlier signal, expected single-digits/day.
 
+### Resolve queue (Upstash QStash)
+
+Cold-miss resolves route through Upstash QStash when `QSTASH_TOKEN + QSTASH_CONSUMER_URL` are both set in Vercel env. Producer (`src/lib/server/catalog/scheduling.ts`) publishes one message per work item via `batchJSON` with `flowControl: { key: "catalog-resolve", parallelism: 2 }`. Consumer (`src/routes/api/queue/catalog-resolve/+server.ts`) verifies `Upstash-Signature` against `QSTASH_CURRENT_SIGNING_KEY` + `QSTASH_NEXT_SIGNING_KEY`, decodes the body via `parseWorkPayload`, and runs the same `dispatchResolve` helper as the inline path. `Receiver.verify` binds against `QSTASH_CONSUMER_URL` (NOT `request.url`) — Vercel-reconstructed URL drift under custom domain / preview alias / proxy rewrite would otherwise reject every fire.
+
+**Feature-flag:** absence of either env var = inline `runInBackground` fallback (today's behavior). Both env vars required so a half-provisioned environment falls back rather than publishing to the wrong URL. Preview deploys never set `QSTASH_CONSUMER_URL`, so they can't accidentally hit production's consumer.
+
+**Failure-recovery layers (three, increasing cadence):**
+
+| Layer                         | Cadence         | Handles                                       |
+| ----------------------------- | --------------- | --------------------------------------------- |
+| QStash retries (2× on 5xx)    | seconds-minutes | Transient upstream / network / Supabase write |
+| Field-state TTL replay cron   | nightly         | Per-field value-level partial successes       |
+| `catalog_dlq_archive` + admin | operator-driven | QStash exhausted retries; permanent failures  |
+
+**Producer publish-failure posture:** try/catch around `batchJSON` logs `catalog.queue.publish_failed` + `Sentry.captureException` with `{ queue: "catalog-resolve", phase: "publish" }`, then swallows. Surfacing to the load function would render an error page over readable feed content (cosmetic-enrichment posture per `feed-enrichment.ts:23-28`). Recovery is the nightly replay cron.
+
+**DLQ archive cron:** `/api/cron/catalog-dlq-drain` (05:00 UTC daily) pulls QStash DLQ contents into `catalog_dlq_archive` with 23505-tolerant INSERT (idempotent on partial-success retries), then deletes from QStash to free the 3-day retention slot. Implicit self-hoster gate on `!privateEnv.QSTASH_TOKEN` — returns `{ skipped: true }` matching the `catalog-replay` skip pattern. Per-iteration try/catch absorbs malformed-message edge cases without aborting the batch. Sentry extras strip `userId` (Supabase auth UUID) and forward only `{ fail_reason, item }`. Not wrapped in `Sentry.withMonitor` (free-tier slot allocated to `transfer-sweep`); `captureMessage` per archived item is the observability surface — `await Sentry.flush(2000)` before every return prevents Vercel function suspension from dropping events.
+
+**Admin UI surface:** `/app/admin/catalog/[id]` queries `catalog_dlq_archive` by ISBN AND/OR (title, author), deduplicates by id (Svelte each-block crash defense), and renders a section listing matching rows. The existing requeue action scopes its `manually_requeued_at` UPDATE to the DLQ archive IDs the operator actually saw (passed via hidden form inputs) — prevents touching DLQ rows belonging to a different catalog row sharing the same ISBN during a `set_isbn` race.
+
+**Adding a new TrackedField requires consumer-before-producer deploy.** `parseWorkPayload` rejects unknown field literals with 4xx → permanent DLQ. Mirror the migration's consumer-before-producer rule when extending `src/lib/catalog/tracked-fields.ts`.
+
+**Operator runbook:** [`docs/operations/qstash-runbook.md`](docs/operations/qstash-runbook.md).
+
 ### Field-state model (introduced 2026-05-27)
 
 `book_catalog` carries per-field state — `<field>_attempted_at`, `<field>_attempts`, `<field>_fail_reason`, `<field>_provider` — for the six tracked fields: cover, description, publisher, published_date, subjects, page_count. Resolver gates per-field via `shouldAttempt(field, row, now)` (`src/lib/server/catalog/fetcher.ts`); chain walker (`src/lib/server/catalog/chain.ts`) aggregates per-leg `LegOutcome` into one `FailReason` per field. TTL ladder lives in SQL via `_field_replay_due()` (migration `20260527000004`) and in TS via `TTL_MS` — keep both in sync manually when editing the buckets. The tracked-field literal set + `FailReason` union live in [`src/lib/catalog/tracked-fields.ts`](src/lib/catalog/tracked-fields.ts) — under `$lib/catalog/`, NOT `$lib/server/catalog/`, so the admin `+page.svelte` files can value-import without tripping SvelteKit's server-only-bundle boundary.
@@ -280,6 +304,8 @@ Cron paths are declared in `vercel.ts` (`crons[]`) and live under `src/routes/ap
 3. **Read `CRON_SECRET` via `$env/dynamic/private`, never `$env/static/private`.** CRON_SECRET is marked Sensitive in Vercel; static-imported sensitive vars bake empty strings into prebuilt deploys and every cron fire 401s. See "Environment Variables" below.
 
 If you add a new cron path: update `vercel.ts`, follow these three rules, and the smoke job picks it up automatically without a workflow edit.
+
+The DLQ drain cron at `/api/cron/catalog-dlq-drain` follows the same three invariants. It also calls `await Sentry.flush(2000)` before every return so per-archive `captureMessage` events survive Vercel function suspension — mirrors the pattern in `transfer-sweep`.
 
 ### Tier constraints (Vercel Hobby + Sentry Free)
 
@@ -314,7 +340,7 @@ See `.env.example`. Required:
 
 Vercel env vars have a per-var `type`: `encrypted` (default, decryptable via CLI) or `sensitive` (locked, never decryptable post-creation — even by Vercel CLI). `vercel pull` redacts sensitive vars to empty strings. Our production-deploy.yml uses `vercel pull` → `vercel build --prebuilt` → `vercel deploy --prebuilt`, so any sensitive var read via `$env/static/private` gets baked into the deployed bundle as `""` and the route silently misbehaves at runtime (401 forever on auth-checked routes, silent fallback to defaults on config gates).
 
-**Rule:** sensitive Vercel envs must be read via `$env/dynamic/private` (runtime read), never `$env/static/private` (build-time inlined). Verify type via `npx vercel env ls -F json production | jq '.envs[] | select(.key=="X") | .type'`. Currently sensitive in this project (must use dynamic): `CRON_SECRET`, `CATALOG_WARMUP_ENABLED`, `COVER_STORAGE_BACKEND`, `NYT_BOOKS_API_KEY`, `GOOGLE_BOOKS_API_KEY`, `LIBRITO_JWT_PRIVATE_KEY_JWK`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_IMAGES_API_TOKEN`, `PUBLIC_CLOUDFLARE_IMAGES_HASH`, `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `RESEND_API_KEY`. The smoke job catches CRON_SECRET regressions; other sensitive vars rely on this rule + code review. Add explicit `server_misconfigured` (500) guards at handler entry for the value you read, so a config drift surfaces loudly rather than silently. See `src/routes/api/cron/*/+server.ts` and `src/lib/server/cover-storage.ts` for the established pattern. Background: the bug surfaced via #195 / #196 after PR #195 added the smoke probe; rule applies to both production and any future preview-build flows that use `--prebuilt`.
+**Rule:** sensitive Vercel envs must be read via `$env/dynamic/private` (runtime read), never `$env/static/private` (build-time inlined). Verify type via `npx vercel env ls -F json production | jq '.envs[] | select(.key=="X") | .type'`. Currently sensitive in this project (must use dynamic): `CRON_SECRET`, `CATALOG_WARMUP_ENABLED`, `COVER_STORAGE_BACKEND`, `NYT_BOOKS_API_KEY`, `GOOGLE_BOOKS_API_KEY`, `LIBRITO_JWT_PRIVATE_KEY_JWK`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_IMAGES_API_TOKEN`, `PUBLIC_CLOUDFLARE_IMAGES_HASH`, `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `RESEND_API_KEY`, `QSTASH_TOKEN`, `QSTASH_CONSUMER_URL`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`. The smoke job catches CRON_SECRET regressions; other sensitive vars rely on this rule + code review. Add explicit `server_misconfigured` (500) guards at handler entry for the value you read, so a config drift surfaces loudly rather than silently. See `src/routes/api/cron/*/+server.ts` and `src/lib/server/cover-storage.ts` for the established pattern. Background: the bug surfaced via #195 / #196 after PR #195 added the smoke probe; rule applies to both production and any future preview-build flows that use `--prebuilt`.
 
 **Inverse rule for `PUBLIC_*` vars:** `$env/dynamic/public` (and `$env/static/public`) publish values to the browser bundle. Sensitive vars are redacted to empty strings by `vercel pull` before `vercel build --prebuilt` runs, so a Sensitive-typed `PUBLIC_*` var becomes the empty string in the deployed bundle. Currently `PUBLIC_SENTRY_DSN` is the only var subject to this rule — it MUST be Encrypted in Vercel. Verify type via `npx vercel env ls -F json production | jq '.envs[] | select(.key=="PUBLIC_SENTRY_DSN") | .type'` — expected output: `"encrypted"`.
 

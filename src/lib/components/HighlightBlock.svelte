@@ -36,6 +36,16 @@
 </blockquote>
 
 <style>
+  /* Highlight text sits above the card-link overlay (.card-link is
+     position:absolute; z-index:1 in HighlightCard) so selection + the
+     context menu hit the text, not the link. Scoped here — NOT a bare
+     `blockquote` rule in app.css — so this positioning cannot leak onto
+     other semantic <blockquote> elements (issue #472). Typography for the
+     blockquote stays centralized in app.css per #421. */
+  blockquote {
+    position: relative;
+    z-index: 2;
+  }
   .bold {
     font-weight: 700;
   }

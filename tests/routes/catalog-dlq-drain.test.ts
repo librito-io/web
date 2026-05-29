@@ -94,8 +94,20 @@ describe("GET /api/cron/catalog-dlq-drain", () => {
     expect(listMessagesSpy).not.toHaveBeenCalled();
   });
 
+  it("QSTASH_URL absent → 200 {skipped:true}, no QStash call", async () => {
+    // Token set but region endpoint missing: EU-tenant tokens 401 against
+    // the SDK's global default, so the gate (+server.ts:48) skips when
+    // either leg of the pair is unset.
+    dynPrivate.QSTASH_TOKEN = "tok";
+    const res = await GET(makeReq("secret") as any);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ skipped: true });
+    expect(listMessagesSpy).not.toHaveBeenCalled();
+  });
+
   it("DLQ empty → 200 {archived: 0}", async () => {
     dynPrivate.QSTASH_TOKEN = "tok";
+    dynPrivate.QSTASH_URL = "https://qstash-eu-central-1.upstash.io";
     listMessagesSpy.mockResolvedValueOnce({ messages: [] });
     adminSupabase._results.set("catalog_dlq_archive.insert", {
       data: null,
@@ -108,6 +120,7 @@ describe("GET /api/cron/catalog-dlq-drain", () => {
 
   it("DLQ has 2 messages → INSERT + delete + captureMessage per item", async () => {
     dynPrivate.QSTASH_TOKEN = "tok";
+    dynPrivate.QSTASH_URL = "https://qstash-eu-central-1.upstash.io";
     listMessagesSpy.mockResolvedValueOnce({
       messages: [
         {
@@ -145,6 +158,7 @@ describe("GET /api/cron/catalog-dlq-drain", () => {
 
   it("INSERT error → no delete, Sentry capture, continue to next message", async () => {
     dynPrivate.QSTASH_TOKEN = "tok";
+    dynPrivate.QSTASH_URL = "https://qstash-eu-central-1.upstash.io";
     listMessagesSpy.mockResolvedValueOnce({
       messages: [
         {
@@ -171,6 +185,7 @@ describe("GET /api/cron/catalog-dlq-drain", () => {
 
   it("INSERT duplicate (23505) → DOES delete, continues", async () => {
     dynPrivate.QSTASH_TOKEN = "tok";
+    dynPrivate.QSTASH_URL = "https://qstash-eu-central-1.upstash.io";
     listMessagesSpy.mockResolvedValueOnce({
       messages: [
         {

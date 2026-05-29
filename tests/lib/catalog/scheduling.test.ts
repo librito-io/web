@@ -114,6 +114,7 @@ beforeEach(() => {
   });
   delete dynPrivate.QSTASH_TOKEN;
   delete dynPrivate.QSTASH_CONSUMER_URL;
+  delete dynPrivate.QSTASH_URL;
   batchJSONSpy.mockClear();
   batchJSONSpy.mockResolvedValue(undefined);
   sentryCaptureSpy.mockClear();
@@ -223,6 +224,11 @@ describe("scheduleCatalogResolveIfAllowed", () => {
       dynPrivate.QSTASH_TOKEN = "qst-tok";
       dynPrivate.QSTASH_CONSUMER_URL =
         "https://qstash-consumer.test/api/queue/catalog-resolve";
+      // All three env vars gate the qstash branch (scheduling.ts:106-110).
+      // QSTASH_URL pins the region endpoint — added to the prod gate in #460
+      // but not threaded here until #474; without it the producer falls back
+      // to the inline runInBackground path and every assertion below misses.
+      dynPrivate.QSTASH_URL = "https://qstash-eu-central-1.upstash.io";
     });
 
     it("single batchJSON publish, one entry per permitted item", async () => {

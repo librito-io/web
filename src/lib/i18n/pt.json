@@ -1,5 +1,7 @@
 {
   "highlights": "Destaques",
+  "readingList": "Lista de leitura",
+  "readingListComingSoon": "Em breve",
   "loading": "Carregando…",
   "noHighlights": "Nenhum destaque ainda",
   "loadFailed": "Falha ao carregar os destaques",

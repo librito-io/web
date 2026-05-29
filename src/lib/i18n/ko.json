@@ -1,5 +1,7 @@
 {
   "highlights": "하이라이트",
+  "readingList": "읽기 목록",
+  "readingListComingSoon": "곧 출시 예정",
   "loading": "로딩 중…",
   "noHighlights": "하이라이트가 아직 없습니다",
   "loadFailed": "하이라이트를 불러오지 못했습니다",

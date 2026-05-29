@@ -11,7 +11,7 @@ import { awaitHydration } from "./helpers/hydrate";
 // font-loading invariants the swap relies on:
 //
 //   1. Preload set on /            — Inter 400/600/700, InterVariable,
-//                                    JetBrains 500, Literata 400 + italic.
+//                                    Literata 400 + italic.
 //                                    No Noto preload.
 //   2. Per-script Noto subsets     — non-Latin locales (ar/hi/ja/ko/zh)
 //                                    fetch the matching woff2 on-demand
@@ -36,9 +36,7 @@ import { awaitHydration } from "./helpers/hydrate";
 // preload to eliminate it tracked in issue #416.
 
 test.describe("font loading", () => {
-  test("preload links: Inter + JetBrains + Literata, no Noto", async ({
-    page,
-  }) => {
+  test("preload links: Inter + Literata, no Noto", async ({ page }) => {
     await page.goto("/");
     await awaitHydration(page);
 
@@ -54,7 +52,6 @@ test.describe("font loading", () => {
         "/fonts/inter-600.woff2",
         "/fonts/inter-700.woff2",
         "/fonts/inter-variable.woff2",
-        "/fonts/jetbrains-mono-500.woff2",
         "/fonts/literata-400.woff2",
         "/fonts/literata-400-italic.woff2",
       ]),

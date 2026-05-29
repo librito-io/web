@@ -1,5 +1,7 @@
 {
   "highlights": "Evidenziazioni",
+  "readingList": "Lista di lettura",
+  "readingListComingSoon": "Prossimamente",
   "loading": "Caricamento…",
   "noHighlights": "Nessuna evidenziazione",
   "loadFailed": "Impossibile caricare le evidenziazioni",

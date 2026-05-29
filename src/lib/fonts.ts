@@ -6,7 +6,6 @@ export const PRELOAD_FONTS: readonly string[] = [
   "/fonts/inter-600.woff2",
   "/fonts/inter-700.woff2",
   "/fonts/inter-variable.woff2",
-  "/fonts/jetbrains-mono-500.woff2",
   "/fonts/literata-400.woff2",
   "/fonts/literata-400-italic.woff2",
 ] as const;

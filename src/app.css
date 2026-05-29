@@ -79,13 +79,6 @@
   font-display: optional;
   src: url("/fonts/inter-700.woff2") format("woff2");
 }
-@font-face {
-  font-family: "JetBrains Mono";
-  font-style: normal;
-  font-weight: 500;
-  font-display: optional;
-  src: url("/fonts/jetbrains-mono-500.woff2") format("woff2");
-}
 
 /* InterVariable — variable font with weight (100-900) and opsz (14-32)
    axes. Used on heading classes that need the opsz axis driven from
@@ -115,8 +108,8 @@
 
    Apply `letter-spacing: var(--tracking-*)` to any Inter-family class
    that sets `font-size`, and reset to `normal` on non-Inter elements
-   (Literata, JetBrains Mono) so the inherited body tracking doesn't
-   bleed into the wrong face. */
+   (Literata) so the inherited body tracking doesn't bleed into the
+   wrong face. */
 :root {
   --tracking-xs: 0em; /* 12px (formula ≈ +0.0005, rounded to 0) */
   --tracking-sm: -0.006em; /* 14px */
@@ -125,6 +118,34 @@
   --tracking-lg: -0.017em; /* 20px */
   --tracking-xl: -0.019em; /* 24px */
   --tracking-2xl: -0.022em; /* 32px (h1 browser default) */
+
+  /* ── Motion language ─────────────────────────────────────────────
+     Shared vocabulary for every animation in the app, CSS or JS. The
+     coherence layer: a sync pulse, a pill slide and a transfer-success
+     check all read from this same set, so they feel like one hand drew
+     them. JS-side mirrors live in src/lib/motion/index.ts (keep in
+     sync). Principles + rationale: docs/dev/motion-language.md.
+
+     Durations — smaller distance ⇒ shorter. Exits shorter than enters. */
+  --dur-1: 120ms; /* taps, instant state flips           */
+  --dur-fast: 150ms; /* press feedback, snappy micro-moves   */
+  --dur-2: 180ms; /* hover, small elements                */
+  --dur-3: 240ms; /* default UI: pill slide, fade, toggle */
+  --dur-4: 360ms; /* entrances, modals, larger moves      */
+  --dur-5: 600ms; /* page / theme transitions             */
+
+  /* Easings — match the curve to the situation. Response & entrance
+     decelerate (ease-out, fast start → settle = the "Apple" feel);
+     on-screen A→B moves use ease-in-out; only things leaving use
+     ease-in. Never linear (robotic) or symmetric ease on a response. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* enters / responses     */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* on-screen moves    */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* exits only                 */
+  --ease-hover: cubic-bezier(0.4, 0, 0.2, 1); /* hovers                */
+
+  /* Press feedback — every interactive element scales down on :active
+     for instant, tactile acknowledgement of input. */
+  --press-scale: 0.97;
 }
 
 html {
@@ -173,8 +194,7 @@ body {
    kerning than the static Inter Display cut, and `letter-spacing:
    normal` avoids stacking formula tracking on top of opsz Text width.
    Header h1 + body-size headings stay on the static Inter cut via
-   their own more-specific rules. `.page-header h2` uses JetBrains
-   Mono (its own font-family override wins).
+   their own more-specific rules.
 
    Bare `<h1>`/`<h2>` in user routes inherit this recipe automatically;
    no scoped <style> needed per page. Applies to:
@@ -205,7 +225,8 @@ h2 {
 
 header {
   background: #0a0c0f;
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 60;
 }
 .header-inner {
@@ -229,40 +250,16 @@ header h1 {
   margin: 0 auto;
   padding: 0 20px 20px 20px;
 }
-.page-header {
-  position: sticky;
-  top: 0;
-  z-index: 40;
-  background: #0a0c0f;
-  padding: 24px 0 12px 0;
-  margin: 0 0 8px 0;
-}
-.page-header::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: calc(-50vw + 50%);
-  width: 100vw;
-  height: 1px;
-  background: #2a2a2a;
-  opacity: 0;
-  transition: opacity 0.25s ease;
-}
-.page-header.has-line::after {
-  opacity: 1;
-}
-.page-header h2 {
-  font-family: "JetBrains Mono", monospace;
-  font-weight: 500;
-  font-size: 1.5rem;
-  color: #ffffff;
-  letter-spacing: normal;
-}
-.page-subtitle {
-  color: #999;
-  font-size: 0.875rem;
-  margin-top: 4px;
-  letter-spacing: var(--tracking-sm);
+/* Section nav (left) + sort control (right), in normal document flow
+   above the feed — scrolls away with the content. The single sticky
+   element is the site header, which carries the divider. */
+.section-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  padding: 48px 0;
 }
 .menu-wrap {
   position: relative;
@@ -607,7 +604,12 @@ header h1 {
   gap: 32px;
 }
 @media (min-width: 912px) {
-  .content:has(.book-list) {
+  /* `.feed-page` keeps /app at feed width even when the active section
+     renders no `.book-list` (e.g. the Reading List placeholder), so the
+     sticky section bar doesn't jump horizontally when switching sections.
+     `:has(.book-list)` still covers the book-detail page. */
+  .content:has(.book-list),
+  .content.feed-page {
     max-width: min(1400px, calc(100% - 40px));
   }
 }
@@ -688,7 +690,6 @@ header h1 {
    h6 = 10.72px. Only h4 (16px) is correct by accident.
    Sites of bare headings (audit as of 2026-05-26):
    - `header h1`                                  → covered by `header h1`.
-   - `.page-header h2`                            → covered (JetBrains Mono).
    - `.book-header .meta h2` (book detail title)  → .book-detail-title.
    - homepage h1, transfer h1/h2, devices h1/h2,
      auth/{login,signup,verify-email} h1          → scoped <style> per file.

@@ -1,5 +1,7 @@
 {
   "highlights": "Выделения",
+  "readingList": "Список чтения",
+  "readingListComingSoon": "Скоро",
   "loading": "Загрузка…",
   "noHighlights": "Выделений пока нет",
   "loadFailed": "Не удалось загрузить выделения",

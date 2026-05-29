@@ -231,6 +231,40 @@ describe("scheduleCatalogResolveIfAllowed", () => {
       dynPrivate.QSTASH_URL = "https://qstash-eu-central-1.upstash.io";
     });
 
+    // Per-clause absent guards (issue #477). The describe `beforeEach` sets
+    // all three env vars, so the happy-path assertions below stay green even
+    // if a single clause is deleted from the gate (scheduling.ts:106-110).
+    // Each guard unsets ONE leg, leaves the other two, and asserts the inline
+    // fallback (runInBackground fan-out, no publish) — so dropping that clause
+    // from the OR makes the corresponding test fail. Mirrors the QSTASH_URL
+    // absent guard added to catalog-dlq-drain.test.ts in #476.
+    it("QSTASH_TOKEN absent → inline fallback, no publish", async () => {
+      delete dynPrivate.QSTASH_TOKEN;
+      await scheduleCatalogResolveIfAllowed("u", [
+        { kind: "isbn", isbn: "9780000000000" },
+      ]);
+      expect(runInBackgroundSpy).toHaveBeenCalledTimes(1);
+      expect(batchJSONSpy).not.toHaveBeenCalled();
+    });
+
+    it("QSTASH_CONSUMER_URL absent → inline fallback, no publish", async () => {
+      delete dynPrivate.QSTASH_CONSUMER_URL;
+      await scheduleCatalogResolveIfAllowed("u", [
+        { kind: "isbn", isbn: "9780000000000" },
+      ]);
+      expect(runInBackgroundSpy).toHaveBeenCalledTimes(1);
+      expect(batchJSONSpy).not.toHaveBeenCalled();
+    });
+
+    it("QSTASH_URL absent → inline fallback, no publish", async () => {
+      delete dynPrivate.QSTASH_URL;
+      await scheduleCatalogResolveIfAllowed("u", [
+        { kind: "isbn", isbn: "9780000000000" },
+      ]);
+      expect(runInBackgroundSpy).toHaveBeenCalledTimes(1);
+      expect(batchJSONSpy).not.toHaveBeenCalled();
+    });
+
     it("single batchJSON publish, one entry per permitted item", async () => {
       await scheduleCatalogResolveIfAllowed("user-1", [
         { kind: "isbn", isbn: "9780000000000" },

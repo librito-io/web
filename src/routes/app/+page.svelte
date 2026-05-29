@@ -43,7 +43,10 @@
     {/if}
   </div>
 
-  {#if activeSection === "highlights"}
+  <!-- Feed stays mounted across section switches (hidden, not unmounted) so
+       sort, loaded pages, and item order survive a trip to Reading List with
+       no refetch or reflow — the "blanket" over the tower. -->
+  <div class="feed-pane" class:is-hidden={activeSection !== "highlights"}>
     <HighlightFeed
       initialItems={data.items}
       initialSort={data.sort}
@@ -54,7 +57,14 @@
       supabase={data.supabase}
       userId={data.user?.id ?? ""}
     />
-  {:else}
+  </div>
+  {#if activeSection === "readingList"}
     <ReadingListPlaceholder />
   {/if}
 </div>
+
+<style>
+  .feed-pane.is-hidden {
+    display: none;
+  }
+</style>

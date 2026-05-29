@@ -1,0 +1,41 @@
+name: unit-tests
+
+# Runs the fast hermetic unit suite (`npm test` → `vitest run`) on every PR
+# and `main` push. The suite mocks Supabase/Redis/QStash and launches no
+# external services, so it is the cheapest gate in the repo (seconds, no
+# Postgres or Chromium boot) — yet until #474 it was the one suite NOT gated.
+# The suite went red on `main` for 10 tests across two files and sat
+# unnoticed because nothing ran `npm test` on PRs (only migration-smoke,
+# e2e-smoke, commitlint, lint-pr-title). This closes that detection gap.
+#
+# No path filter on purpose: unit tests span `src/lib/**` and `src/routes/**`
+# broadly, and a test can break from a change to code it imports anywhere in
+# the tree. A path filter would reintroduce the silent-rot blind spot this
+# gate exists to remove. The suite is cheap enough to always run.
+#
+# Scope is `npm test` only — typecheck (`npm run check`) is a separate concern
+# and not gated here.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test

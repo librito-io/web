@@ -1,5 +1,7 @@
 {
   "highlights": "Highlights",
+  "readingList": "Reading List",
+  "readingListComingSoon": "Coming soon",
   "loading": "Loading…",
   "noHighlights": "No highlights yet",
   "loadFailed": "Failed to load highlights",

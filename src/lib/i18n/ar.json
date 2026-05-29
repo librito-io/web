@@ -1,5 +1,7 @@
 {
   "highlights": "التمييزات",
+  "readingList": "قائمة القراءة",
+  "readingListComingSoon": "قريباً",
   "loading": "جاري التحميل…",
   "noHighlights": "لا توجد تمييزات بعد",
   "loadFailed": "فشل تحميل التمييزات",

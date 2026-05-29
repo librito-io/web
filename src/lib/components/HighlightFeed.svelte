@@ -22,25 +22,32 @@
     initialItems,
     initialSort,
     initialCursor,
-    sortOptions,
+    sortOptions = [],
     fetchUrl,
     emptyMessage,
     supabase,
     userId,
     cardProps = {},
+    controlledSort = undefined,
   } = $props<{
     initialItems: FeedItem[];
     initialSort: Sort;
     initialCursor: string | null;
-    sortOptions: readonly SortOption[];
+    sortOptions?: readonly SortOption[];
     fetchUrl: (params: { sort: Sort; cursor: string | null }) => string;
     emptyMessage: string;
     supabase: SupabaseClient;
     userId: string;
     cardProps?: CardFlags;
+    // When provided, sort is owned by the parent (the section bar renders
+    // the control) and changing it refetches. When omitted, this component
+    // self-manages sort and renders its own <SortPillRow> (book detail).
+    controlledSort?: Sort;
   }>();
 
-  let sort = $state<Sort>(untrack(() => initialSort));
+  let internalSort = $state<Sort>(untrack(() => initialSort));
+  // Effective sort: parent-controlled value when present, else internal.
+  const sort = $derived(controlledSort ?? internalSort);
   let items = $state<FeedItem[]>(untrack(() => initialItems));
   let cursor = $state<string | null>(untrack(() => initialCursor));
   let done = $state(untrack(() => initialCursor === null));
@@ -142,11 +149,27 @@
   async function onSortChange(next: Sort): Promise<void> {
     if (next === sort) return;
     writeSortCookie(next);
-    sort = next;
+    internalSort = next;
     cursor = null;
     done = false;
     await loadMore({ replace: true });
   }
+
+  // Controlled-sort mode: the parent owns `sort` and renders the control.
+  // When it changes, mirror onSortChange's reset + refetch. Skip the
+  // initial value (SSR already loaded items for it) and stay inert when
+  // uncontrolled (controlledSort === undefined).
+  let lastControlledSort = untrack(() => controlledSort);
+  $effect(() => {
+    const next = controlledSort;
+    if (next === undefined) return;
+    if (next === untrack(() => lastControlledSort)) return;
+    lastControlledSort = next;
+    writeSortCookie(next);
+    cursor = null;
+    done = false;
+    loadMore({ replace: true });
+  });
 
   async function loadMore(opts: { replace?: boolean } = {}): Promise<void> {
     abortController?.abort();
@@ -177,7 +200,9 @@
   }
 </script>
 
-<SortPillRow options={sortOptions} active={sort} onChange={onSortChange} />
+{#if controlledSort === undefined}
+  <SortPillRow options={sortOptions} active={sort} onChange={onSortChange} />
+{/if}
 
 <div class="book-list">
   {#if items.length === 0}

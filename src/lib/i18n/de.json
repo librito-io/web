@@ -1,5 +1,7 @@
 {
   "highlights": "Markierungen",
+  "readingList": "Leseliste",
+  "readingListComingSoon": "Demnächst verfügbar",
   "loading": "Laden…",
   "noHighlights": "Noch keine Markierungen",
   "loadFailed": "Fehler beim Laden der Markierungen",

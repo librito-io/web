@@ -1,5 +1,7 @@
 {
   "highlights": "Surlignages",
+  "readingList": "Liste de lecture",
+  "readingListComingSoon": "Bientôt disponible",
   "loading": "Chargement…",
   "noHighlights": "Aucun surlignage",
   "loadFailed": "Échec du chargement des surlignages",

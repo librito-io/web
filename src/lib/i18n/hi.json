@@ -1,5 +1,7 @@
 {
   "highlights": "हाइलाइट्स",
+  "readingList": "पठन सूची",
+  "readingListComingSoon": "जल्द आ रहा है",
   "loading": "लोड हो रहा है…",
   "noHighlights": "अभी तक कोई हाइलाइट नहीं",
   "loadFailed": "हाइलाइट्स लोड करने में विफल",

@@ -1,5 +1,7 @@
 {
   "highlights": "高亮",
+  "readingList": "阅读清单",
+  "readingListComingSoon": "敬请期待",
   "loading": "加载中…",
   "noHighlights": "暂无高亮",
   "loadFailed": "加载高亮失败",

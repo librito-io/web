@@ -130,11 +130,10 @@
     align-items: center;
     justify-content: center;
     color: #dedede;
-    font-family: "JetBrains Mono", monospace;
-    font-weight: 500;
+    /* Inherits the body Inter stack (like .book-title). Single centered
+       glyph, so letter-spacing is moot. */
+    font-weight: 600;
     font-size: 2rem;
-    /* JetBrains Mono carries its own metrics; reset Inter tracking. */
-    letter-spacing: normal;
     background: #2a2a2a;
     text-decoration: none;
   }

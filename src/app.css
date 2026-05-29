@@ -79,13 +79,6 @@
   font-display: optional;
   src: url("/fonts/inter-700.woff2") format("woff2");
 }
-@font-face {
-  font-family: "JetBrains Mono";
-  font-style: normal;
-  font-weight: 500;
-  font-display: optional;
-  src: url("/fonts/jetbrains-mono-500.woff2") format("woff2");
-}
 
 /* InterVariable — variable font with weight (100-900) and opsz (14-32)
    axes. Used on heading classes that need the opsz axis driven from
@@ -115,8 +108,8 @@
 
    Apply `letter-spacing: var(--tracking-*)` to any Inter-family class
    that sets `font-size`, and reset to `normal` on non-Inter elements
-   (Literata, JetBrains Mono) so the inherited body tracking doesn't
-   bleed into the wrong face. */
+   (Literata) so the inherited body tracking doesn't bleed into the
+   wrong face. */
 :root {
   --tracking-xs: 0em; /* 12px (formula ≈ +0.0005, rounded to 0) */
   --tracking-sm: -0.006em; /* 14px */

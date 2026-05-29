@@ -143,10 +143,13 @@
   .item {
     position: relative;
     z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    height: 42px;
     background: transparent;
     border: none;
     border-radius: 999px;
-    padding: 7px 16px;
+    padding: 0 16px;
     font-family: inherit;
     font-size: 0.95rem;
     font-weight: 500;

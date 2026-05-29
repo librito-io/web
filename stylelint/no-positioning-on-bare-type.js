@@ -51,8 +51,10 @@ const POSITIONING_PROPS = new Set([
  */
 function isGloballyReachableType(selectorNode, scoped) {
   let hasClassOrId = false;
+  let hasType = false;
   selectorNode.walk((node) => {
     if (node.type === "class" || node.type === "id") hasClassOrId = true;
+    else if (node.type === "tag") hasType = true;
   });
   if (hasClassOrId) return false;
 
@@ -67,11 +69,37 @@ function isGloballyReachableType(selectorNode, scoped) {
     return globalType;
   }
 
-  let hasType = false;
-  selectorNode.walk((node) => {
-    if (node.type === "tag") hasType = true;
-  });
   return hasType;
+}
+
+/**
+ * True if any ancestor rule in the nested-rule chain is anchored by a class/id.
+ * Native CSS nesting (and Svelte `&`) means a nested rule inherits its parents'
+ * scope: `.foo { & header { … } }` resolves to `.foo header`, and
+ * `.menu-icon { span { … } }` to `.menu-icon span` — both author-scoped, so the
+ * inner rule's bare type must not be flagged. We answer only the anchor
+ * question, not full `&` resolution, which is all the rule needs.
+ *
+ * @param {import("postcss").Rule} styleRule
+ * @returns {boolean}
+ */
+function hasAnchoredAncestor(styleRule) {
+  let parent = styleRule.parent;
+  while (parent && parent.type === "rule") {
+    let anchored = false;
+    try {
+      parser()
+        .astSync(parent.selector)
+        .walk((node) => {
+          if (node.type === "class" || node.type === "id") anchored = true;
+        });
+    } catch {
+      // Unparseable ancestor selector — ignore and keep climbing.
+    }
+    if (anchored) return true;
+    parent = parent.parent;
+  }
+  return false;
 }
 
 /** @type {import("stylelint").Rule} */
@@ -90,22 +118,30 @@ const rule = (primary, secondaryOptions) => {
     if (!validOptions || !primary) return;
 
     // Default (no { mode } passed) is "global": every selector is treated as
-    // globally reachable, which is correct for plain CSS. The config sets
-    // mode: "scoped" only for Svelte <style> blocks (postcss-html).
-    const scoped =
-      typeof secondaryOptions === "object" &&
-      secondaryOptions !== null &&
-      secondaryOptions.mode === "scoped";
+    // globally reachable, correct for plain CSS. The config sets mode: "scoped"
+    // only for Svelte <style> blocks (postcss-html). validateOptions has
+    // already constrained mode to the two literals.
+    const scoped = secondaryOptions?.mode === "scoped";
 
     root.walkRules((styleRule) => {
+      // Scan DIRECT-child declarations only: walkDecls() recurses into nested
+      // rules and would misattribute a nested decl to this outer selector
+      // (double-report). Nested rules are visited on their own by walkRules.
       /** @type {import("postcss").Declaration[]} */
       const offendingDecls = [];
-      styleRule.walkDecls((decl) => {
-        if (POSITIONING_PROPS.has(decl.prop.toLowerCase())) {
-          offendingDecls.push(decl);
+      for (const node of styleRule.nodes) {
+        if (
+          node.type === "decl" &&
+          POSITIONING_PROPS.has(node.prop.toLowerCase())
+        ) {
+          offendingDecls.push(node);
         }
-      });
+      }
       if (offendingDecls.length === 0) return;
+
+      // A nested rule under a class/id ancestor is author-scoped (resolves to
+      // `.foo header`, `.menu-icon span`, …) — skip, matching the flat case.
+      if (hasAnchoredAncestor(styleRule)) return;
 
       let selectorRoot;
       try {

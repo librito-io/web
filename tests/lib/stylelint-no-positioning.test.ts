@@ -132,3 +132,38 @@ describe("librito/no-positioning-on-bare-type — scoped (Svelte) mode", () => {
     expect(w).toHaveLength(0);
   });
 });
+
+describe("librito/no-positioning-on-bare-type — nested CSS / &", () => {
+  it("does not double-report a nested decl against the outer selector", async () => {
+    // `header { & span { … } }` resolves to `header span` — a genuine bare-type
+    // leak, flagged ONCE against the nested rule, not also against `header`.
+    const w = await lintCss(
+      "header { & span { position: absolute; } }",
+      "global",
+    );
+    expect(w).toHaveLength(1);
+  });
+
+  it("does NOT flag a nested rule anchored by an ancestor class (& form)", async () => {
+    const w = await lintCss(
+      ".foo { & header { position: absolute; } }",
+      "global",
+    );
+    expect(w).toHaveLength(0);
+  });
+
+  it("does NOT flag a nested rule anchored by an ancestor class (implicit nesting)", async () => {
+    const w = await lintCss(
+      ".menu-icon { span { position: absolute; } }",
+      "global",
+    );
+    expect(w).toHaveLength(0);
+  });
+
+  it("does NOT flag :global(type) nested under an ancestor class (scoped)", async () => {
+    const w = await lintSvelte(
+      ".wrap { & :global(header) { position: absolute; } }",
+    );
+    expect(w).toHaveLength(0);
+  });
+});

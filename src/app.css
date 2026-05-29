@@ -856,8 +856,6 @@ blockquote {
      over-tighten the serif body. */
   letter-spacing: normal;
   background: transparent;
-  position: relative;
-  z-index: 2;
 }
 .ctx-menu {
   position: fixed;

@@ -141,6 +141,35 @@ desired):
 - `ss03` for friendly `g`.
 - `tnum` / `zero` for numeric tables (`.book-meta`, transfer page).
 
-## 3. Color
+## 3. Layout & positioning
+
+**Layout/positioning properties never live on a bare element (type) selector
+— only on classes or component-scoped styles.** Typography on tags stays
+allowed (see §2 and #421).
+
+The properties: `position`, `z-index`, `inset` (and `top`/`right`/`bottom`/
+`left` + logical longhands), and `transform` (and `translate`/`rotate`/
+`scale`). On a reused semantic element (`<header>`, `<blockquote>`, `<main>`,
+`<nav>`, …) these leak **structurally** — a wrong stacking context or a
+surprise sticky element — not cosmetically. The canonical regression: a global
+`header { position: sticky; z-index: 60 }` meant for the site header landed on
+the book-detail page's `<header class="book-header">`, painting book content
+over the open menu overlay (#472).
+
+**Where positioning belongs instead:**
+
+- A **class** (`.menu-overlay { position: fixed }`) — anchored, intentional.
+- A **component-scoped `<style>`** (Svelte hashes the selector, e.g.
+  `blockquote { position: relative }` inside `HighlightBlock.svelte`).
+- A class anywhere in the selector counts as an anchor, so
+  `.menu-icon span { position: absolute }` is fine.
+
+**Enforced** by `stylelint/no-positioning-on-bare-type.js` (run via
+`npm run lint:css`, gated in CI by `.github/workflows/lint-css.yml`). The rule
+is property-gated and selector-gated: it fires only on a positioning property
+on a type selector with no class/id anchor. In Svelte `<style>`, bare selectors
+are auto-scoped, so only `:global(type)` is flagged.
+
+## 4. Color
 
 (TBD — extract from existing `app.css` palette when next touched.)

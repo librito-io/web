@@ -223,12 +223,13 @@ h2 {
   letter-spacing: normal;
 }
 
-header {
-  background: #0a0c0f;
-  position: sticky;
-  top: 0;
-  z-index: 60;
-}
+/* Site-header CHROME (sticky position, z-index, background, border) lives
+   component-scoped in Header.svelte so it cannot leak onto other semantic
+   <header> elements (e.g. the book detail page's <header class="book-header">).
+   Layout/positioning never belongs on a globally-reachable selector — that
+   coupling caused the book-detail menu-overlay stacking bug. Only the
+   site-header TYPOGRAPHY stays here, per the centralized type convention
+   (issue #421): .site-header h1 below, .header-inner layout. */
 .header-inner {
   max-width: 1400px;
   margin: 0 auto;
@@ -237,10 +238,7 @@ header {
   justify-content: space-between;
   align-items: center;
 }
-header {
-  border-bottom: 1px solid #2a2a2a;
-}
-header h1 {
+.site-header h1 {
   font-size: 1.125rem;
   font-weight: 700;
   letter-spacing: var(--tracking-md);
@@ -689,7 +687,7 @@ header h1 {
    for that tracking: h1 = 32px, h2 = 24px, h3 = 18.72px, h5 = 13.28px,
    h6 = 10.72px. Only h4 (16px) is correct by accident.
    Sites of bare headings (audit as of 2026-05-26):
-   - `header h1`                                  → covered by `header h1`.
+   - `.site-header h1` (site title)               → covered by `.site-header h1`.
    - `.book-header .meta h2` (book detail title)  → .book-detail-title.
    - homepage h1, transfer h1/h2, devices h1/h2,
      auth/{login,signup,verify-email} h1          → scoped <style> per file.

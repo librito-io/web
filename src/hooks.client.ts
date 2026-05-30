@@ -62,6 +62,10 @@ if (publicEnv.PUBLIC_SENTRY_DSN) {
     tracesSampleRate: 0,
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 0,
+    // See hooks.server.ts: attach the execution stack to events whose
+    // error carries no `.stack` (stackless DOM exceptions). Mirrors server
+    // init so browser + server error fidelity match.
+    attachStacktrace: true,
     sendDefaultPii: false,
     // Cast mirrors hooks.server.ts: scrubEvent uses a minimal
     // ScrubableEvent shape rather than Sentry's internal ErrorEvent

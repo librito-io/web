@@ -21,6 +21,13 @@ if (privateEnv.SENTRY_DSN) {
     environment: process.env.VERCEL_ENV ?? "development",
     release: process.env.VERCEL_GIT_COMMIT_SHA,
     tracesSampleRate: 0,
+    // Attach the current JS execution stack to events whose error object
+    // carries no usable `.stack` of its own — notably DOM AbortError from
+    // a fetch() abort, which surfaces from the abort microtask with empty
+    // frames. Without this, such events arrive as "No stacktrace available"
+    // (see LIBRITO-WEB-G). Default is false; turning it on costs nothing and
+    // restores the runbook's assumption that every error carries frames.
+    attachStacktrace: true,
     sendDefaultPii: false,
     // Cast: scrubEvent uses a minimal ScrubableEvent shape rather than
     // Sentry's internal ErrorEvent type (see sentry-scrub.ts for why).

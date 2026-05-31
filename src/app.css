@@ -657,8 +657,10 @@ h2 {
   flex-wrap: wrap;
 }
 .book-cover {
-  width: 67px;
-  height: 100px;
+  /* Phone (<600px): 80×120. +20% over the prior 67×100; the ≥600px
+     media query below keeps tablet/desktop at 100×150. */
+  width: 80px;
+  height: 120px;
   border-radius: 4px;
   object-fit: cover;
   flex-shrink: 0;

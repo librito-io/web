@@ -82,8 +82,8 @@
         class="book-cover"
         src={item.coverUrl}
         alt=""
-        width="67"
-        height="100"
+        width="80"
+        height="120"
         loading="lazy"
       />
     {:else}

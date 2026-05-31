@@ -247,3 +247,81 @@ describe("fetchOpenLibraryCoverBytesByIsbn", () => {
     expect(result).toBeNull();
   });
 });
+
+describe("searchOpenLibraryWorksByTitleAuthor", () => {
+  it("requests limit=10 with ranking fields and returns the docs array", async () => {
+    const { searchOpenLibraryWorksByTitleAuthor } =
+      await import("../../../src/lib/server/catalog/openlibrary");
+
+    let calledUrl = "";
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      calledUrl = typeof input === "string" ? input : input.toString();
+      return jsonResponse({
+        docs: [
+          {
+            key: "/works/OL1W",
+            title: "A",
+            edition_count: 5,
+            first_publish_year: 2001,
+          },
+          {
+            key: "/works/OL2W",
+            title: "A",
+            edition_count: 1,
+            first_publish_year: 2020,
+          },
+        ],
+      });
+    }) as unknown as typeof fetch;
+
+    const docs = await searchOpenLibraryWorksByTitleAuthor("A", "B", {
+      fetchFn,
+    });
+    expect(calledUrl).toContain("limit=10");
+    expect(calledUrl).toContain("edition_count");
+    expect(calledUrl).toContain("first_publish_year");
+    expect(docs).toHaveLength(2);
+    expect(docs[0].key).toBe("/works/OL1W");
+  });
+
+  it("returns [] when the response has no docs", async () => {
+    const { searchOpenLibraryWorksByTitleAuthor } =
+      await import("../../../src/lib/server/catalog/openlibrary");
+
+    const fetchFn = vi.fn(async () =>
+      jsonResponse({}),
+    ) as unknown as typeof fetch;
+    expect(
+      await searchOpenLibraryWorksByTitleAuthor("A", "B", { fetchFn }),
+    ).toEqual([]);
+  });
+});
+
+describe("fetchOpenLibraryEditions", () => {
+  it("fetches editions for a work key and returns the parsed response", async () => {
+    const { fetchOpenLibraryEditions } =
+      await import("../../../src/lib/server/catalog/openlibrary");
+
+    let calledUrl = "";
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      calledUrl = typeof input === "string" ? input : input.toString();
+      return jsonResponse({
+        entries: [{ covers: [111] }, { covers: [-1] }],
+      });
+    }) as unknown as typeof fetch;
+    const res = await fetchOpenLibraryEditions("OL1W", { fetchFn });
+    expect(calledUrl).toContain("/works/OL1W/editions.json");
+    expect(calledUrl).toContain("limit=20");
+    expect(res?.entries?.[0].covers).toEqual([111]);
+  });
+
+  it("returns null on 404", async () => {
+    const { fetchOpenLibraryEditions } =
+      await import("../../../src/lib/server/catalog/openlibrary");
+
+    const fetchFn = vi.fn(
+      async () => new Response(null, { status: 404 }),
+    ) as unknown as typeof fetch;
+    expect(await fetchOpenLibraryEditions("OLX", { fetchFn })).toBeNull();
+  });
+});

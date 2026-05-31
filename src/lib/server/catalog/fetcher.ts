@@ -57,7 +57,7 @@ import {
 import { uploadCover as defaultUploadCover } from "$lib/server/cover-storage";
 import { sha256Hex } from "./sha";
 import { type CatalogMutex, noopMutex } from "./mutex";
-import { acceptableMatch } from "./work-resolver";
+import { acceptableMatch, WorkCoverWalker } from "./work-resolver";
 import { logger } from "$lib/server/log";
 import { fetchItunesByIsbn, fetchItunesCoverBytes } from "./itunes";
 import { decodeImageDimensions } from "./dimensions";
@@ -598,6 +598,9 @@ interface CoverChainContext {
    *  burning a second upstream call and rate-limit token. Caller (resolve*)
    *  owns the memo via closure capture. */
   fetchGbVolume: () => Promise<GoogleBooksItem | null>;
+  /** Per-resolve work-cover walker (cross-tier byte cache + lazy editions).
+   *  Undefined when work resolution returned null → leg short-circuits. */
+  workCoverWalker?: WorkCoverWalker;
 }
 
 async function tryGoogleBooksExtraLarge(
@@ -710,7 +713,7 @@ async function tryItunes(
   );
 }
 
-async function tryOpenLibrary(
+async function tryOpenLibrarySearchCoverId(
   deps: ResolveDeps,
   ctx: CoverChainContext,
   minWidth: number,
@@ -742,23 +745,46 @@ async function tryOpenLibraryDirectIsbn(
   );
 }
 
-/** Walk sources in precision-first priority order; each source has the same
- *  `minWidth` floor applied. First source whose decoded width meets `minWidth`
- *  wins. Null when all sources fail.
+async function tryOpenLibraryWorkCovers(
+  _deps: ResolveDeps,
+  ctx: CoverChainContext,
+  minWidth: number,
+): Promise<CoverResolution | null> {
+  const walker = ctx.workCoverWalker;
+  if (!walker) return null;
+  const hit = await walker.tryAtFloor(minWidth);
+  if (!hit) return null;
+  return {
+    bytes: hit.bytes,
+    mime: hit.mime,
+    source: hit.source,
+    width: hit.width,
+    height: hit.height,
+    byteCount: hit.byteCount,
+    openLibraryCoverId: hit.openLibraryCoverId,
+  };
+}
+
+/** Walk cover sources in priority order at a single `minWidth` floor; first
+ *  source whose decoded width meets the floor wins. Null when all fail.
+ *  resolveCoverWithTiering wraps this once per tier (premium 1200 → basic 300
+ *  → salvage 240), so each source gets first-refusal at the highest floor
+ *  before any source is accepted at a lower one.
  *
- *  Order (issue #211, plan 2026-05-18):
+ *  Order (work-resolver reorder, 2026-05-31):
  *    1. OL direct-ISBN (covers/b/isbn/{isbn}-L): ISBN-locked, OL-resolved
- *       across editions of the Work.
- *    2. OL cover_id (covers/b/id/{cover_id}-L): requires explicit cover_id
- *       discovery via /api/books or /search.json.
- *    3. GoogleBooks extraLarge: resolution-rich but prone to wrong-bytes
- *       failure mode (limited-preview volumes serve InDesign interior
- *       pages). Filtered by accessInfo.pdf.isAvailable in Task 8.
- *    4. iTunes: ISBN-keyed, generally precise but lower resolution.
- *
- *  Trade-off: prefers precision over resolution. Some books where OL has
- *  only basic-tier coverage but GB has premium will now stop at OL basic.
- *  Second-pass (basic floor) preserves the same ordering. */
+ *       across editions. ISBN path only.
+ *    2. GoogleBooks extraLarge: pdf.isAvailable-gated; resolution-rich. Placed
+ *       at position 2 so a real GB xlarge is NEVER shadowed by an OL leg — GB
+ *       only loses to an OL source that also clears the same tier floor.
+ *    3. OL work covers (WorkCoverWalker): walks the chosen work's cover
+ *       editions (cross-tier byte cache, lazy editions). The iconic-cover
+ *       getter for books where GB has no usable cover.
+ *    4. OL search cover_id (demoted): the old tryOpenLibrary. Last-resort —
+ *       the 321px library-scan offender; fires only when 1-3 returned null at
+ *       this floor. Preserves the #450 cross-work-stub catch.
+ *    5. iTunes: ISBN-keyed, lower resolution.
+ */
 async function resolveCoverChain(
   deps: ResolveDeps,
   ctx: CoverChainContext,
@@ -766,8 +792,9 @@ async function resolveCoverChain(
 ): Promise<CoverResolution | null> {
   return (
     (await tryOpenLibraryDirectIsbn(deps, ctx, minWidth)) ??
-    (await tryOpenLibrary(deps, ctx, minWidth)) ??
     (await tryGoogleBooksExtraLarge(deps, ctx, minWidth)) ??
+    (await tryOpenLibraryWorkCovers(deps, ctx, minWidth)) ??
+    (await tryOpenLibrarySearchCoverId(deps, ctx, minWidth)) ??
     (await tryItunes(deps, ctx, minWidth))
   );
 }

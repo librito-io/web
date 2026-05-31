@@ -1610,6 +1610,56 @@ export async function resolveTitleAuthor(
       };
     }
 
+    // Key this row is WRITTEN under. Defaults to the find key. When the
+    // found row's stored key has drifted from the canonical
+    // normalizeTitleAuthor(title, author) — Fix A located it by the stale
+    // key — try to correct it so the column stops drifting (#489 Fix B).
+    let writeKey = rowKey;
+    const canonicalKey = key;
+    const existingId = existing?.id as string | undefined;
+    if (lookupKey && lookupKey !== canonicalKey && existingId) {
+      // Does a DIFFERENT row already hold the canonical key? Renaming into
+      // it would violate the partial-unique index (and clobber that row).
+      const { data: collision, error: collisionErr } = await supabase
+        .from("book_catalog")
+        .select("id")
+        .is("isbn", null)
+        .eq("normalized_title_author", canonicalKey)
+        .neq("id", existingId)
+        .limit(1)
+        .maybeSingle();
+      if (collisionErr)
+        throw new Error(
+          `book_catalog collision check: ${collisionErr.message}`,
+        );
+
+      if (collision) {
+        // Two rows are the same book under different keys. Don't rename
+        // (would fork/clobber) — update the drifted row in place under its
+        // current key and leave the merge to the dedup sweeper (Fix C).
+        logger().warn(
+          {
+            event: "catalog.ta_key_collision",
+            stored_key: lookupKey,
+            canonical_key: canonicalKey,
+            row_id: existingId,
+          },
+          "catalog.ta_key_collision",
+        );
+      } else {
+        // Canonical key is free — rename the row's key to it, then write
+        // under the canonical key so the column self-heals.
+        const { error: renameErr } = await supabase
+          .from("book_catalog")
+          .update({ normalized_title_author: canonicalKey })
+          .is("isbn", null)
+          .eq("normalized_title_author", lookupKey);
+        if (renameErr)
+          throw new Error(`book_catalog key heal: ${renameErr.message}`);
+        writeKey = canonicalKey;
+      }
+    }
+
     // 1. Resolve the canonical OL work (search → rank → work doc) once. Yields
     //    the cover walker AND the OL work doc for the description/subjects legs.
     //    Replaces the old standalone limit=1 search; resolveWork makes one
@@ -1788,7 +1838,7 @@ export async function resolveTitleAuthor(
 
     const pendingRow = buildPendingRow({
       isbn: null,
-      normalizedTitleAuthor: rowKey,
+      normalizedTitleAuthor: writeKey,
       cover,
       coverStateInUpsert,
       coverFailReason,
@@ -1828,12 +1878,14 @@ export async function resolveTitleAuthor(
             ((existing?.cover_attempts as number | undefined) ?? 0) + 1,
         })
         .is("isbn", null)
-        .eq("normalized_title_author", rowKey);
+        .eq("normalized_title_author", writeKey);
       if (finalErr)
         throw new Error(`book_catalog storage finalize: ${finalErr.message}`);
     }
 
-    await reportSuspectLowBpp(cover, audit, { normalizedTitleAuthor: rowKey });
+    await reportSuspectLowBpp(cover, audit, {
+      normalizedTitleAuthor: writeKey,
+    });
 
     const resultRow = {
       ...pendingRow,

@@ -4140,3 +4140,154 @@ describe("resolveTitleAuthor – find by stored lookup key (#489 Fix A)", () => 
     );
   });
 });
+
+describe("resolveTitleAuthor – recompute drifted key, heal or defer (#489 Fix B)", () => {
+  let logWrites: Array<Record<string, unknown>>;
+  beforeEach(() => {
+    logWrites = [];
+    __setTestDestination((line) => logWrites.push(JSON.parse(line)));
+  });
+  afterEach(() => __resetTestDestination());
+
+  const DERIVED = "1984 adaptation|michael dean george orwell";
+  const STORED = "1984|george orwell";
+
+  function driftedRow(): Record<string, unknown> {
+    const stale = "2026-01-22T00:00:00Z";
+    return {
+      id: "row-x",
+      isbn: null,
+      normalized_title_author: STORED, // frozen; drifted from title/author
+      title: "1984 (adaptation)",
+      author: "Michael Dean, George Orwell",
+      storage_path: null,
+      pending_storage: false,
+      last_attempted_at: stale,
+      attempt_count: 1,
+      cover_attempted_at: stale,
+      cover_fail_reason: "provider_no_data",
+      description_attempted_at: stale,
+      description_fail_reason: "provider_no_data",
+      publisher_attempted_at: stale,
+      publisher_fail_reason: "provider_no_data",
+      published_date_attempted_at: stale,
+      published_date_fail_reason: "provider_no_data",
+      subjects_attempted_at: stale,
+      subjects_fail_reason: "provider_no_data",
+      page_count_attempted_at: stale,
+      page_count_fail_reason: "provider_no_data",
+    };
+  }
+
+  function emptyUpstreamFetch(): typeof fetch {
+    return vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          JSON.stringify({ kind: "books#volumes", totalItems: 0, items: [] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(null, { status: 404 });
+    }) as unknown as typeof fetch;
+  }
+
+  it("heals: when the canonical key is FREE, renames the row's key and writes the canonical key", async () => {
+    const supabase = createMockSupabase();
+    // selects in order: initial lookup (HIT drifted row) → collision pre-check
+    // (no other row holds canonical → null). No cover ⇒ no selectBySha.
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [driftedRow()], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+
+    await resolveTitleAuthor(
+      supabase as never,
+      "1984 (adaptation)",
+      "Michael Dean, George Orwell",
+      deps({ fetchFn: emptyUpstreamFetch(), mutex: noopMutex }),
+      undefined,
+      STORED, // lookupKey — drifted
+    );
+
+    // (a) Heal-rename: an UPDATE set normalized_title_author = canonical,
+    // filtered by the OLD stored key.
+    const renameSet = supabase._updateCalls.find(
+      (c) =>
+        c.table === "book_catalog" &&
+        (c.payload as Record<string, unknown>).normalized_title_author ===
+          DERIVED,
+    );
+    expect(renameSet).toBeDefined();
+
+    // (b) Upsert payload writes the CANONICAL key, not the stale stored key.
+    const upsert = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_title_author",
+    );
+    const p_row = (upsert!.args as { p_row: Record<string, unknown> }).p_row;
+    expect(p_row.normalized_title_author).toBe(DERIVED);
+
+    // No collision was logged.
+    expect(
+      logWrites.find((l) => l.event === "catalog.ta_key_collision"),
+    ).toBeUndefined();
+  });
+
+  it("defers: when another row already holds the canonical key, keeps the stored key, logs collision, does NOT rename", async () => {
+    const supabase = createMockSupabase();
+    // initial lookup (HIT drifted row) → collision pre-check (a DIFFERENT row
+    // already holds the canonical key).
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [driftedRow()], error: null },
+      { data: [{ id: "row-y" }], error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+
+    await resolveTitleAuthor(
+      supabase as never,
+      "1984 (adaptation)",
+      "Michael Dean, George Orwell",
+      deps({ fetchFn: emptyUpstreamFetch(), mutex: noopMutex }),
+      undefined,
+      STORED,
+    );
+
+    // No heal-rename to the canonical key (would clobber row-y).
+    const renameSet = supabase._updateCalls.find(
+      (c) =>
+        c.table === "book_catalog" &&
+        (c.payload as Record<string, unknown>).normalized_title_author ===
+          DERIVED,
+    );
+    expect(renameSet).toBeUndefined();
+
+    // Upsert keeps the row's CURRENT (stored) key → updates the drifted row
+    // in place; the merge is left to the dedup sweeper (Fix C).
+    const upsert = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_title_author",
+    );
+    const p_row = (upsert!.args as { p_row: Record<string, unknown> }).p_row;
+    expect(p_row.normalized_title_author).toBe(STORED);
+
+    // Collision was logged for operator/sweeper visibility.
+    const collisionLog = logWrites.find(
+      (l) => l.event === "catalog.ta_key_collision",
+    );
+    expect(collisionLog).toBeDefined();
+  });
+});

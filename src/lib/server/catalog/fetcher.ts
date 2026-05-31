@@ -9,6 +9,8 @@ import {
   fetchOpenLibraryWork,
   fetchOpenLibraryCoverBytes,
   fetchOpenLibraryCoverBytesByIsbn,
+  searchOpenLibraryWorksByTitleAuthor,
+  fetchOpenLibraryEditions,
 } from "./openlibrary";
 import {
   fetchGoogleBooksByIsbn,
@@ -57,7 +59,13 @@ import {
 import { uploadCover as defaultUploadCover } from "$lib/server/cover-storage";
 import { sha256Hex } from "./sha";
 import { type CatalogMutex, noopMutex } from "./mutex";
-import { acceptableMatch, WorkCoverWalker } from "./work-resolver";
+import {
+  acceptableMatch,
+  WorkCoverWalker,
+  resolveWork,
+  type ResolvedWork,
+  type WorkLookup,
+} from "./work-resolver";
 import { logger } from "$lib/server/log";
 import { fetchItunesByIsbn, fetchItunesCoverBytes } from "./itunes";
 import { decodeImageDimensions } from "./dimensions";
@@ -765,6 +773,50 @@ async function tryOpenLibraryWorkCovers(
   };
 }
 
+// Build a ResolvedWork via the injected OL client, then a WorkCoverWalker
+// whose fetchCover pulls OL cover bytes WITHOUT a width floor — so each cover
+// ID is fetched once and its decoded width is reused across all three tier
+// passes (the walker applies the per-tier floor). fetchWork wraps the
+// throwing fetchOpenLibraryWork in try/catch → null, matching the best-effort
+// posture of loadOpenLibraryData.
+async function buildWorkResolution(
+  lookup: WorkLookup,
+  deps: ResolveDeps,
+): Promise<{ resolved: ResolvedWork | null; walker?: WorkCoverWalker }> {
+  const resolved = await resolveWork(lookup, {
+    searchWorks: (t, a) =>
+      searchOpenLibraryWorksByTitleAuthor(t, a, { fetchFn: deps.fetchFn }),
+    fetchWork: async (id) => {
+      try {
+        return await fetchOpenLibraryWork(id, { fetchFn: deps.fetchFn });
+      } catch {
+        return null;
+      }
+    },
+    fetchEditions: (id) =>
+      fetchOpenLibraryEditions(id, { fetchFn: deps.fetchFn }),
+  });
+  if (!resolved) return { resolved: null };
+  const walker = new WorkCoverWalker(resolved, async (id) => {
+    let bytes: { bytes: Uint8Array; mime: string } | null;
+    try {
+      bytes = await fetchOpenLibraryCoverBytes(id, { fetchFn: deps.fetchFn });
+    } catch {
+      return null;
+    }
+    if (!bytes) return null;
+    const dims = decodeImageDimensions(bytes.bytes);
+    if (!dims) return null;
+    return {
+      bytes: bytes.bytes,
+      mime: bytes.mime,
+      width: dims.width,
+      height: dims.height,
+    };
+  });
+  return { resolved, walker };
+}
+
 /** Walk cover sources in priority order at a single `minWidth` floor; first
  *  source whose decoded width meets the floor wins. Null when all fail.
  *  resolveCoverWithTiering wraps this once per tier (premium 1200 → basic 300
@@ -1080,10 +1132,23 @@ export async function resolveIsbn(
     //    when shouldAttempt('cover'); otherwise skip the expensive byte
     //    fetch entirely. Per-field gating extends to cover.
     const coverShouldAttempt = shouldAttempt("cover", existing ?? {}, now);
+
+    // Build the work-cover walker from the ISBN's OL work key (skips
+    // search/rank — the ISBN already identifies the work). Lazy: the walker
+    // only fetches covers if OL-direct + GB miss the tier floor.
+    const isbnWorkKey = olData?.works?.[0]?.key;
+    const { walker: workCoverWalker } = isbnWorkKey
+      ? await buildWorkResolution(
+          { kind: "work-key", workKey: isbnWorkKey },
+          deps,
+        )
+      : { walker: undefined };
+
     const cover = coverShouldAttempt
       ? await resolveCoverWithTiering(deps, {
           isbn,
           openLibraryCoverId: openLibraryCoverId ?? undefined,
+          workCoverWalker,
           fetchGbVolume: gbMemo.fetch,
         })
       : null;
@@ -1524,32 +1589,19 @@ export async function resolveTitleAuthor(
       };
     }
 
-    // 1. OL search by title/author — metadata source. TA path has no
-    //    OL data doc or work doc (those are ISBN-keyed); walker OL legs
-    //    therefore see olData=null + olWork=null and aggregate to
-    //    `no_data`. Only the GB legs can succeed on TA resolves.
-    let search: Awaited<ReturnType<typeof searchOpenLibraryByTitleAuthor>> =
-      null;
-    try {
-      search = await searchOpenLibraryByTitleAuthor(title, author, {
-        fetchFn: deps.fetchFn,
-      });
-    } catch (err) {
-      logger().warn(
-        {
-          event: "catalog_openlibrary_search_failed",
-          title,
-          author,
-          error: String(err),
-        },
-        "catalog_openlibrary_search_failed",
-      );
-    }
+    // 1. Resolve the canonical OL work (search → rank → work doc) once. Yields
+    //    the cover walker AND the OL work doc for the description/subjects legs.
+    //    Replaces the old standalone limit=1 search; resolveWork makes one
+    //    limit=10 search internally and returns the winning doc as searchDoc.
+    const { resolved, walker } = await buildWorkResolution(
+      { kind: "title-author", title, author },
+      deps,
+    );
 
     const metadata: CatalogMetadata = {};
-    if (search?.title) metadata.title = search.title;
-    if (search?.author_name?.length)
-      metadata.author = search.author_name.join(", ");
+    if (resolved?.searchDoc?.title) metadata.title = resolved.searchDoc.title;
+    if (resolved?.searchDoc?.author_name?.length)
+      metadata.author = resolved.searchDoc.author_name.join(", ");
 
     // Memoized GB volume fetcher (issue #203 + refit 2026-05-27).
     const gbMemo = memoizeGoogleBooksVolume(deps, () =>
@@ -1559,15 +1611,14 @@ export async function resolveTitleAuthor(
       }),
     );
 
-    // 2. Cover via chain (TA path has no ISBN → no iTunes leg in the
-    //    cover chain; falls through to OL via search.cover_i). Gated on
-    //    shouldAttempt('cover').
+    // 2. Cover via chain. TA path has no ISBN (no OL-direct, no iTunes-cover
+    //    keying); the work-covers walker (leg 3) + GB xlarge carry it.
     const coverShouldAttempt = shouldAttempt("cover", existing ?? {}, now);
     const cover = coverShouldAttempt
       ? await resolveCoverWithTiering(deps, {
           title,
           author,
-          openLibraryCoverId: search?.cover_i ?? undefined,
+          workCoverWalker: walker,
           fetchGbVolume: gbMemo.fetch,
         })
       : null;
@@ -1619,7 +1670,8 @@ export async function resolveTitleAuthor(
           {
             field: "description",
             legs: [
-              async () => classifyDescriptionFromOpenLibrary(null),
+              async () =>
+                classifyDescriptionFromOpenLibrary(resolved?.olWork ?? null),
               async () => classifyDescriptionFromGoogleBooks(gbState),
               async () => classifyDescriptionFromItunes({ hasIsbn: false }),
             ],
@@ -1657,7 +1709,8 @@ export async function resolveTitleAuthor(
         {
           field: "subjects",
           legs: [
-            async () => classifySubjectsFromOpenLibrary(null, null),
+            async () =>
+              classifySubjectsFromOpenLibrary(null, resolved?.olWork ?? null),
             async () => classifySubjectsFromGoogleBooks(gbState),
           ],
         },

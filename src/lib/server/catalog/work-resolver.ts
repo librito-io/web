@@ -193,6 +193,12 @@ export interface WorkResolverDeps {
 
 const OL_WORK_KEY_PREFIX = /^\/works\//;
 
+// OL work IDs are interpolated into work/editions fetch URLs; validate the
+// shape at this boundary so a malformed key (e.g. "garbage/..%2F..%2Fadmin"
+// from a poisoned OL data doc) can never reach the network. Mirrors the
+// OL_WORK_ID_RE guard in fetcher.ts's loadOpenLibraryData.
+const OL_WORK_ID_RE = /^OL\d+W$/;
+
 function editionCoverIds(res: OpenLibraryEditionsResponse | null): number[] {
   if (!res?.entries) return [];
   return collectCoverIds(res.entries.map((e) => e.covers ?? []));
@@ -227,6 +233,7 @@ export async function resolveWork(
   }
 
   const workId = workKey.replace(OL_WORK_KEY_PREFIX, "");
+  if (!OL_WORK_ID_RE.test(workId)) return null;
   const olWork = await deps.fetchWork(workId);
   if (!olWork) return null;
 

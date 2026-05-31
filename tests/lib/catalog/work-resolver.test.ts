@@ -188,7 +188,7 @@ describe("resolveWork (title-author)", () => {
       deps({
         searchWorks: async () => [
           {
-            key: "/works/W",
+            key: "/works/OL1W",
             title: "The Martian",
             author_name: ["Andy Weir"],
             edition_count: 74,
@@ -212,25 +212,40 @@ describe("resolveWork (title-author)", () => {
 describe("resolveWork (work-key)", () => {
   it("skips search/rank, fetches the work directly, searchDoc null", async () => {
     const r = await resolveWork(
-      { kind: "work-key", workKey: "/works/OLABC" },
+      { kind: "work-key", workKey: "/works/OL99W" },
       deps({
         fetchWork: async (key: string) => {
-          expect(key).toBe("OLABC");
+          expect(key).toBe("OL99W");
           return { covers: [5] };
         },
       }),
     );
-    expect(r?.workKey).toBe("/works/OLABC");
+    expect(r?.workKey).toBe("/works/OL99W");
     expect(r?.workCoverIds).toEqual([5]);
     expect(r?.searchDoc).toBeNull();
   });
 
   it("returns null when the work fetch fails", async () => {
     const r = await resolveWork(
-      { kind: "work-key", workKey: "/works/X" },
+      { kind: "work-key", workKey: "/works/OL1W" },
       deps({ fetchWork: async () => null }),
     );
     expect(r).toBeNull();
+  });
+
+  it("returns null for a malformed work key without fetching the work", async () => {
+    let fetchWorkCalls = 0;
+    const r = await resolveWork(
+      { kind: "work-key", workKey: "/works/garbage/..%2F..%2Fadmin" },
+      deps({
+        fetchWork: async () => {
+          fetchWorkCalls++;
+          return { covers: [1] };
+        },
+      }),
+    );
+    expect(r).toBeNull();
+    expect(fetchWorkCalls).toBe(0);
   });
 });
 

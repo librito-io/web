@@ -40,8 +40,23 @@ vi.mock("@sentry/sveltekit", () => ({
 import {
   resolveIsbn,
   resolveTitleAuthor,
+  RESOLVE_SELECT,
 } from "../../../src/lib/server/catalog/fetcher";
 import { noopMutex } from "../../../src/lib/server/catalog/mutex";
+
+// Project a fixture row through the SAME column list the resolver selects,
+// so a unit test reflects what Postgres actually returns. The chainable
+// mock echoes the fixture verbatim regardless of `.select(...)`, which can
+// hide a missing projection — drop any key not in RESOLVE_SELECT so the
+// fixture cannot smuggle in a column the real query never returns. (#489
+// branch review: the Fix B heal block shipped dead because `id` was absent
+// from RESOLVE_SELECT but present in the test fixture.)
+function projectThroughResolveSelect(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  const cols = new Set(RESOLVE_SELECT.split(",").map((c) => c.trim()));
+  return Object.fromEntries(Object.entries(row).filter(([k]) => cols.has(k)));
+}
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 // Real JPEG files so decodeImageDimensions can parse width/height.
@@ -4202,8 +4217,11 @@ describe("resolveTitleAuthor – recompute drifted key, heal or defer (#489 Fix 
     const supabase = createMockSupabase();
     // selects in order: initial lookup (HIT drifted row) → collision pre-check
     // (no other row holds canonical → null). No cover ⇒ no selectBySha.
+    // Project the fixture through RESOLVE_SELECT so the row carries only the
+    // columns the real query returns (this is what makes the test catch a
+    // missing `id` projection — see projectThroughResolveSelect).
     supabase._resultsQueue.set("book_catalog.select", [
-      { data: [driftedRow()], error: null },
+      { data: [projectThroughResolveSelect(driftedRow())], error: null },
       { data: null, error: null },
     ]);
     supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
@@ -4247,9 +4265,10 @@ describe("resolveTitleAuthor – recompute drifted key, heal or defer (#489 Fix 
   it("defers: when another row already holds the canonical key, keeps the stored key, logs collision, does NOT rename", async () => {
     const supabase = createMockSupabase();
     // initial lookup (HIT drifted row) → collision pre-check (a DIFFERENT row
-    // already holds the canonical key).
+    // already holds the canonical key). Project the found row through
+    // RESOLVE_SELECT (see heal test) so it reflects the real projection.
     supabase._resultsQueue.set("book_catalog.select", [
-      { data: [driftedRow()], error: null },
+      { data: [projectThroughResolveSelect(driftedRow())], error: null },
       { data: [{ id: "row-y" }], error: null },
     ]);
     supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
@@ -4289,5 +4308,14 @@ describe("resolveTitleAuthor – recompute drifted key, heal or defer (#489 Fix 
       (l) => l.event === "catalog.ta_key_collision",
     );
     expect(collisionLog).toBeDefined();
+  });
+
+  it("RESOLVE_SELECT projects `id` (load-bearing for the heal collision guard)", () => {
+    // The heal block reads existing.id; if RESOLVE_SELECT omits it, the
+    // guard short-circuits and the heal silently no-ops in production. This
+    // assertion checks the actual query string, so it is immune to the
+    // chainable mock's projection-blindness (#489 branch review regression).
+    const cols = RESOLVE_SELECT.split(",").map((c) => c.trim());
+    expect(cols).toContain("id");
   });
 });

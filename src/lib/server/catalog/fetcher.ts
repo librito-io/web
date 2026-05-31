@@ -129,7 +129,15 @@ type StorageRecord = {
 // first-render, so we still avoid `select("*")` — but the per-field state
 // model needs all 6 value columns + 22 state columns to drive shouldAttempt
 // and increment *_attempts. Refit 2026-05-27.
-const RESOLVE_SELECT = [
+// Exported so tests can project a fixture row through the SAME column list
+// the resolver actually selects — a mock that echoes extra columns (e.g.
+// `id`) would otherwise hide a missing projection.
+export const RESOLVE_SELECT = [
+  // Row identity — read by the Fix B key-heal collision guard in
+  // resolveTitleAuthor (existing.id). Omitting it makes existing.id
+  // undefined in production, short-circuiting the heal so a drifted key
+  // never self-corrects (issue #489 branch review).
+  "id",
   "pending_storage",
   "storage_path",
   "cover_storage_backend",
@@ -1614,17 +1622,17 @@ export async function resolveTitleAuthor(
     // found row's stored key has drifted from the canonical
     // normalizeTitleAuthor(title, author) — Fix A located it by the stale
     // key — try to correct it so the column stops drifting (#489 Fix B).
+    // `key` is the canonical normalizeTitleAuthor(title, author).
     let writeKey = rowKey;
-    const canonicalKey = key;
-    const existingId = existing?.id as string | undefined;
-    if (lookupKey && lookupKey !== canonicalKey && existingId) {
+    const existingId = existing?.id;
+    if (lookupKey && lookupKey !== key && existingId) {
       // Does a DIFFERENT row already hold the canonical key? Renaming into
       // it would violate the partial-unique index (and clobber that row).
       const { data: collision, error: collisionErr } = await supabase
         .from("book_catalog")
         .select("id")
         .is("isbn", null)
-        .eq("normalized_title_author", canonicalKey)
+        .eq("normalized_title_author", key)
         .neq("id", existingId)
         .limit(1)
         .maybeSingle();
@@ -1641,7 +1649,7 @@ export async function resolveTitleAuthor(
           {
             event: "catalog.ta_key_collision",
             stored_key: lookupKey,
-            canonical_key: canonicalKey,
+            canonical_key: key,
             row_id: existingId,
           },
           "catalog.ta_key_collision",
@@ -1651,12 +1659,12 @@ export async function resolveTitleAuthor(
         // under the canonical key so the column self-heals.
         const { error: renameErr } = await supabase
           .from("book_catalog")
-          .update({ normalized_title_author: canonicalKey })
+          .update({ normalized_title_author: key })
           .is("isbn", null)
           .eq("normalized_title_author", lookupKey);
         if (renameErr)
           throw new Error(`book_catalog key heal: ${renameErr.message}`);
-        writeKey = canonicalKey;
+        writeKey = key;
       }
     }
 

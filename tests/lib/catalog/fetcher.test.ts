@@ -3337,10 +3337,80 @@ describe("resolveIsbn – Sentry suspect-cover warning (Task 10)", () => {
 
   beforeEach(() => sentryCaptureMessage.mockClear());
 
-  it("captures Sentry warning when accepted GB cover has cover_bytes_per_pixel < threshold", async () => {
-    // FIXTURE_1500x2250 is ~20102 bytes / (1500*2250 = 3 375 000 px) ≈ 0.006
-    // bpp — well below the 0.05 threshold. GB wins the chain (OL direct + OL
-    // cover_id miss via 404 / no cover_id) so the suspect-cover check fires.
+  it("captures Sentry warning when accepted sub-premium GB cover has cover_bytes_per_pixel < threshold", async () => {
+    // FIXTURE_600x900 is ~3470 bytes / (600*900 = 540 000 px) ≈ 0.006 bpp —
+    // well below the 0.05 threshold. 600 px is below FLOOR_PREMIUM (1200) so
+    // the width gate does NOT suppress: this is the whitespace-template
+    // interior-page class the signal targets. GB wins the chain (OL direct +
+    // OL cover_id miss via 404 / no cover_id) at the basic tier.
+    const supabase = coldMissSupabase();
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://covers.openlibrary.org/b/")) {
+        return new Response(null, { status: 404 });
+      }
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(olNoCoverResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/works/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            { extraLarge: "https://books.google.com/extra.jpg" },
+            {},
+            { pdf: { isAvailable: true }, viewability: "PARTIAL" },
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      if (url.startsWith("https://books.google.com/")) {
+        return new Response(FIXTURE_600x900, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    // `title` is carried into the event extras so triage no longer needs an
+    // ISBN→title lookup. olNoCoverResponse resolves the book title as "Foo".
+    expect(sentryCaptureMessage).toHaveBeenCalledWith(
+      "catalog_cover_suspect_low_bpp",
+      expect.objectContaining({
+        level: "warning",
+        tags: expect.objectContaining({ catalog_audit: "suspect_cover" }),
+        extra: expect.objectContaining({ title: "Foo" }),
+      }),
+    );
+  });
+
+  it("does NOT capture Sentry warning when GB cover is native xlarge (width >= FLOOR_PREMIUM)", async () => {
+    // FIXTURE_1500x2250 ≈ 0.006 bpp — below the bpp threshold — but 1500 px
+    // clears FLOOR_PREMIUM (1200). A native extraLarge is a genuine jacket;
+    // flat/minimalist art legitimately compresses to low bpp. Width gate
+    // suppresses the false positive (LIBRITO-WEB-K: 9780593804148).
     const supabase = coldMissSupabase();
     const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -3392,13 +3462,7 @@ describe("resolveIsbn – Sentry suspect-cover warning (Task 10)", () => {
 
     await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
 
-    expect(sentryCaptureMessage).toHaveBeenCalledWith(
-      "catalog_cover_suspect_low_bpp",
-      expect.objectContaining({
-        level: "warning",
-        tags: expect.objectContaining({ catalog_audit: "suspect_cover" }),
-      }),
-    );
+    expect(sentryCaptureMessage).not.toHaveBeenCalled();
   });
 
   it("does NOT capture Sentry warning when cover source is not google_books", async () => {
@@ -3473,10 +3537,11 @@ describe("resolveTitleAuthor – Sentry suspect-cover warning (Task 10)", () => 
 
   beforeEach(() => sentryCaptureMessage.mockClear());
 
-  it("captures Sentry warning when accepted GB cover (title/author path) has low bpp", async () => {
-    // FIXTURE_1500x2250 is ~20KB / 3.375M px ≈ 0.006 bpp — below 0.05 threshold.
-    // title/author flow has no ISBN, so OL direct + cover_id tiers can't fire;
-    // GB wins the chain and the suspect-cover check runs.
+  it("captures Sentry warning when accepted sub-premium GB cover (title/author path) has low bpp", async () => {
+    // FIXTURE_600x900 is ~3.5KB / 540K px ≈ 0.006 bpp — below 0.05 threshold —
+    // and 600 px is below FLOOR_PREMIUM (1200) so the width gate does not
+    // suppress. title/author flow has no ISBN, so OL direct + cover_id tiers
+    // can't fire; GB wins the chain and the suspect-cover check runs.
     const supabase = coldMissSupabase();
     const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -3506,7 +3571,7 @@ describe("resolveTitleAuthor – Sentry suspect-cover warning (Task 10)", () => 
         );
       }
       if (url.startsWith("https://books.google.com/")) {
-        return new Response(FIXTURE_1500x2250, {
+        return new Response(FIXTURE_600x900, {
           status: 200,
           headers: { "content-type": "image/jpeg" },
         });
@@ -3524,6 +3589,8 @@ describe("resolveTitleAuthor – Sentry suspect-cover warning (Task 10)", () => 
       deps({ fetchFn }),
     );
 
+    // The caller-supplied title is carried into the event extras alongside the
+    // normalized key, so triage reads the book name directly off the event.
     expect(sentryCaptureMessage).toHaveBeenCalledWith(
       "catalog_cover_suspect_low_bpp",
       expect.objectContaining({
@@ -3531,6 +3598,7 @@ describe("resolveTitleAuthor – Sentry suspect-cover warning (Task 10)", () => 
         tags: expect.objectContaining({ catalog_audit: "suspect_cover" }),
         extra: expect.objectContaining({
           normalizedTitleAuthor: expect.any(String),
+          title: "The Great Gatsby",
         }),
       }),
     );

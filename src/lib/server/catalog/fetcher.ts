@@ -518,6 +518,18 @@ export interface CoverResolution {
  * identifying extras (e.g. `{ isbn }` or `{ normalizedTitleAuthor }`)
  * so the same payload shape works from either resolver entry point.
  *
+ * Gated on `cover.width < FLOOR_PREMIUM`: the bpp signal targets the
+ * whitespace-template interior-page class, which GB only serves at
+ * basic/salvage tiers — a native extraLarge (≥1200 px) is a genuine
+ * jacket. FLOOR_PREMIUM (1200) is exactly the Cloudflare `xlarge`
+ * variant min source width (VARIANT_MIN_SOURCE_WIDTH.xlarge in
+ * cover-storage.ts) — any cover that earns our top render variant is
+ * trusted. Without the gate, legit minimalist/flat-art covers at full
+ * xlarge resolution trip the floor purely on low entropy (e.g.
+ * 9780593804148 "One Day, Everyone Will Have Always Been Against This",
+ * 1652×2478 @ 0.047 bpp — LIBRITO-WEB-K). bpp alone can't separate
+ * low-detail (junk) from low-entropy (flat design); width does.
+ *
  * Awaits Sentry.flush(2000) because the surrounding `runInBackground`
  * (Vercel waitUntil) only flushes on the .catch path; without an
  * explicit flush here, success-path warnings would be dropped at
@@ -534,6 +546,7 @@ async function reportSuspectLowBpp(
   if (
     !cover ||
     cover.source !== "google_books" ||
+    cover.width >= FLOOR_PREMIUM ||
     audit.cover_bytes_per_pixel === null ||
     audit.cover_bytes_per_pixel >= COVER_LOW_BPP_THRESHOLD
   ) {
@@ -1379,7 +1392,10 @@ export async function resolveIsbn(
         throw new Error(`book_catalog storage finalize: ${finalErr.message}`);
     }
 
-    await reportSuspectLowBpp(cover, audit, { isbn });
+    await reportSuspectLowBpp(cover, audit, {
+      isbn,
+      title: metadata.title ?? undefined,
+    });
 
     const resultRow = {
       ...pendingRow,
@@ -1893,6 +1909,7 @@ export async function resolveTitleAuthor(
 
     await reportSuspectLowBpp(cover, audit, {
       normalizedTitleAuthor: writeKey,
+      title: metadata.title ?? undefined,
     });
 
     const resultRow = {

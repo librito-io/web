@@ -1275,11 +1275,20 @@ describe("resolveIsbn – resolver chain cover", () => {
     expect(result.row.cover_max_width).toBeGreaterThanOrEqual(1200);
   });
 
-  it("OL by cover_id wins over GB when both have valid bytes at the same floor", async () => {
-    // Pre-reorder: GB extraLarge wins because GB is checked before tryOpenLibrary.
-    // Post-reorder (this task): tryOpenLibrary (cover_id) is checked before GB,
-    // so the OL `b/id/` cover wins when both sources offer valid premium bytes.
-    // OL direct returns 404 (no isbn-keyed cover) so the second tier (OL cover_id) gets to win.
+  it("GB xlarge wins over OL search cover_id at the same floor (reorder 2026-05-31)", async () => {
+    // Chain order after work-resolver reorder (2026-05-31):
+    //   1. OL direct-ISBN  → 404 (fails, advances)
+    //   2. GB xlarge       → pdf.isAvailable=true + extraLarge URL → WINS here
+    //   3. OL work-covers  → would be checked next (not reached)
+    //   4. OL search cover_id (demoted) → 12345 cover available, but GB wins first
+    //   5. iTunes          → not reached
+    //
+    // Pre-reorder, the OL search cover_id leg ran before GB so the OL cover
+    // won. Post-reorder GB xlarge is leg 2 — it wins when pdf.isAvailable=true
+    // and the cover clears the same floor, because it runs before the demoted
+    // OL search-cover_id leg (leg 4). The #209 pdf.isAvailable filter justifies
+    // GB-first: a GB cover backed by real PDF bytes is more canonical than an
+    // OL library-scan image.
     const supabase = coldMissSupabase();
     const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -1287,14 +1296,17 @@ describe("resolveIsbn – resolver chain cover", () => {
       if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
         return new Response(null, { status: 404 });
       }
-      // OL data document — empty (no embedded cover URL).
+      // OL data document — empty (no embedded cover URL, no works key).
       if (url.includes("openlibrary.org/api/books")) {
         return new Response(olNoCoverResponse(), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
       }
-      // OL search — returns a cover_id so tryOpenLibrary has a target.
+      // OL search — returns a cover_i with no valid work key, so the work
+      // resolver finds nothing; leg 3 (work-covers) produces no walker.
+      // The cover_i itself is available for the demoted leg 4, but by then
+      // GB (leg 2) has already won.
       if (url.includes("openlibrary.org/search.json")) {
         return new Response(
           JSON.stringify({ numFound: 1, docs: [{ cover_i: 12345 }] }),
@@ -1304,22 +1316,19 @@ describe("resolveIsbn – resolver chain cover", () => {
       if (url.includes("openlibrary.org/works/")) {
         return new Response(JSON.stringify({}), {
           status: 200,
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "image/jpeg" },
         });
       }
-      // OL cover_id endpoint — returns a real 1500x2250 cover.
+      // OL cover_id endpoint — cover available, but never reached because GB wins first.
       if (url.includes("covers.openlibrary.org/b/id/12345")) {
         return new Response(FIXTURE_1500x2250, {
           status: 200,
           headers: { "content-type": "image/jpeg" },
         });
       }
-      // GB also offers a premium cover with valid bytes and a filter-passing
-      // accessInfo — pre-reorder this would win (GB checked before
-      // tryOpenLibrary); post-reorder it loses to OL cover_id because
-      // tryOpenLibrary runs first. accessInfo.pdf.isAvailable=true ensures
-      // the Task 8 filter does NOT reject GB — the test must demonstrate
-      // ordering, not filter behavior.
+      // GB offers a premium cover with a filter-passing pdf.isAvailable=true.
+      // This is leg 2 and runs before the OL search-cover_id leg (leg 4),
+      // so GB wins even though OL also has a valid cover at the same floor.
       if (url.includes("googleapis.com/books")) {
         return new Response(
           gbVolumesResponse(
@@ -1352,7 +1361,7 @@ describe("resolveIsbn – resolver chain cover", () => {
     expect(upsertCall).toBeDefined();
     const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
       .p_row;
-    expect(p_row.cover_source).toBe("openlibrary_isbn");
+    expect(p_row.cover_source).toBe("google_books");
   });
 
   it("rejects GB cover when accessInfo.pdf.isAvailable=false; chain advances to iTunes", async () => {
@@ -1947,9 +1956,13 @@ describe("resolveIsbn – resolver chain cover", () => {
 });
 
 describe("resolveTitleAuthor – resolver chain", () => {
-  it("title/author: OL search finds cover_i; chain resolves via OL when GB has no imageLinks", async () => {
-    // resolveTitleAuthor; GB has no imageLinks; iTunes skipped (no isbn);
-    // OL cover_i from search result; OL -L returns 600×900.
+  it("title/author: OL search resolves work; chain resolves via work-covers when GB has no imageLinks", async () => {
+    // resolveTitleAuthor; GB has no imageLinks; iTunes skipped (no isbn).
+    // New behavior (work-resolver reorder): the TA path calls buildWorkResolution
+    // (limit=10 search → rank → work doc → WorkCoverWalker). The walker walks
+    // work.covers[0] = 9876; covers.openlibrary.org/b/id/9876-L returns 600×900.
+    // cover_source = "openlibrary_work" (not "openlibrary_search_title" — that was
+    // the pre-resolver path that used the cover_i directly from the limit=1 search).
     const supabase = createMockSupabase();
     supabase._resultsQueue.set("book_catalog.select", [
       { data: [], error: null },
@@ -1965,7 +1978,9 @@ describe("resolveTitleAuthor – resolver chain", () => {
 
     const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
       const url = typeof input === "string" ? input : input.toString();
-      // OL search by title/author — returns cover_i
+      // OL limit=10 search by title/author (used by resolveWork inside buildWorkResolution).
+      // Doc must have a valid OL work key + title+author fields that pass acceptableMatch,
+      // plus the ranking signals edition_count/first_publish_year used by rankWorkCandidates.
       if (url.includes("openlibrary.org/search.json")) {
         return new Response(
           JSON.stringify({
@@ -1975,20 +1990,29 @@ describe("resolveTitleAuthor – resolver chain", () => {
                 key: "/works/OL12345W",
                 title: "The Great Gatsby",
                 author_name: ["F. Scott Fitzgerald"],
-                cover_i: 9876,
+                edition_count: 10,
+                first_publish_year: 1925,
               },
             ],
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
+      // OL work doc — returns cover ID 9876 for the walker to walk.
+      if (url.includes("openlibrary.org/works/OL12345W.json")) {
+        return new Response(JSON.stringify({ covers: [9876] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // OL cover byte fetches (b/id/9876-L) — serve 600×900 fixture.
       if (url.includes("covers.openlibrary.org")) {
         return new Response(FIXTURE_600x900, {
           status: 200,
           headers: { "content-type": "image/jpeg" },
         });
       }
-      // GB — no imageLinks
+      // GB — no imageLinks → cover chain leg 2 fails; walker (leg 3) carries it.
       if (url.includes("googleapis.com/books")) {
         return new Response(gbVolumesResponse(), {
           status: 200,
@@ -2014,7 +2038,9 @@ describe("resolveTitleAuthor – resolver chain", () => {
     expect(upsertCall).toBeDefined();
     const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
       .p_row;
-    expect(p_row.cover_source).toBe("openlibrary_search_title");
+    // Cover resolved via WorkCoverWalker (work-covers leg), not the old
+    // search cover_i leg — the walker is what picks up OL covers now.
+    expect(p_row.cover_source).toBe("openlibrary_work");
     // After Task 4 reorder: cover_max_width is null in the pending RPC row;
     // it is written by the finalize UPDATE and reflected in result.row.
     expect(p_row.cover_max_width).toBeNull();
@@ -2025,6 +2051,271 @@ describe("resolveTitleAuthor – resolver chain", () => {
       (args: unknown[]) => String(args[0]).includes("itunes.apple.com"),
     );
     expect(itunesCalls).toHaveLength(0);
+  });
+});
+
+// ─── End-to-end resolver tests (work-resolver integration) ──────────────────
+
+describe("resolveTitleAuthor – Martian TA happy path (work-resolver)", () => {
+  it("ISBN-less Martian (TA path) → openlibrary_work cover + openlibrary description, no library-stub blurb", async () => {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null },
+      { data: null, error: null }, // selectBySha dedup
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      // OL limit=10 search — returns the canonical Martian work.
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(
+          JSON.stringify({
+            numFound: 1,
+            docs: [
+              {
+                key: "/works/OL17091839W",
+                title: "The Martian",
+                author_name: ["Andy Weir"],
+                edition_count: 74,
+                first_publish_year: 2011,
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      // OL work doc — description + cover ID 11447888.
+      if (url.includes("openlibrary.org/works/OL17091839W.json")) {
+        return new Response(
+          JSON.stringify({
+            description:
+              "The Martian is a 2011 science fiction novel about an astronaut stranded on Mars.",
+            covers: [11447888],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      // OL cover bytes (walker fetches b/id/11447888-L) — serve 1500×2250 premium fixture.
+      if (url.includes("covers.openlibrary.org")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      // GB — library-distribution stub: no imageLinks, stub description.
+      // Stub description must be rejected so description comes from OL.
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          gbVolumesResponse(
+            {},
+            {
+              description: "For use in schools and libraries only.",
+            },
+          ),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      // iTunes: no results (TA path has no ISBN to key on anyway).
+      if (url.includes("itunes.apple.com")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await resolveTitleAuthor(
+      supabase as never,
+      "The Martian",
+      "Andy Weir",
+      deps({ fetchFn }),
+    );
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_title_author",
+    );
+    expect(upsertCall).toBeDefined();
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+
+    // Cover must come from the work-covers walker (leg 3), not GB or OL stub.
+    expect(p_row.cover_source).toBe("openlibrary_work");
+    expect(result.row.cover_max_width).toBeGreaterThanOrEqual(1200);
+
+    // Description must come from OL (the work doc), not GB library stub.
+    expect(p_row.description_provider).toBe("openlibrary");
+    expect(typeof p_row.description).toBe("string");
+    expect(p_row.description as string).toContain("2011 science fiction novel");
+    expect(p_row.description as string).not.toContain(
+      "For use in schools and libraries only",
+    );
+  });
+});
+
+describe("resolveIsbn – ISBN sibling-lift via work-covers (#470)", () => {
+  function coldMissSupabase() {
+    const supabase = createMockSupabase();
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_isbn", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+    return supabase;
+  }
+
+  it("OL-direct + GB miss the floor but a work edition cover clears it → cover_source openlibrary_work", async () => {
+    const supabase = coldMissSupabase();
+
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      // OL data doc — returns the work key so buildWorkResolution can use it.
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(
+          JSON.stringify({
+            "ISBN:9780743273565": {
+              title: "Test Book",
+              works: [{ key: "/works/OL2W" }],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      // OL work doc — fetched once by loadOpenLibraryData (leg metadata); the
+      // walker reuses that doc via the work-doc lookup (#486), so this handler
+      // is hit a single time per resolve. The dedicated single-fetch test
+      // below asserts the count.
+      if (url.includes("openlibrary.org/works/OL2W.json")) {
+        return new Response(JSON.stringify({ covers: [77001] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // OL direct-ISBN cover (leg 1) — 404 so it does not win.
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(null, { status: 404 });
+      }
+      // Walker cover fetch (leg 3, b/id/77001-L) — serve 1500×2250 fixture.
+      if (url.includes("covers.openlibrary.org/b/id/77001")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      // GB — no usable cover (no imageLinks).
+      if (url.includes("googleapis.com/books")) {
+        return new Response(gbVolumesResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // OL search (discoverOpenLibraryCoverId + work ranker limit=10) — no docs,
+      // so the demoted search-cover_id leg (leg 4) has nothing to fall back on.
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // iTunes — no results.
+      if (url.includes("itunes.apple.com")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    const upsertCall = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_isbn",
+    );
+    expect(upsertCall).toBeDefined();
+    const p_row = (upsertCall!.args as { p_row: Record<string, unknown> })
+      .p_row;
+    // Walker (leg 3) resolved the work edition cover; direct-ISBN + GB both failed.
+    expect(p_row.cover_source).toBe("openlibrary_work");
+  });
+
+  it("cold cover resolve fetches /works/{id}.json exactly once (no double-fetch, #486)", async () => {
+    const supabase = coldMissSupabase();
+    let workDocFetches = 0;
+
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(
+          JSON.stringify({
+            "ISBN:9780743273565": {
+              title: "Test Book",
+              works: [{ key: "/works/OL2W" }],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("openlibrary.org/works/OL2W.json")) {
+        workDocFetches++;
+        return new Response(JSON.stringify({ covers: [77001] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(null, { status: 404 });
+      }
+      if (url.includes("covers.openlibrary.org/b/id/77001")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(gbVolumesResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("itunes.apple.com")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    // loadOpenLibraryData fetches the work doc; the walker reuses it via the
+    // work-doc lookup rather than re-fetching. Exactly one GET.
+    expect(workDocFetches).toBe(1);
   });
 });
 

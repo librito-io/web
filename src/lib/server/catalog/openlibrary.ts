@@ -2,6 +2,7 @@ import type {
   OpenLibraryDataDoc,
   OpenLibraryWork,
   OpenLibrarySearchDoc,
+  OpenLibraryEditionsResponse,
 } from "./types";
 import { fetchCatalogJson, downloadCover } from "./http";
 
@@ -55,6 +56,45 @@ export async function searchOpenLibraryByTitleAuthor(
     "openlibrary",
   );
   return body?.docs?.[0] ?? null;
+}
+
+/**
+ * Multi-result title+author search for the work-resolver ranker. Distinct
+ * from `searchOpenLibraryByTitleAuthor` (limit=1, single doc) which serves
+ * `discoverOpenLibraryCoverId` on the ISBN path — do NOT merge them. Requests
+ * the ranking signals (edition_count, first_publish_year) the ranker needs.
+ */
+export async function searchOpenLibraryWorksByTitleAuthor(
+  title: string,
+  author: string,
+  deps: OpenLibraryDeps = {},
+): Promise<OpenLibrarySearchDoc[]> {
+  const url =
+    `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}` +
+    `&author=${encodeURIComponent(author)}` +
+    `&fields=cover_i,title,author_name,key,edition_count,first_publish_year&limit=10`;
+  const body = await fetchCatalogJson<{ docs?: OpenLibrarySearchDoc[] }>(
+    url,
+    deps,
+    "openlibrary",
+  );
+  return body?.docs ?? [];
+}
+
+/**
+ * Fetch a work's editions list (cover IDs only consumed downstream). Capped
+ * at limit=20 — most works have <=10 editions; long-tail bounded. Returns null
+ * on 404 (fetchCatalogJson contract); the walker treats null as "no editions".
+ */
+export async function fetchOpenLibraryEditions(
+  workId: string,
+  deps: OpenLibraryDeps = {},
+): Promise<OpenLibraryEditionsResponse | null> {
+  return fetchCatalogJson<OpenLibraryEditionsResponse>(
+    `https://openlibrary.org/works/${workId}/editions.json?limit=20`,
+    deps,
+    "openlibrary",
+  );
 }
 
 export async function fetchOpenLibraryWork(

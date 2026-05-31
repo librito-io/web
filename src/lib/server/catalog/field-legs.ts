@@ -27,6 +27,14 @@ export type ItunesDescriptionState =
 
 // ── description ──────────────────────────────────────────────────────────────
 
+// GB serves library-distribution stub volumes whose only description is this
+// boilerplate (e.g. volume P7g_rgEACAAJ for The Martian). Reject as a
+// description source so the walker falls through to iTunes. Distinct from
+// stripMarketingCruft (de-junks *real* descriptions) — this rejects a
+// non-description. Must run BEFORE stripMarketingCruft.
+const LIBRARY_STUB_RE =
+  /\bfor use in (schools|libraries)( and (schools|libraries))?\s+only\b/i;
+
 export function classifyDescriptionFromOpenLibrary(
   olWork: OpenLibraryWork | null,
 ): LegOutcome<string> {
@@ -59,6 +67,8 @@ export function classifyDescriptionFromGoogleBooks(
   if (outcome.kind === "empty")
     return { kind: "no_data", provider: "google_books" };
   const desc = outcome.value.volumeInfo?.description;
+  if (desc && LIBRARY_STUB_RE.test(desc))
+    return { kind: "empty", provider: "google_books" };
   if (!desc) return { kind: "empty", provider: "google_books" };
   return {
     kind: "success",

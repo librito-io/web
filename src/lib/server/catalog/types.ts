@@ -25,8 +25,12 @@ export interface OpenLibraryDataDoc {
 }
 
 export interface OpenLibraryWork {
+  key?: string;
   description?: string | { value: string };
   subjects?: string[];
+  // Work-level cover IDs, highest-priority first. Walked by WorkCoverWalker
+  // before edition-level covers. OL uses -1 / 0 as "no cover" sentinels.
+  covers?: number[];
 }
 
 export interface OpenLibrarySearchDoc {
@@ -34,6 +38,16 @@ export interface OpenLibrarySearchDoc {
   title?: string;
   author_name?: string[];
   key?: string;
+  // Ranking signals (requested by searchOpenLibraryWorksByTitleAuthor).
+  edition_count?: number;
+  first_publish_year?: number;
+}
+
+// /works/{key}/editions.json response. Only the per-edition cover IDs are
+// consumed (WorkCoverWalker phase 2). Each entry's `covers` is OL's
+// edition-level cover list, same -1/0 sentinel convention as work.covers.
+export interface OpenLibraryEditionsResponse {
+  entries?: { covers?: number[] }[];
 }
 
 export interface GoogleBooksItem {
@@ -108,6 +122,9 @@ export type CoverSource =
   | "openlibrary_isbn_direct"
   | "openlibrary_isbn"
   | "openlibrary_search_title"
+  // Walked from the chosen work's cover editions (work-resolver). DB CHECK
+  // widened in a later migration in this branch.
+  | "openlibrary_work"
   | "google_books"
   | "itunes"
   // 'manual' added in the 2026-05-27 refit for operator-uploaded covers

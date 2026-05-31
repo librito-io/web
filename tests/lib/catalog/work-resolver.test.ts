@@ -131,3 +131,120 @@ describe("collectCoverIds", () => {
     expect(collectCoverIds([[], []])).toEqual([]);
   });
 });
+
+import { WorkCoverWalker } from "../../../src/lib/server/catalog/work-resolver";
+import type { ResolvedWork } from "../../../src/lib/server/catalog/work-resolver";
+
+function fakeResolvedWork(
+  over: Partial<ResolvedWork> &
+    Pick<ResolvedWork, "workCoverIds" | "fetchEditionCoverIds">,
+): ResolvedWork {
+  return { workKey: "/works/X", olWork: null, searchDoc: null, ...over };
+}
+
+function stubFetch(
+  map: Record<number, { width: number; height: number } | null>,
+) {
+  const calls: number[] = [];
+  const fn = async (id: number) => {
+    calls.push(id);
+    const e = map[id];
+    if (!e) return null;
+    return {
+      bytes: new Uint8Array([1]),
+      mime: "image/jpeg",
+      width: e.width,
+      height: e.height,
+    };
+  };
+  return { fn, calls };
+}
+
+describe("WorkCoverWalker", () => {
+  it("returns the first work cover meeting the floor; skips earlier dead IDs", async () => {
+    const { fn, calls } = stubFetch({
+      1: null,
+      2: { width: 1300, height: 2000 },
+    });
+    const w = new WorkCoverWalker(
+      fakeResolvedWork({
+        workCoverIds: [1, 2],
+        fetchEditionCoverIds: async () => [],
+      }),
+      fn,
+    );
+    const r = await w.tryAtFloor(1200);
+    expect(r?.openLibraryCoverId).toBe(2);
+    expect(r?.source).toBe("openlibrary_work");
+    expect(calls).toEqual([1, 2]);
+  });
+
+  it("fetches each ID at most once across premium/basic/salvage calls", async () => {
+    const { fn, calls } = stubFetch({ 1: { width: 800, height: 1200 } });
+    const w = new WorkCoverWalker(
+      fakeResolvedWork({
+        workCoverIds: [1],
+        fetchEditionCoverIds: async () => [],
+      }),
+      fn,
+    );
+    expect(await w.tryAtFloor(1200)).toBeNull(); // premium miss
+    const basic = await w.tryAtFloor(300);
+    expect(basic?.openLibraryCoverId).toBe(1); // basic hit from cache
+    expect(calls).toEqual([1]); // fetched ONCE, not 3x
+  });
+
+  it("invokes the editions thunk only after work covers miss, and only once", async () => {
+    const { fn, calls } = stubFetch({
+      1: { width: 100, height: 150 },
+      99: { width: 1300, height: 2000 },
+    });
+    let editionCalls = 0;
+    const w = new WorkCoverWalker(
+      fakeResolvedWork({
+        workCoverIds: [1],
+        fetchEditionCoverIds: async () => {
+          editionCalls++;
+          return [99];
+        },
+      }),
+      fn,
+    );
+    const r = await w.tryAtFloor(1200);
+    expect(r?.openLibraryCoverId).toBe(99);
+    expect(editionCalls).toBe(1);
+    await w.tryAtFloor(300); // editions already loaded
+    expect(editionCalls).toBe(1);
+    expect(calls).toEqual([1, 99]);
+  });
+
+  it("stops fetching past TOTAL_PROBE_CAP distinct IDs", async () => {
+    const ids = Array.from({ length: 20 }, (_, i) => i + 1);
+    const map: Record<number, null> = {};
+    for (const id of ids) map[id] = null;
+    const { fn, calls } = stubFetch(map);
+    const w = new WorkCoverWalker(
+      fakeResolvedWork({
+        workCoverIds: ids,
+        fetchEditionCoverIds: async () => [],
+      }),
+      fn,
+    );
+    await w.tryAtFloor(1200);
+    await w.tryAtFloor(300);
+    await w.tryAtFloor(240);
+    expect(calls.length).toBeLessThanOrEqual(12);
+  });
+
+  it("returns null when all candidates miss every floor", async () => {
+    const { fn } = stubFetch({ 1: { width: 100, height: 150 } });
+    const w = new WorkCoverWalker(
+      fakeResolvedWork({
+        workCoverIds: [1],
+        fetchEditionCoverIds: async () => [],
+      }),
+      fn,
+    );
+    expect(await w.tryAtFloor(240)).toBeNull();
+  });
+});

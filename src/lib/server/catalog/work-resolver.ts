@@ -1,4 +1,4 @@
-import type { OpenLibrarySearchDoc } from "./types";
+import type { OpenLibrarySearchDoc, OpenLibraryWork } from "./types";
 
 /** Tokenize for acceptableMatch — Unicode-aware, lowercase, stopword-free. */
 export function matchTokens(s: string): string[] {
@@ -127,4 +127,118 @@ export function collectCoverIds(coverIdLists: number[][]): number[] {
     }
   }
   return out;
+}
+
+export interface ResolvedWork {
+  workKey: string | null;
+  olWork: OpenLibraryWork | null;
+  /** Winning search doc (TA mode); null in work-key mode. Seeds metadata. */
+  searchDoc: OpenLibrarySearchDoc | null;
+  /** work.covers[], sentinel-stripped + deduped. NOT capped (walker caps). */
+  workCoverIds: number[];
+  /** Lazy: fetches /works/{key}/editions.json on first call, memoized; []
+   *  on failure or no editions. Called by WorkCoverWalker only when work
+   *  covers miss the floor. */
+  fetchEditionCoverIds: () => Promise<number[]>;
+}
+
+/** Decoded cover bytes + dimensions, or null = fetched-and-failed. */
+export type FetchedCover = {
+  bytes: Uint8Array;
+  mime: string;
+  width: number;
+  height: number;
+} | null;
+
+/** Result of a successful walk at a tier floor. Carries the fields the cover
+ *  chain's CoverResolution needs from this source. */
+export interface WalkerCover {
+  bytes: Uint8Array;
+  mime: string;
+  width: number;
+  height: number;
+  byteCount: number;
+  source: "openlibrary_work";
+  openLibraryCoverId: number;
+}
+
+/** Hard ceiling on distinct cover IDs fetched across the whole resolve (work
+ *  + edition covers, all tiers). Bounds dead-ID + latency cost. */
+export const TOTAL_PROBE_CAP = 12;
+
+/**
+ * Per-resolve cover walker. Fetches each candidate cover ID at most once
+ * across all three tier passes (premium/basic/salvage), caching decoded
+ * dimensions, and applies the per-tier floor against the cache. Phase 1 walks
+ * work-level covers; phase 2 lazily fetches edition covers only after phase 1
+ * misses the current floor (once per resolve). Created once per resolve,
+ * threaded into the cover-chain ctx.
+ */
+export class WorkCoverWalker {
+  private decoded = new Map<number, FetchedCover>();
+  private orderedIds: number[];
+  private readonly orderedSet = new Set<number>();
+  private editionIdsLoaded = false;
+
+  constructor(
+    private readonly resolved: ResolvedWork,
+    private readonly fetchCover: (id: number) => Promise<FetchedCover>,
+  ) {
+    this.orderedIds = [...resolved.workCoverIds];
+    for (const id of this.orderedIds) this.orderedSet.add(id);
+  }
+
+  private async fetchOnce(id: number): Promise<FetchedCover> {
+    if (this.decoded.has(id)) return this.decoded.get(id)!;
+    if (this.decoded.size >= TOTAL_PROBE_CAP) return null;
+    const entry = await this.fetchCover(id);
+    this.decoded.set(id, entry);
+    return entry;
+  }
+
+  private match(
+    entry: FetchedCover,
+    id: number,
+    minWidth: number,
+  ): WalkerCover | null {
+    if (entry && entry.width >= minWidth) {
+      return {
+        bytes: entry.bytes,
+        mime: entry.mime,
+        width: entry.width,
+        height: entry.height,
+        byteCount: entry.bytes.length,
+        source: "openlibrary_work",
+        openLibraryCoverId: id,
+      };
+    }
+    return null;
+  }
+
+  async tryAtFloor(minWidth: number): Promise<WalkerCover | null> {
+    // Phase 1: work-level + any already-loaded edition covers.
+    for (const id of this.orderedIds) {
+      if (this.decoded.size >= TOTAL_PROBE_CAP && !this.decoded.has(id)) break;
+      const entry = await this.fetchOnce(id);
+      const hit = this.match(entry, id, minWidth);
+      if (hit) return hit;
+    }
+    // Phase 2: lazy editions — fetch once, append new IDs, probe the new ones.
+    if (!this.editionIdsLoaded) {
+      this.editionIdsLoaded = true;
+      const editionIds = await this.resolved.fetchEditionCoverIds();
+      const newIds = collectCoverIds([editionIds]).filter(
+        (id) => !this.decoded.has(id) && !this.orderedSet.has(id),
+      );
+      this.orderedIds = this.orderedIds.concat(newIds);
+      for (const id of newIds) this.orderedSet.add(id);
+      for (const id of newIds) {
+        if (this.decoded.size >= TOTAL_PROBE_CAP) break;
+        const entry = await this.fetchOnce(id);
+        const hit = this.match(entry, id, minWidth);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }
 }

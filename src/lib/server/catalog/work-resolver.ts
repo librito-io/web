@@ -10,7 +10,7 @@ export function matchTokens(s: string): string[] {
     .filter(Boolean);
 }
 
-export const TITLE_STOPWORDS = new Set([
+const TITLE_STOPWORDS = new Set([
   "a",
   "an",
   "the",

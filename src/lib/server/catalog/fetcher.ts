@@ -1136,13 +1136,17 @@ export async function resolveIsbn(
     // Build the work-cover walker from the ISBN's OL work key (skips
     // search/rank — the ISBN already identifies the work). Lazy: the walker
     // only fetches covers if OL-direct + GB miss the tier floor.
+    // Gate on coverShouldAttempt: building the walker fetches the OL work
+    // doc, so skip it entirely on warm-cover / field-replay resolves where
+    // the cover is already stored and the walker would never be consulted.
     const isbnWorkKey = olData?.works?.[0]?.key;
-    const { walker: workCoverWalker } = isbnWorkKey
-      ? await buildWorkResolution(
-          { kind: "work-key", workKey: isbnWorkKey },
-          deps,
-        )
-      : { walker: undefined };
+    const { walker: workCoverWalker } =
+      coverShouldAttempt && isbnWorkKey
+        ? await buildWorkResolution(
+            { kind: "work-key", workKey: isbnWorkKey },
+            deps,
+          )
+        : { walker: undefined };
 
     const cover = coverShouldAttempt
       ? await resolveCoverWithTiering(deps, {

@@ -411,3 +411,30 @@ describe("classifySubjectsFromGoogleBooks", () => {
     ).toEqual({ kind: "empty", provider: "google_books" });
   });
 });
+
+describe("classifyDescriptionFromGoogleBooks library-stub filter", () => {
+  function gbOk(description: string) {
+    return {
+      apiKeySet: true as const,
+      outcome: {
+        kind: "ok" as const,
+        value: { id: "v1", volumeInfo: { description } },
+      },
+    };
+  }
+
+  it("rejects 'For use in schools and libraries only' boilerplate as empty", () => {
+    const r = classifyDescriptionFromGoogleBooks(
+      gbOk("For use in schools and libraries only. Stranded on Mars..."),
+    );
+    expect(r.kind).toBe("empty");
+    if (r.kind === "empty") expect(r.provider).toBe("google_books");
+  });
+
+  it("does not false-positive on a normal description", () => {
+    const r = classifyDescriptionFromGoogleBooks(
+      gbOk("A lone astronaut must survive on Mars."),
+    );
+    expect(r.kind).toBe("success");
+  });
+});

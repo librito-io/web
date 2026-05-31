@@ -1,4 +1,8 @@
-import type { OpenLibrarySearchDoc, OpenLibraryWork } from "./types";
+import type {
+  OpenLibrarySearchDoc,
+  OpenLibraryWork,
+  OpenLibraryEditionsResponse,
+} from "./types";
 
 /** Tokenize for acceptableMatch — Unicode-aware, lowercase, stopword-free. */
 export function matchTokens(s: string): string[] {
@@ -165,6 +169,82 @@ export interface WalkerCover {
 /** Hard ceiling on distinct cover IDs fetched across the whole resolve (work
  *  + edition covers, all tiers). Bounds dead-ID + latency cost. */
 export const TOTAL_PROBE_CAP = 12;
+
+export type WorkLookup =
+  | { kind: "title-author"; title: string; author: string }
+  | { kind: "work-key"; workKey: string };
+
+/**
+ * Injected OL fns. `resolveWork` takes these (rather than importing the
+ * openlibrary client directly) so it's unit-testable without network and so
+ * rate-limit-token acquisition stays the caller's (fetcher's) concern — these
+ * fns run under the single OL token fetcher already acquired.
+ */
+export interface WorkResolverDeps {
+  searchWorks: (
+    title: string,
+    author: string,
+  ) => Promise<OpenLibrarySearchDoc[]>;
+  fetchWork: (workId: string) => Promise<OpenLibraryWork | null>;
+  fetchEditions: (
+    workId: string,
+  ) => Promise<OpenLibraryEditionsResponse | null>;
+}
+
+const OL_WORK_KEY_PREFIX = /^\/works\//;
+
+function editionCoverIds(res: OpenLibraryEditionsResponse | null): number[] {
+  if (!res?.entries) return [];
+  return collectCoverIds(res.entries.map((e) => e.covers ?? []));
+}
+
+/**
+ * Resolve a lookup to a canonical OL work + its cover candidates. TA mode:
+ * search → rank → fetch work. work-key mode: fetch work directly (skips
+ * search/rank). Returns null when ranking finds nothing acceptable or the
+ * work fetch fails. Editions are NOT fetched here — `fetchEditionCoverIds` is
+ * a lazy, memoized thunk the cover walker calls only if work covers miss.
+ */
+export async function resolveWork(
+  lookup: WorkLookup,
+  deps: WorkResolverDeps,
+): Promise<ResolvedWork | null> {
+  let workKey: string;
+  let searchDoc: OpenLibrarySearchDoc | null = null;
+
+  if (lookup.kind === "title-author") {
+    const docs = await deps.searchWorks(lookup.title, lookup.author);
+    const winner = rankWorkCandidates(docs, {
+      title: lookup.title,
+      author: lookup.author,
+    });
+    if (!winner?.key) return null;
+    workKey = winner.key;
+    searchDoc = winner;
+  } else {
+    if (!lookup.workKey) return null;
+    workKey = lookup.workKey;
+  }
+
+  const workId = workKey.replace(OL_WORK_KEY_PREFIX, "");
+  const olWork = await deps.fetchWork(workId);
+  if (!olWork) return null;
+
+  const workCoverIds = collectCoverIds([olWork.covers ?? []]);
+
+  let editionsPromise: Promise<number[]> | null = null;
+  const fetchEditionCoverIds = (): Promise<number[]> => {
+    if (!editionsPromise) {
+      editionsPromise = deps
+        .fetchEditions(workId)
+        .then(editionCoverIds)
+        .catch(() => []);
+    }
+    return editionsPromise;
+  };
+
+  return { workKey, olWork, searchDoc, workCoverIds, fetchEditionCoverIds };
+}
 
 /**
  * Per-resolve cover walker. Fetches each candidate cover ID at most once

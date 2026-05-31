@@ -132,6 +132,108 @@ describe("collectCoverIds", () => {
   });
 });
 
+import { resolveWork } from "../../../src/lib/server/catalog/work-resolver";
+
+function deps(over: Partial<Parameters<typeof resolveWork>[1]> = {}) {
+  return {
+    searchWorks: async () => [],
+    fetchWork: async () => null,
+    fetchEditions: async () => null,
+    ...over,
+  } as Parameters<typeof resolveWork>[1];
+}
+
+describe("resolveWork (title-author)", () => {
+  it("searches, ranks, fetches the winning work, assembles workCoverIds", async () => {
+    const r = await resolveWork(
+      { kind: "title-author", title: "The Martian", author: "Andy Weir" },
+      deps({
+        searchWorks: async () => [
+          {
+            key: "/works/OL17091839W",
+            title: "The Martian",
+            author_name: ["Andy Weir"],
+            edition_count: 74,
+            first_publish_year: 2011,
+          },
+        ],
+        fetchWork: async (key: string) => {
+          expect(key).toBe("OL17091839W"); // /works/ prefix stripped
+          return { description: "synopsis", covers: [11447888, -1, 10860735] };
+        },
+      }),
+    );
+    expect(r?.workKey).toBe("/works/OL17091839W");
+    expect(r?.olWork?.description).toBe("synopsis");
+    expect(r?.workCoverIds).toEqual([11447888, 10860735]);
+    expect(r?.searchDoc?.key).toBe("/works/OL17091839W");
+  });
+
+  it("returns null when ranking finds no acceptable work", async () => {
+    const r = await resolveWork(
+      { kind: "title-author", title: "The Martian", author: "Andy Weir" },
+      deps({
+        searchWorks: async () => [
+          { title: "Unrelated", author_name: ["Nobody"], edition_count: 1 },
+        ],
+      }),
+    );
+    expect(r).toBeNull();
+  });
+
+  it("fetchEditionCoverIds lazily fetches + memoizes editions", async () => {
+    let editionFetches = 0;
+    const r = await resolveWork(
+      { kind: "title-author", title: "The Martian", author: "Andy Weir" },
+      deps({
+        searchWorks: async () => [
+          {
+            key: "/works/W",
+            title: "The Martian",
+            author_name: ["Andy Weir"],
+            edition_count: 74,
+          },
+        ],
+        fetchWork: async () => ({ covers: [1] }),
+        fetchEditions: async () => {
+          editionFetches++;
+          return { entries: [{ covers: [2, -1] }, { covers: [3] }] };
+        },
+      }),
+    );
+    expect(editionFetches).toBe(0); // not fetched during resolveWork
+    expect(await r!.fetchEditionCoverIds()).toEqual([2, 3]);
+    expect(editionFetches).toBe(1);
+    await r!.fetchEditionCoverIds(); // memoized
+    expect(editionFetches).toBe(1);
+  });
+});
+
+describe("resolveWork (work-key)", () => {
+  it("skips search/rank, fetches the work directly, searchDoc null", async () => {
+    const r = await resolveWork(
+      { kind: "work-key", workKey: "/works/OLABC" },
+      deps({
+        fetchWork: async (key: string) => {
+          expect(key).toBe("OLABC");
+          return { covers: [5] };
+        },
+      }),
+    );
+    expect(r?.workKey).toBe("/works/OLABC");
+    expect(r?.workCoverIds).toEqual([5]);
+    expect(r?.searchDoc).toBeNull();
+  });
+
+  it("returns null when the work fetch fails", async () => {
+    const r = await resolveWork(
+      { kind: "work-key", workKey: "/works/X" },
+      deps({ fetchWork: async () => null }),
+    );
+    expect(r).toBeNull();
+  });
+});
+
 import { WorkCoverWalker } from "../../../src/lib/server/catalog/work-resolver";
 import type { ResolvedWork } from "../../../src/lib/server/catalog/work-resolver";
 

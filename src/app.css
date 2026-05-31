@@ -1083,7 +1083,7 @@ blockquote {
     /* Tighter top than bottom: trims the gap above "Librito" without
        crowding the divider below. (OS status-bar space above is not
        ours to reclaim — viewport-fit=cover, no safe-area padding.) */
-    padding: 8px 16px 16px;
+    padding: 4px 16px 16px;
   }
   .content {
     padding: 0 16px 16px 16px;

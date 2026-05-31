@@ -57,6 +57,7 @@ import {
 import { uploadCover as defaultUploadCover } from "$lib/server/cover-storage";
 import { sha256Hex } from "./sha";
 import { type CatalogMutex, noopMutex } from "./mutex";
+import { acceptableMatch } from "./work-resolver";
 import { logger } from "$lib/server/log";
 import { fetchItunesByIsbn, fetchItunesCoverBytes } from "./itunes";
 import { decodeImageDimensions } from "./dimensions";
@@ -803,82 +804,6 @@ async function resolveCoverWithTiering(
 }
 
 // ─── OL cover_id discovery (metadata only — no byte fetch) ───────────────────
-
-/** Tokenize for acceptableMatch — Unicode-aware, lowercase, stopword-free. */
-function matchTokens(s: string): string[] {
-  return s
-    .normalize("NFKD")
-    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
-}
-
-const TITLE_STOPWORDS = new Set([
-  "a",
-  "an",
-  "the",
-  "of",
-  "and",
-  "or",
-  "in",
-  "on",
-  "to",
-  "for",
-  "is",
-  "are",
-  "at",
-  "by",
-  "with",
-  "from",
-  "as",
-]);
-
-/**
- * Gate a title+author OL search result against the ctx title/author so we
- * don't accept a wrong book's cover when OL ranking returns a near-miss.
- *
- * Require BOTH:
- *   - Title-token overlap: at least min(2, ctxTitleTokens.length) significant
- *     (non-stopword) tokens in common. Two-token requirement prevents a single
- *     generic token ("story", "memoir") from passing the gate; the floor of
- *     min(2, len) keeps single-significant-token titles ("Annie Bot" reduced
- *     to "annie bot", "Beloved") gateable when ctx is short.
- *   - Author surname overlap: last whitespace token of any `doc.author_name`
- *     entry matches any surname extracted from ctx.author (last whitespace
- *     token per comma/semicolon/ampersand-split fragment). Surname-to-surname
- *     only — a doc author whose first name coincides with ctx's surname
- *     (or vice-versa) must NOT pass.
- */
-function acceptableMatch(
-  doc: Pick<OpenLibrarySearchDoc, "title" | "author_name">,
-  ctx: { title: string; author: string },
-): boolean {
-  const ctxTitleTokens = matchTokens(ctx.title).filter(
-    (t) => !TITLE_STOPWORDS.has(t),
-  );
-  if (ctxTitleTokens.length === 0) return false;
-  const docTitleTokens = matchTokens(doc.title ?? "").filter(
-    (t) => !TITLE_STOPWORDS.has(t),
-  );
-  const overlapCount = ctxTitleTokens.filter((t) =>
-    docTitleTokens.includes(t),
-  ).length;
-  const required = Math.min(2, ctxTitleTokens.length);
-  if (overlapCount < required) return false;
-
-  const ctxSurnames = new Set(
-    ctx.author
-      .split(/[,;&]/)
-      .map((part) => matchTokens(part).at(-1))
-      .filter((t): t is string => Boolean(t)),
-  );
-  if (ctxSurnames.size === 0) return false;
-  const docSurnames = (doc.author_name ?? [])
-    .map((name) => matchTokens(name).at(-1))
-    .filter((t): t is string => Boolean(t));
-  return docSurnames.some((s) => ctxSurnames.has(s));
-}
 
 /**
  * Discover the Open Library cover_id for an ISBN from the data document or

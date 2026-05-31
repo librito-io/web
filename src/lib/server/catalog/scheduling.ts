@@ -34,6 +34,15 @@ export type CatalogResolveWork =
       title: string;
       author: string;
       fields?: TrackedField[];
+      // Stored `normalized_title_author` of the catalog row being
+      // re-resolved. Set by callers that re-resolve an EXISTING row (admin
+      // requeue, replay cron) so the resolver targets that row by its
+      // current key rather than re-deriving from possibly-drifted
+      // title/author and forking a duplicate (issue #489 Fix A). Absent for
+      // a fresh cold-resolve. Serialized over QStash; `parseWorkPayload`
+      // accepts it as an optional string (absence = today's behavior, so
+      // the field is backward-compatible / consumer-before-producer safe).
+      normalizedTitleAuthor?: string;
     };
 
 /**

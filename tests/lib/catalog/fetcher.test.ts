@@ -40,8 +40,23 @@ vi.mock("@sentry/sveltekit", () => ({
 import {
   resolveIsbn,
   resolveTitleAuthor,
+  RESOLVE_SELECT,
 } from "../../../src/lib/server/catalog/fetcher";
 import { noopMutex } from "../../../src/lib/server/catalog/mutex";
+
+// Project a fixture row through the SAME column list the resolver selects,
+// so a unit test reflects what Postgres actually returns. The chainable
+// mock echoes the fixture verbatim regardless of `.select(...)`, which can
+// hide a missing projection — drop any key not in RESOLVE_SELECT so the
+// fixture cannot smuggle in a column the real query never returns. (#489
+// branch review: the Fix B heal block shipped dead because `id` was absent
+// from RESOLVE_SELECT but present in the test fixture.)
+function projectThroughResolveSelect(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  const cols = new Set(RESOLVE_SELECT.split(",").map((c) => c.trim()));
+  return Object.fromEntries(Object.entries(row).filter(([k]) => cols.has(k)));
+}
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 // Real JPEG files so decodeImageDimensions can parse width/height.
@@ -4051,5 +4066,256 @@ describe("resolveTitleAuthor – caller args override stub metadata (#449)", () 
       .p_row;
     expect(p_row.title).toBe("Are You Mad at Me?");
     expect(p_row.author).toBe("Meg Josephson");
+  });
+});
+
+describe("resolveTitleAuthor – find by stored lookup key (#489 Fix A)", () => {
+  // A drifted row whose stored key does NOT derive from its own title/author
+  // (the #449 ctx-override froze the key at creation). Stale fail_reasons so
+  // shouldAttempt is true and the resolver proceeds past the cache gate.
+  function driftedRow(): Record<string, unknown> {
+    const stale = "2026-01-22T00:00:00Z"; // > 90-day TTL before fixture "now"
+    return {
+      isbn: null,
+      normalized_title_author: "1984|george orwell", // frozen at creation
+      title: "1984 (adaptation)", // drifted via #449 override
+      author: "Michael Dean, George Orwell",
+      storage_path: null,
+      pending_storage: false,
+      last_attempted_at: stale,
+      attempt_count: 1,
+      cover_attempted_at: stale,
+      cover_fail_reason: "provider_no_data",
+      description_attempted_at: stale,
+      description_fail_reason: "provider_no_data",
+      publisher_attempted_at: stale,
+      publisher_fail_reason: "provider_no_data",
+      published_date_attempted_at: stale,
+      published_date_fail_reason: "provider_no_data",
+      subjects_attempted_at: stale,
+      subjects_fail_reason: "provider_no_data",
+      page_count_attempted_at: stale,
+      page_count_fail_reason: "provider_no_data",
+    };
+  }
+
+  function emptyUpstreamFetch(): typeof fetch {
+    return vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          JSON.stringify({ kind: "books#volumes", totalItems: 0, items: [] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(null, { status: 404 });
+    }) as unknown as typeof fetch;
+  }
+
+  it("SELECTs the existing row by the stored lookup key, not the re-derived key", async () => {
+    const supabase = createMockSupabase();
+    // 1st select → initial lookup HITS the drifted row; 2nd → selectBySha miss.
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [driftedRow()], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+
+    await resolveTitleAuthor(
+      supabase as never,
+      "1984 (adaptation)",
+      "Michael Dean, George Orwell",
+      deps({ fetchFn: emptyUpstreamFetch(), mutex: noopMutex }),
+      undefined, // _fields
+      "1984|george orwell", // lookupKey — the row's STORED key
+    );
+
+    // The initial book_catalog lookup must filter normalized_title_author by
+    // the STORED lookup key, never by the re-derived drifted key.
+    const eqCalls = supabase._chainCalls.filter(
+      (c) =>
+        c.operation === "select" &&
+        c.method === "eq" &&
+        c.args[0] === "normalized_title_author",
+    );
+    const filteredKeys = eqCalls.map((c) => c.args[1]);
+    expect(filteredKeys).toContain("1984|george orwell");
+    expect(filteredKeys).not.toContain(
+      "1984 adaptation|michael dean george orwell",
+    );
+  });
+});
+
+describe("resolveTitleAuthor – recompute drifted key, heal or defer (#489 Fix B)", () => {
+  let logWrites: Array<Record<string, unknown>>;
+  beforeEach(() => {
+    logWrites = [];
+    __setTestDestination((line) => logWrites.push(JSON.parse(line)));
+  });
+  afterEach(() => __resetTestDestination());
+
+  const DERIVED = "1984 adaptation|michael dean george orwell";
+  const STORED = "1984|george orwell";
+
+  function driftedRow(): Record<string, unknown> {
+    const stale = "2026-01-22T00:00:00Z";
+    return {
+      id: "row-x",
+      isbn: null,
+      normalized_title_author: STORED, // frozen; drifted from title/author
+      title: "1984 (adaptation)",
+      author: "Michael Dean, George Orwell",
+      storage_path: null,
+      pending_storage: false,
+      last_attempted_at: stale,
+      attempt_count: 1,
+      cover_attempted_at: stale,
+      cover_fail_reason: "provider_no_data",
+      description_attempted_at: stale,
+      description_fail_reason: "provider_no_data",
+      publisher_attempted_at: stale,
+      publisher_fail_reason: "provider_no_data",
+      published_date_attempted_at: stale,
+      published_date_fail_reason: "provider_no_data",
+      subjects_attempted_at: stale,
+      subjects_fail_reason: "provider_no_data",
+      page_count_attempted_at: stale,
+      page_count_fail_reason: "provider_no_data",
+    };
+  }
+
+  function emptyUpstreamFetch(): typeof fetch {
+    return vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          JSON.stringify({ kind: "books#volumes", totalItems: 0, items: [] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(null, { status: 404 });
+    }) as unknown as typeof fetch;
+  }
+
+  it("heals: when the canonical key is FREE, renames the row's key and writes the canonical key", async () => {
+    const supabase = createMockSupabase();
+    // selects in order: initial lookup (HIT drifted row) → collision pre-check
+    // (no other row holds canonical → null). No cover ⇒ no selectBySha.
+    // Project the fixture through RESOLVE_SELECT so the row carries only the
+    // columns the real query returns (this is what makes the test catch a
+    // missing `id` projection — see projectThroughResolveSelect).
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [projectThroughResolveSelect(driftedRow())], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+
+    await resolveTitleAuthor(
+      supabase as never,
+      "1984 (adaptation)",
+      "Michael Dean, George Orwell",
+      deps({ fetchFn: emptyUpstreamFetch(), mutex: noopMutex }),
+      undefined,
+      STORED, // lookupKey — drifted
+    );
+
+    // (a) Heal-rename: an UPDATE set normalized_title_author = canonical,
+    // filtered by the OLD stored key.
+    const renameSet = supabase._updateCalls.find(
+      (c) =>
+        c.table === "book_catalog" &&
+        (c.payload as Record<string, unknown>).normalized_title_author ===
+          DERIVED,
+    );
+    expect(renameSet).toBeDefined();
+
+    // (b) Upsert payload writes the CANONICAL key, not the stale stored key.
+    const upsert = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_title_author",
+    );
+    const p_row = (upsert!.args as { p_row: Record<string, unknown> }).p_row;
+    expect(p_row.normalized_title_author).toBe(DERIVED);
+
+    // No collision was logged.
+    expect(
+      logWrites.find((l) => l.event === "catalog.ta_key_collision"),
+    ).toBeUndefined();
+  });
+
+  it("defers: when another row already holds the canonical key, keeps the stored key, logs collision, does NOT rename", async () => {
+    const supabase = createMockSupabase();
+    // initial lookup (HIT drifted row) → collision pre-check (a DIFFERENT row
+    // already holds the canonical key). Project the found row through
+    // RESOLVE_SELECT (see heal test) so it reflects the real projection.
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [projectThroughResolveSelect(driftedRow())], error: null },
+      { data: [{ id: "row-y" }], error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+
+    await resolveTitleAuthor(
+      supabase as never,
+      "1984 (adaptation)",
+      "Michael Dean, George Orwell",
+      deps({ fetchFn: emptyUpstreamFetch(), mutex: noopMutex }),
+      undefined,
+      STORED,
+    );
+
+    // No heal-rename to the canonical key (would clobber row-y).
+    const renameSet = supabase._updateCalls.find(
+      (c) =>
+        c.table === "book_catalog" &&
+        (c.payload as Record<string, unknown>).normalized_title_author ===
+          DERIVED,
+    );
+    expect(renameSet).toBeUndefined();
+
+    // Upsert keeps the row's CURRENT (stored) key → updates the drifted row
+    // in place; the merge is left to the dedup sweeper (Fix C).
+    const upsert = supabase._rpcCalls.find(
+      (c) => c.name === "upsert_book_catalog_by_title_author",
+    );
+    const p_row = (upsert!.args as { p_row: Record<string, unknown> }).p_row;
+    expect(p_row.normalized_title_author).toBe(STORED);
+
+    // Collision was logged for operator/sweeper visibility.
+    const collisionLog = logWrites.find(
+      (l) => l.event === "catalog.ta_key_collision",
+    );
+    expect(collisionLog).toBeDefined();
+  });
+
+  it("RESOLVE_SELECT projects `id` (load-bearing for the heal collision guard)", () => {
+    // The heal block reads existing.id; if RESOLVE_SELECT omits it, the
+    // guard short-circuits and the heal silently no-ops in production. This
+    // assertion checks the actual query string, so it is immune to the
+    // chainable mock's projection-blindness (#489 branch review regression).
+    const cols = RESOLVE_SELECT.split(",").map((c) => c.trim());
+    expect(cols).toContain("id");
   });
 });

@@ -129,7 +129,15 @@ type StorageRecord = {
 // first-render, so we still avoid `select("*")` — but the per-field state
 // model needs all 6 value columns + 22 state columns to drive shouldAttempt
 // and increment *_attempts. Refit 2026-05-27.
-const RESOLVE_SELECT = [
+// Exported so tests can project a fixture row through the SAME column list
+// the resolver actually selects — a mock that echoes extra columns (e.g.
+// `id`) would otherwise hide a missing projection.
+export const RESOLVE_SELECT = [
+  // Row identity — read by the Fix B key-heal collision guard in
+  // resolveTitleAuthor (existing.id). Omitting it makes existing.id
+  // undefined in production, short-circuiting the heal so a drifted key
+  // never self-corrects (issue #489 branch review).
+  "id",
   "pending_storage",
   "storage_path",
   "cover_storage_backend",
@@ -1545,9 +1553,22 @@ export async function resolveTitleAuthor(
   // Replay-cron field-scoping param; see resolveIsbn for rationale.
   // Optimization tracked in #439 — not consumed yet.
   _fields?: TrackedField[],
+  // Stored `normalized_title_author` of the catalog row being re-resolved.
+  // When a caller (admin requeue, replay cron) re-resolves an EXISTING row,
+  // it passes the row's stored key here so the lookup + upsert target that
+  // row by its current key — even if the row's title/author have since
+  // drifted away from what the key was derived from. Without it, the
+  // resolver re-derives the key from the (possibly drifted) title/author,
+  // misses the existing row's `ON CONFLICT` target, and INSERTs a duplicate
+  // (issue #489 Fix A). Undefined for a fresh cold-resolve (no row yet).
+  lookupKey?: string,
 ): Promise<ResolveResult> {
   const key = normalizeTitleAuthor(title, author);
   if (!key) throw new InvalidTitleAuthorError();
+  // The key the EXISTING row is found and written under. Prefer the caller's
+  // stored key (Fix A) so a drifted row updates in place rather than forking;
+  // fall back to the derived key for a fresh resolve.
+  const rowKey = lookupKey ?? key;
   const now = currentTime(deps);
   const upload = deps.coverStorage?.uploadCover ?? defaultUploadCover;
   const mutex = deps.mutex ?? noopMutex;
@@ -1556,7 +1577,7 @@ export async function resolveTitleAuthor(
     .from("book_catalog")
     .select(RESOLVE_SELECT)
     .is("isbn", null)
-    .eq("normalized_title_author", key)
+    .eq("normalized_title_author", rowKey)
     .maybeSingle();
   if (selErr) throw new Error(`book_catalog select: ${selErr.message}`);
 
@@ -1583,7 +1604,7 @@ export async function resolveTitleAuthor(
     return {
       cached: false,
       rateLimited: true,
-      row: existing ?? { normalized_title_author: key },
+      row: existing ?? { normalized_title_author: rowKey },
     };
   }
 
@@ -1593,8 +1614,58 @@ export async function resolveTitleAuthor(
       return {
         cached: false,
         rateLimited: true,
-        row: existing ?? { normalized_title_author: key },
+        row: existing ?? { normalized_title_author: rowKey },
       };
+    }
+
+    // Key this row is WRITTEN under. Defaults to the find key. When the
+    // found row's stored key has drifted from the canonical
+    // normalizeTitleAuthor(title, author) — Fix A located it by the stale
+    // key — try to correct it so the column stops drifting (#489 Fix B).
+    // `key` is the canonical normalizeTitleAuthor(title, author).
+    let writeKey = rowKey;
+    const existingId = existing?.id;
+    if (lookupKey && lookupKey !== key && existingId) {
+      // Does a DIFFERENT row already hold the canonical key? Renaming into
+      // it would violate the partial-unique index (and clobber that row).
+      const { data: collision, error: collisionErr } = await supabase
+        .from("book_catalog")
+        .select("id")
+        .is("isbn", null)
+        .eq("normalized_title_author", key)
+        .neq("id", existingId)
+        .limit(1)
+        .maybeSingle();
+      if (collisionErr)
+        throw new Error(
+          `book_catalog collision check: ${collisionErr.message}`,
+        );
+
+      if (collision) {
+        // Two rows are the same book under different keys. Don't rename
+        // (would fork/clobber) — update the drifted row in place under its
+        // current key and leave the merge to the dedup sweeper (Fix C).
+        logger().warn(
+          {
+            event: "catalog.ta_key_collision",
+            stored_key: lookupKey,
+            canonical_key: key,
+            row_id: existingId,
+          },
+          "catalog.ta_key_collision",
+        );
+      } else {
+        // Canonical key is free — rename the row's key to it, then write
+        // under the canonical key so the column self-heals.
+        const { error: renameErr } = await supabase
+          .from("book_catalog")
+          .update({ normalized_title_author: key })
+          .is("isbn", null)
+          .eq("normalized_title_author", lookupKey);
+        if (renameErr)
+          throw new Error(`book_catalog key heal: ${renameErr.message}`);
+        writeKey = key;
+      }
     }
 
     // 1. Resolve the canonical OL work (search → rank → work doc) once. Yields
@@ -1775,7 +1846,7 @@ export async function resolveTitleAuthor(
 
     const pendingRow = buildPendingRow({
       isbn: null,
-      normalizedTitleAuthor: key,
+      normalizedTitleAuthor: writeKey,
       cover,
       coverStateInUpsert,
       coverFailReason,
@@ -1815,12 +1886,14 @@ export async function resolveTitleAuthor(
             ((existing?.cover_attempts as number | undefined) ?? 0) + 1,
         })
         .is("isbn", null)
-        .eq("normalized_title_author", key);
+        .eq("normalized_title_author", writeKey);
       if (finalErr)
         throw new Error(`book_catalog storage finalize: ${finalErr.message}`);
     }
 
-    await reportSuspectLowBpp(cover, audit, { normalizedTitleAuthor: key });
+    await reportSuspectLowBpp(cover, audit, {
+      normalizedTitleAuthor: writeKey,
+    });
 
     const resultRow = {
       ...pendingRow,

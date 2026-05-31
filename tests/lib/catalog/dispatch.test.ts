@@ -53,10 +53,37 @@ describe("dispatchResolve", () => {
       author: "A",
       fields: ["publisher"],
     });
-    expect(resolveTitleAuthorSpy).toHaveBeenCalledWith(admin, "T", "A", deps, [
-      "publisher",
-    ]);
+    expect(resolveTitleAuthorSpy).toHaveBeenCalledWith(
+      admin,
+      "T",
+      "A",
+      deps,
+      ["publisher"],
+      undefined,
+    );
     expect(resolveIsbnSpy).not.toHaveBeenCalled();
+  });
+
+  it("ta work → resolveTitleAuthor with stored normalizedTitleAuthor as lookup key (#489 Fix A)", async () => {
+    const admin = createMockSupabase();
+    const deps = { rateLimiters: {} as any, mutex: undefined };
+    await dispatchResolve(admin as any, deps as any, "user-1", {
+      kind: "ta",
+      title: "1984 (adaptation)",
+      author: "Michael Dean, George Orwell",
+      fields: ["cover"],
+      normalizedTitleAuthor: "1984|george orwell",
+    });
+    // The stored key must flow through as the resolver's lookupKey (6th arg)
+    // so a drifted row updates in place instead of forking.
+    expect(resolveTitleAuthorSpy).toHaveBeenCalledWith(
+      admin,
+      "1984 (adaptation)",
+      "Michael Dean, George Orwell",
+      deps,
+      ["cover"],
+      "1984|george orwell",
+    );
   });
 });
 
@@ -99,6 +126,44 @@ describe("parseWorkPayload", () => {
     });
     const r = parseWorkPayload(body);
     expect(r.ok).toBe(true);
+  });
+
+  it("TA payload with normalizedTitleAuthor round-trips (#489 Fix A)", () => {
+    const body = JSON.stringify({
+      userId: "u",
+      item: {
+        kind: "ta",
+        title: "1984 (adaptation)",
+        author: "Michael Dean, George Orwell",
+        normalizedTitleAuthor: "1984|george orwell",
+      },
+    });
+    const r = parseWorkPayload(body);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.item.kind === "ta") {
+      expect(r.value.item.normalizedTitleAuthor).toBe("1984|george orwell");
+    }
+  });
+
+  it("TA payload with non-string normalizedTitleAuthor drops the field (not forwarded)", () => {
+    const body = JSON.stringify({
+      userId: "u",
+      item: {
+        kind: "ta",
+        title: "T",
+        author: "A",
+        normalizedTitleAuthor: 12345,
+      },
+    });
+    const r = parseWorkPayload(body);
+    // A malformed key is dropped (treated as absent → resolver re-derives),
+    // rather than failing the whole payload to the DLQ: title+author are
+    // still valid, so the resolve should proceed, just without Fix A's
+    // in-place targeting.
+    expect(r.ok).toBe(true);
+    if (r.ok && r.value.item.kind === "ta") {
+      expect(r.value.item.normalizedTitleAuthor).toBeUndefined();
+    }
   });
 
   it("non-JSON body rejected", () => {

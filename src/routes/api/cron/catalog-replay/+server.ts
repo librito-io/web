@@ -79,7 +79,20 @@ export const GET: RequestHandler = async ({ request, url }) => {
       return [{ kind: "isbn", isbn: r.isbn, ctx, fields }];
     }
     if (r.title && r.author) {
-      return [{ kind: "ta", title: r.title, author: r.author, fields }];
+      // Thread the row's stored key so a drifted row re-resolves in place
+      // rather than forking (issue #489 Fix A) — same fix as the admin
+      // requeue caller. `select_replay_candidates` returns it on every row.
+      return [
+        {
+          kind: "ta",
+          title: r.title,
+          author: r.author,
+          fields,
+          ...(r.normalized_title_author
+            ? { normalizedTitleAuthor: r.normalized_title_author }
+            : {}),
+        },
+      ];
     }
     return [];
   });

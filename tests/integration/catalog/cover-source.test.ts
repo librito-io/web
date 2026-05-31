@@ -116,5 +116,31 @@ describe.skipIf(SKIP)(
       expect(rows[0].cover_source).toBe("openlibrary_search_title");
       expect(rows[0].cover_max_width).toBe(600);
     });
+
+    it("upsert_book_catalog_by_title_author accepts cover_source='openlibrary_work'", async () => {
+      const admin = getAdmin();
+      const taKey = "test-cover-source-openlibrary-work";
+      await sql`DELETE FROM book_catalog WHERE normalized_title_author = ${taKey}`;
+      const { error } = await admin.rpc("upsert_book_catalog_by_title_author", {
+        p_row: {
+          normalized_title_author: taKey,
+          storage_path: "wk/wk.jpg",
+          cover_storage_backend: "cloudflare-images",
+          image_sha256:
+            "0011223300112233001122330011223300112233001122330011223300112233",
+          cover_source: "openlibrary_work",
+          cover_max_width: 1300,
+          last_attempted_at: new Date().toISOString(),
+          fetched_at: new Date().toISOString(),
+          attempt_count: 1,
+        },
+      });
+      expect(error).toBeNull();
+      const rows = await sql<{ cover_source: string }[]>`
+        SELECT cover_source FROM book_catalog WHERE normalized_title_author = ${taKey} AND isbn IS NULL
+      `;
+      expect(rows[0]?.cover_source).toBe("openlibrary_work");
+      await sql`DELETE FROM book_catalog WHERE normalized_title_author = ${taKey}`;
+    });
   },
 );

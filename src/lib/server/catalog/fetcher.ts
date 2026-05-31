@@ -1133,19 +1133,23 @@ export async function resolveIsbn(
     //    fetch entirely. Per-field gating extends to cover.
     const coverShouldAttempt = shouldAttempt("cover", existing ?? {}, now);
 
-    // Build the work-cover walker from the ISBN's OL work key (skips
-    // search/rank — the ISBN already identifies the work). Lazy: the walker
-    // only fetches covers if OL-direct + GB miss the tier floor.
-    // Gate on coverShouldAttempt: building the walker fetches the OL work
-    // doc, so skip it entirely on warm-cover / field-replay resolves where
-    // the cover is already stored and the walker would never be consulted.
+    // Build the work-cover walker from the ISBN's OL work (skips search/rank
+    // — the ISBN already identifies the work). Reuse the work doc already
+    // fetched by loadOpenLibraryData via the work-doc lookup so we don't
+    // re-GET /works/{id}.json (#486); fall back to work-key when that fetch
+    // came back empty. Lazy: the walker only fetches covers if OL-direct + GB
+    // miss the tier floor. Gate on coverShouldAttempt: building the walker can
+    // fetch (editions) and is pointless on warm-cover / field-replay resolves
+    // where the cover is already stored and the walker is never consulted.
     const isbnWorkKey = olData?.works?.[0]?.key;
+    const isbnWorkLookup: WorkLookup | null = isbnWorkKey
+      ? olWork
+        ? { kind: "work-doc", workKey: isbnWorkKey, olWork }
+        : { kind: "work-key", workKey: isbnWorkKey }
+      : null;
     const { walker: workCoverWalker } =
-      coverShouldAttempt && isbnWorkKey
-        ? await buildWorkResolution(
-            { kind: "work-key", workKey: isbnWorkKey },
-            deps,
-          )
+      coverShouldAttempt && isbnWorkLookup
+        ? await buildWorkResolution(isbnWorkLookup, deps)
         : { walker: undefined };
 
     const cover = coverShouldAttempt
@@ -1597,10 +1601,18 @@ export async function resolveTitleAuthor(
     //    the cover walker AND the OL work doc for the description/subjects legs.
     //    Replaces the old standalone limit=1 search; resolveWork makes one
     //    limit=10 search internally and returns the winning doc as searchDoc.
-    const { resolved, walker } = await buildWorkResolution(
-      { kind: "title-author", title, author },
-      deps,
-    );
+    //
+    //    Gate the resolve (2 OL calls: search + work doc) on its consumers —
+    //    cover, description, subjects. A field-replay resolve where those are
+    //    already stored and only publisher/published_date are due would
+    //    otherwise burn both calls for nothing (mirrors the ISBN-path gate).
+    const taWorkNeeded =
+      shouldAttempt("cover", existing ?? {}, now) ||
+      shouldAttempt("description", existing ?? {}, now) ||
+      shouldAttempt("subjects", existing ?? {}, now);
+    const { resolved, walker } = taWorkNeeded
+      ? await buildWorkResolution({ kind: "title-author", title, author }, deps)
+      : { resolved: null, walker: undefined };
 
     const metadata: CatalogMetadata = {};
     if (resolved?.searchDoc?.title) metadata.title = resolved.searchDoc.title;

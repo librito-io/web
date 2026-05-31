@@ -2193,8 +2193,10 @@ describe("resolveIsbn – ISBN sibling-lift via work-covers (#470)", () => {
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
-      // OL work doc — fetched both by loadOpenLibraryData (leg metadata) and
-      // buildWorkResolution (walker); same URL so one handler covers both.
+      // OL work doc — fetched once by loadOpenLibraryData (leg metadata); the
+      // walker reuses that doc via the work-doc lookup (#486), so this handler
+      // is hit a single time per resolve. The dedicated single-fetch test
+      // below asserts the count.
       if (url.includes("openlibrary.org/works/OL2W.json")) {
         return new Response(JSON.stringify({ covers: [77001] }), {
           status: 200,
@@ -2250,6 +2252,70 @@ describe("resolveIsbn – ISBN sibling-lift via work-covers (#470)", () => {
       .p_row;
     // Walker (leg 3) resolved the work edition cover; direct-ISBN + GB both failed.
     expect(p_row.cover_source).toBe("openlibrary_work");
+  });
+
+  it("cold cover resolve fetches /works/{id}.json exactly once (no double-fetch, #486)", async () => {
+    const supabase = coldMissSupabase();
+    let workDocFetches = 0;
+
+    const fetchFn = vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/api/books")) {
+        return new Response(
+          JSON.stringify({
+            "ISBN:9780743273565": {
+              title: "Test Book",
+              works: [{ key: "/works/OL2W" }],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("openlibrary.org/works/OL2W.json")) {
+        workDocFetches++;
+        return new Response(JSON.stringify({ covers: [77001] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.startsWith("https://covers.openlibrary.org/b/isbn/")) {
+        return new Response(null, { status: 404 });
+      }
+      if (url.includes("covers.openlibrary.org/b/id/77001")) {
+        return new Response(FIXTURE_1500x2250, {
+          status: 200,
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(gbVolumesResponse(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("itunes.apple.com")) {
+        return new Response(JSON.stringify({ resultCount: 0, results: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array(512), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveIsbn(supabase as never, "9780743273565", deps({ fetchFn }));
+
+    // loadOpenLibraryData fetches the work doc; the walker reuses it via the
+    // work-doc lookup rather than re-fetching. Exactly one GET.
+    expect(workDocFetches).toBe(1);
   });
 });
 

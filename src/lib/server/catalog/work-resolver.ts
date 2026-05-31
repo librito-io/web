@@ -172,7 +172,11 @@ export const TOTAL_PROBE_CAP = 12;
 
 export type WorkLookup =
   | { kind: "title-author"; title: string; author: string }
-  | { kind: "work-key"; workKey: string };
+  | { kind: "work-key"; workKey: string }
+  // Caller already holds the OL work doc (e.g. resolveIsbn's loadOpenLibraryData
+  // fetch) — skip search/rank AND the work-doc fetch, reuse the supplied doc.
+  // Avoids a duplicate /works/{id}.json GET on the cold ISBN cover path.
+  | { kind: "work-doc"; workKey: string; olWork: OpenLibraryWork };
 
 /**
  * Injected OL fns. `resolveWork` takes these (rather than importing the
@@ -217,6 +221,8 @@ export async function resolveWork(
 ): Promise<ResolvedWork | null> {
   let workKey: string;
   let searchDoc: OpenLibrarySearchDoc | null = null;
+  // Pre-supplied work doc (work-doc lookup) short-circuits the fetch below.
+  let prefetchedWork: OpenLibraryWork | null = null;
 
   if (lookup.kind === "title-author") {
     const docs = await deps.searchWorks(lookup.title, lookup.author);
@@ -227,6 +233,10 @@ export async function resolveWork(
     if (!winner?.key) return null;
     workKey = winner.key;
     searchDoc = winner;
+  } else if (lookup.kind === "work-doc") {
+    if (!lookup.workKey) return null;
+    workKey = lookup.workKey;
+    prefetchedWork = lookup.olWork;
   } else {
     if (!lookup.workKey) return null;
     workKey = lookup.workKey;
@@ -234,7 +244,8 @@ export async function resolveWork(
 
   const workId = workKey.replace(OL_WORK_KEY_PREFIX, "");
   if (!OL_WORK_ID_RE.test(workId)) return null;
-  const olWork = await deps.fetchWork(workId);
+  // Reuse the caller-supplied work doc when present; otherwise fetch it.
+  const olWork = prefetchedWork ?? (await deps.fetchWork(workId));
   if (!olWork) return null;
 
   const workCoverIds = collectCoverIds([olWork.covers ?? []]);

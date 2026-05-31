@@ -249,6 +249,42 @@ describe("resolveWork (work-key)", () => {
   });
 });
 
+describe("resolveWork (work-doc)", () => {
+  it("reuses the supplied work doc without calling fetchWork (#486)", async () => {
+    let fetchWorkCalls = 0;
+    const r = await resolveWork(
+      {
+        kind: "work-doc",
+        workKey: "/works/OL42W",
+        olWork: { description: "supplied", covers: [7, -1, 8] },
+      },
+      deps({
+        fetchWork: async () => {
+          fetchWorkCalls++;
+          return null;
+        },
+      }),
+    );
+    expect(fetchWorkCalls).toBe(0);
+    expect(r?.workKey).toBe("/works/OL42W");
+    expect(r?.olWork?.description).toBe("supplied");
+    expect(r?.workCoverIds).toEqual([7, 8]);
+    expect(r?.searchDoc).toBeNull();
+  });
+
+  it("still enforces the work-id shape guard (malformed key → null, no editions path)", async () => {
+    const r = await resolveWork(
+      {
+        kind: "work-doc",
+        workKey: "/works/garbage/..%2Fadmin",
+        olWork: { covers: [1] },
+      },
+      deps(),
+    );
+    expect(r).toBeNull();
+  });
+});
+
 import { WorkCoverWalker } from "../../../src/lib/server/catalog/work-resolver";
 import type { ResolvedWork } from "../../../src/lib/server/catalog/work-resolver";
 

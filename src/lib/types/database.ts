@@ -743,6 +743,14 @@ export type Database = {
           status: string
         }[]
       }
+      merge_ta_catalog_dups: {
+        Args: {
+          p_admin_user_id: string
+          p_loser_ids: string[]
+          p_survivor_id: string
+        }
+        Returns: number
+      }
       pg_cron_failure_summary: {
         Args: never
         Returns: {

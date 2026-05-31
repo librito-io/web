@@ -102,6 +102,52 @@
   </form>
 </section>
 
+{#if !row.isbn}
+  <section style="margin-top:1.5rem;">
+    <h2>Merge duplicate rows</h2>
+    <p style="color:#555;">
+      Collapse other title+author rows that are the same book into THIS row (the
+      survivor). Losers are deleted; their cover/metadata are not merged — pick
+      the row with the best data as the survivor before merging.
+    </p>
+    <form method="POST" action="?/mergeDuplicates">
+      {#if data.mergeCandidates.length > 0}
+        <p>
+          Suggested duplicates (same normalized title+author, different key):
+        </p>
+        {#each data.mergeCandidates as c (c.id)}
+          <label style="display:block;">
+            <input type="checkbox" name="loser_id" value={c.id} />
+            <code>{c.normalized_title_author ?? "(no key)"}</code> —
+            {c.title ?? "(no title)"} / {c.author ?? "(no author)"}
+            {#if c.storage_path}
+              (cover {c.cover_max_width ?? "?"}px, {c.cover_source ?? "—"})
+            {:else}
+              (no cover)
+            {/if}
+          </label>
+        {/each}
+      {:else}
+        <p style="color:#555;">No auto-detected duplicates.</p>
+      {/if}
+      <label style="display:block; margin-top:0.5rem;">
+        Additional duplicate row IDs (one per line — for differently-spelled
+        titles a human recognizes as the same book):
+        <textarea
+          name="loser_id_manual"
+          rows="3"
+          cols="60"
+          placeholder="00000000-0000-0000-0000-000000000000"
+          aria-label="Additional duplicate row IDs"
+        ></textarea>
+      </label>
+      <button type="submit" style="margin-top:0.5rem;"
+        >Merge selected into this row</button
+      >
+    </form>
+  </section>
+{/if}
+
 <p style="margin-top:2rem;">
   <a href="/app/admin/catalog/{row.id}/history">View action history →</a>
 </p>

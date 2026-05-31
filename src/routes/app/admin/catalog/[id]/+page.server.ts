@@ -11,6 +11,7 @@ import {
 } from "$lib/server/catalog/scheduling";
 import { SERVICE_USER_ID } from "$lib/server/catalog/constants";
 import { TRACKED_FIELDS } from "$lib/catalog/tracked-fields";
+import { normalizeTitleAuthor } from "$lib/server/catalog/title-author";
 import { logger } from "$lib/server/log";
 
 const COVER_MAX_BYTES = 5 * 1024 * 1024;
@@ -24,6 +25,10 @@ const DESCRIPTION_MAX_CHARS = 8 * 1024;
 // at the boundary so a setIsbn slip can't write arbitrary strings into
 // the catalog key.
 const ISBN_RE = /^(?:97[89])?\d{9}[\dX]$/i;
+// Loser catalog ids for the mergeDuplicates action are validated at the
+// boundary so a malformed value can't reach the RPC's uuid[] param.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export const load: PageServerLoad = async ({ params }) => {
   const id = requireUuidParam(params.id);
@@ -104,7 +109,45 @@ export const load: PageServerLoad = async ({ params }) => {
     ).values(),
   );
 
-  return { row, dlqArchive };
+  // Auto-suggest drift-dup candidates (#489 Fix C): other ISBN-less rows
+  // whose OWN canonical normalizeTitleAuthor(title, author) equals this
+  // row's canonical key but are stored under a different key. This catches
+  // the pure drift case exactly. Spelling dups ("1984" vs "Nineteen
+  // Eighty-Four") normalize differently and are NOT surfaced here — the
+  // operator merges those by pasting loser ids (only a human can judge two
+  // differently-spelled titles are one book).
+  //
+  // Bounded scan (200) over ISBN-less rows. book_catalog is shared
+  // per-ISBN/per-(title,author) data deduplicated across all users, so it
+  // stays modest (hundreds, not per-user millions) at the 1k-user target;
+  // revisit with an indexed approach if the TA partition ever grows large.
+  let mergeCandidates: Array<{
+    id: string;
+    title: string | null;
+    author: string | null;
+    normalized_title_author: string | null;
+    storage_path: string | null;
+    cover_max_width: number | null;
+    cover_source: string | null;
+  }> = [];
+  if (!row.isbn && row.title && row.author) {
+    const canonical = normalizeTitleAuthor(row.title, row.author);
+    if (canonical) {
+      const { data: taRows } = await admin
+        .from("book_catalog")
+        .select(
+          "id, title, author, normalized_title_author, storage_path, cover_max_width, cover_source",
+        )
+        .is("isbn", null)
+        .neq("id", row.id)
+        .limit(200);
+      mergeCandidates = (taRows ?? []).filter(
+        (r) => normalizeTitleAuthor(r.title, r.author) === canonical,
+      );
+    }
+  }
+
+  return { row, dlqArchive, mergeCandidates };
 };
 
 export const actions: Actions = {
@@ -291,6 +334,50 @@ export const actions: Actions = {
     }
 
     return { ok: true, scheduledBgResolve: work.length > 0 };
+  },
+
+  // Collapse one or more duplicate TA rows (same book, different keys) into
+  // the row being viewed (the survivor). The operator chooses which rows are
+  // duplicates and which survives — no heuristic can reliably tell a spelling
+  // dup ("1984" vs "Nineteen Eighty-Four") is one book (issue #489 Fix C).
+  // The merge_ta_catalog_dups RPC deletes the losers wholesale, preserving
+  // audit history attached to the survivor.
+  mergeDuplicates: async (event) => {
+    const user = await requireAdmin(event);
+    const id = requireUuidParam(event.params.id);
+    const fd = await event.request.formData();
+    // Two input sources: auto-suggest checkboxes (loser_id) + a free-text
+    // field (loser_id_manual, whitespace/newline-separated) for spelling
+    // dups the auto-detector can't surface. Union + dedup.
+    const fromCheckboxes = fd.getAll("loser_id").map((v) => String(v));
+    const fromManual = String(fd.get("loser_id_manual") ?? "").split(/\s+/);
+    const loserIds = [
+      ...new Set(
+        [...fromCheckboxes, ...fromManual]
+          .map((v) => v.trim())
+          .filter((v) => v.length > 0),
+      ),
+    ];
+    if (loserIds.length === 0) {
+      return fail(400, {
+        message: "select at least one duplicate row to merge",
+      });
+    }
+    const bad = loserIds.find((v) => !UUID_RE.test(v));
+    if (bad) {
+      return fail(400, { message: `invalid catalog id: ${bad}` });
+    }
+    if (loserIds.includes(id)) {
+      return fail(400, { message: "cannot merge a row into itself" });
+    }
+    const admin = createAdminClient();
+    const { error: rpcErr } = await admin.rpc("merge_ta_catalog_dups", {
+      p_admin_user_id: user.id,
+      p_survivor_id: id,
+      p_loser_ids: loserIds,
+    });
+    if (rpcErr) return fail(500, { message: rpcErr.message });
+    return { ok: true };
   },
 };
 

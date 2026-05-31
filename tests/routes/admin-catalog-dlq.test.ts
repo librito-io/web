@@ -126,6 +126,7 @@ beforeEach(() => {
   supabase._resultsQueue.clear();
   supabase._chainCalls.length = 0;
   supabase._updateCalls.length = 0;
+  supabase._rpcCalls.length = 0;
   scheduleSpy.mockReset();
   runInBackgroundSpy.mockReset();
   runInBackgroundSpy.mockImplementation((fn: () => unknown) => fn());
@@ -178,7 +179,12 @@ describe("load /app/admin/catalog/[id] — ISBN-only path", () => {
 describe("load /app/admin/catalog/[id] — TA-only path", () => {
   it("returns matching DLQ rows when row has title+author but no isbn", async () => {
     const row = makeCatalogRow({ title: "My Book", author: "My Author" });
-    supabase._results.set("book_catalog.select", { data: row, error: null });
+    // Two book_catalog.select calls on the TA path: (1) the row fetch,
+    // (2) the mergeCandidates scan (#489 Fix C). Queue distinct results.
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: row, error: null },
+      { data: [], error: null },
+    ]);
 
     const dlqRows = [makeDlqRow(5)];
     supabase._results.set("catalog_dlq_archive.select", {
@@ -395,5 +401,86 @@ describe("requeue action — stamp scoping", () => {
       (c) => c.table === "catalog_dlq_archive",
     );
     expect(updateCall).toBeUndefined();
+  });
+});
+
+// ─── mergeDuplicates action (#489 Fix C) ─────────────────────────────────────
+
+describe("mergeDuplicates action", () => {
+  const LOSER_1 = "22222222-2222-4222-8222-222222222222";
+  const LOSER_2 = "33333333-3333-4333-8333-333333333333";
+
+  it("calls merge_ta_catalog_dups with survivor=current row and the parsed loser ids", async () => {
+    supabase._results.set("rpc.merge_ta_catalog_dups", {
+      data: 2,
+      error: null,
+    });
+
+    const result = await actions.mergeDuplicates(
+      buildActionEvent({ loser_id: [LOSER_1, LOSER_2] }),
+    );
+    expect(result).toMatchObject({ ok: true });
+
+    const rpcCall = supabase._rpcCalls.find(
+      (c) => c.name === "merge_ta_catalog_dups",
+    );
+    expect(rpcCall).toBeDefined();
+    expect(rpcCall!.args).toMatchObject({
+      p_admin_user_id: ADMIN_USER.id,
+      p_survivor_id: CATALOG_ID,
+      p_loser_ids: [LOSER_1, LOSER_2],
+    });
+  });
+
+  it("fails 400 when no loser ids supplied (no RPC call)", async () => {
+    const result = await actions.mergeDuplicates(buildActionEvent({}));
+    expect(result).toMatchObject({ status: 400 });
+    expect(
+      supabase._rpcCalls.find((c) => c.name === "merge_ta_catalog_dups"),
+    ).toBeUndefined();
+  });
+
+  it("fails 400 when a loser id is not a UUID (no RPC call)", async () => {
+    const result = await actions.mergeDuplicates(
+      buildActionEvent({ loser_id: ["not-a-uuid"] }),
+    );
+    expect(result).toMatchObject({ status: 400 });
+    expect(
+      supabase._rpcCalls.find((c) => c.name === "merge_ta_catalog_dups"),
+    ).toBeUndefined();
+  });
+
+  it("surfaces RPC failure as fail(500)", async () => {
+    supabase._results.set("rpc.merge_ta_catalog_dups", {
+      data: null,
+      error: { message: "survivor must be a TA-keyed row" },
+    });
+    const result = await actions.mergeDuplicates(
+      buildActionEvent({ loser_id: [LOSER_1] }),
+    );
+    expect(result).toMatchObject({ status: 500 });
+  });
+
+  it("unions checkbox loser_id with newline-separated loser_id_manual, deduped", async () => {
+    supabase._results.set("rpc.merge_ta_catalog_dups", {
+      data: 2,
+      error: null,
+    });
+
+    const result = await actions.mergeDuplicates(
+      buildActionEvent({
+        loser_id: [LOSER_1],
+        // Manual field: whitespace + a duplicate of LOSER_1 + a new id.
+        loser_id_manual: `  ${LOSER_2}\n${LOSER_1}\n\n`,
+      }),
+    );
+    expect(result).toMatchObject({ ok: true });
+
+    const rpcCall = supabase._rpcCalls.find(
+      (c) => c.name === "merge_ta_catalog_dups",
+    );
+    const loserIds = (rpcCall!.args as { p_loser_ids: string[] }).p_loser_ids;
+    // Deduped union — LOSER_1 once, LOSER_2 once.
+    expect([...loserIds].sort()).toEqual([LOSER_1, LOSER_2].sort());
   });
 });

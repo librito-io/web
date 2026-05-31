@@ -110,3 +110,21 @@ export function rankWorkCandidates(
       return a.i - b.i;
     })[0].doc;
 }
+
+/**
+ * Flatten ordered cover-ID lists into one deduped list, dropping OL "no
+ * cover" sentinels (id <= 0). Preserves first-seen order. Pure — no fetch,
+ * no cap (capping is the WorkCoverWalker's TOTAL_PROBE_CAP job).
+ */
+export function collectCoverIds(coverIdLists: number[][]): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const list of coverIdLists) {
+    for (const id of list) {
+      if (id <= 0 || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}

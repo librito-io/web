@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { rankWorkCandidates } from "../../../src/lib/server/catalog/work-resolver";
+import {
+  rankWorkCandidates,
+  collectCoverIds,
+} from "../../../src/lib/server/catalog/work-resolver";
 import type { OpenLibrarySearchDoc } from "../../../src/lib/server/catalog/types";
 
 const martian = { title: "The Martian", author: "Andy Weir" };
@@ -110,5 +113,21 @@ describe("rankWorkCandidates", () => {
       },
     ];
     expect(rankWorkCandidates(docs, martian)?.key).toBe("/works/OLD");
+  });
+});
+
+describe("collectCoverIds", () => {
+  it("flattens lists in order, strips id<=0 sentinels, dedupes first-seen", () => {
+    expect(
+      collectCoverIds([
+        [11447888, -1, 10860735],
+        [10860735, 0, 8223196],
+      ]),
+    ).toEqual([11447888, 10860735, 8223196]);
+  });
+
+  it("returns [] for empty input", () => {
+    expect(collectCoverIds([])).toEqual([]);
+    expect(collectCoverIds([[], []])).toEqual([]);
   });
 });

@@ -300,6 +300,46 @@ describe("requeue action — stamp scoping", () => {
     expect(inFilter!.args[1]).toEqual([42, 43]);
   });
 
+  it("threads the TA row's stored normalized_title_author into the scheduled work (#489 Fix A)", async () => {
+    // ISBN-less (TA) row whose stored key has drifted from its title/author
+    // (the #449 ctx-override froze the key). Requeue must pass the STORED
+    // key so the re-resolve updates this row in place instead of forking.
+    supabase._results.set("book_catalog.select", {
+      data: {
+        isbn: null,
+        title: "1984 (adaptation)",
+        author: "Michael Dean, George Orwell",
+        normalized_title_author: "1984|george orwell",
+      },
+      error: null,
+    });
+    supabase._results.set("rpc.admin_apply_action", {
+      data: null,
+      error: null,
+    });
+
+    const result = await actions.requeue(
+      buildActionEvent({ field_cover: "on" }),
+    );
+    expect(result).toMatchObject({ ok: true });
+
+    expect(scheduleSpy).toHaveBeenCalledTimes(1);
+    const [, work] = scheduleSpy.mock.calls[0] as unknown as [
+      string,
+      unknown[],
+      unknown,
+    ];
+    expect(work).toEqual([
+      {
+        kind: "ta",
+        title: "1984 (adaptation)",
+        author: "Michael Dean, George Orwell",
+        fields: ["cover"],
+        normalizedTitleAuthor: "1984|george orwell",
+      },
+    ]);
+  });
+
   it("returns fail(500) when stamp UPDATE errors", async () => {
     supabase._results.set("book_catalog.select", {
       data: {

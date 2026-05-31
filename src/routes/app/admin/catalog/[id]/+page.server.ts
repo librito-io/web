@@ -251,7 +251,21 @@ export const actions: Actions = {
     if (row?.isbn) {
       work = [{ kind: "isbn", isbn: row.isbn, ctx, fields }];
     } else if (row?.title && row.author) {
-      work = [{ kind: "ta", title: row.title, author: row.author, fields }];
+      // Pass the row's STORED key so the re-resolve targets THIS row by its
+      // current key, even if its title/author have drifted away from what
+      // the key was derived from (issue #489 Fix A). Without it the resolver
+      // re-derives a key from the drifted title and forks a duplicate row.
+      work = [
+        {
+          kind: "ta",
+          title: row.title,
+          author: row.author,
+          fields,
+          ...(row.normalized_title_author
+            ? { normalizedTitleAuthor: row.normalized_title_author }
+            : {}),
+        },
+      ];
     }
     if (work.length > 0) {
       runInBackground(() =>

@@ -184,7 +184,7 @@ describe("GET /api/cron/catalog-replay", () => {
     ]);
   });
 
-  it("maps ISBN-less row with title+author into kind=ta work", async () => {
+  it("maps ISBN-less row with title+author into kind=ta work, threading the stored key (#489 Fix A)", async () => {
     supabase._results.set("rpc.select_replay_candidates", {
       data: [
         {
@@ -200,12 +200,16 @@ describe("GET /api/cron/catalog-replay", () => {
     });
     await GET(buildEvent({ Authorization: "Bearer secret" }));
     const [, work] = scheduleSpy.mock.calls[0] as [string, unknown[], unknown];
+    // The cron knows the row's stored key; it must pass it so a drifted row
+    // re-resolves in place instead of forking (the cron is the second caller
+    // with the same bug as admin requeue).
     expect(work).toEqual([
       {
         kind: "ta",
         title: "Ruth",
         author: "Kate Riley",
         fields: ["publisher"],
+        normalizedTitleAuthor: "ruth|kate-riley",
       },
     ]);
   });

@@ -40,7 +40,14 @@ export async function dispatchResolve(
   if (item.kind === "isbn") {
     await resolveIsbn(admin, item.isbn, deps, item.ctx, item.fields);
   } else {
-    await resolveTitleAuthor(admin, item.title, item.author, deps, item.fields);
+    await resolveTitleAuthor(
+      admin,
+      item.title,
+      item.author,
+      deps,
+      item.fields,
+      item.normalizedTitleAuthor,
+    );
   }
 }
 
@@ -142,11 +149,26 @@ export function parseWorkPayload(body: string): ParsedPayload {
     const fieldsResult = parseFields(it.fields);
     if (!fieldsResult.ok) return { ok: false, error: fieldsResult.error };
     const fields = fieldsResult.value;
+    // Optional stored key (#489 Fix A). A non-string / empty value is
+    // dropped (treated as absent → resolver re-derives) rather than failing
+    // the payload: title+author are still valid, so the resolve should
+    // proceed without in-place targeting rather than land in the DLQ.
+    const normalizedTitleAuthor =
+      typeof it.normalizedTitleAuthor === "string" &&
+      it.normalizedTitleAuthor.trim().length > 0
+        ? it.normalizedTitleAuthor
+        : undefined;
     return {
       ok: true,
       value: {
         userId,
-        item: { kind: "ta", title: it.title, author: it.author, fields },
+        item: {
+          kind: "ta",
+          title: it.title,
+          author: it.author,
+          fields,
+          ...(normalizedTitleAuthor ? { normalizedTitleAuthor } : {}),
+        },
       },
     };
   }

@@ -4053,3 +4053,90 @@ describe("resolveTitleAuthor – caller args override stub metadata (#449)", () 
     expect(p_row.author).toBe("Meg Josephson");
   });
 });
+
+describe("resolveTitleAuthor – find by stored lookup key (#489 Fix A)", () => {
+  // A drifted row whose stored key does NOT derive from its own title/author
+  // (the #449 ctx-override froze the key at creation). Stale fail_reasons so
+  // shouldAttempt is true and the resolver proceeds past the cache gate.
+  function driftedRow(): Record<string, unknown> {
+    const stale = "2026-01-22T00:00:00Z"; // > 90-day TTL before fixture "now"
+    return {
+      isbn: null,
+      normalized_title_author: "1984|george orwell", // frozen at creation
+      title: "1984 (adaptation)", // drifted via #449 override
+      author: "Michael Dean, George Orwell",
+      storage_path: null,
+      pending_storage: false,
+      last_attempted_at: stale,
+      attempt_count: 1,
+      cover_attempted_at: stale,
+      cover_fail_reason: "provider_no_data",
+      description_attempted_at: stale,
+      description_fail_reason: "provider_no_data",
+      publisher_attempted_at: stale,
+      publisher_fail_reason: "provider_no_data",
+      published_date_attempted_at: stale,
+      published_date_fail_reason: "provider_no_data",
+      subjects_attempted_at: stale,
+      subjects_fail_reason: "provider_no_data",
+      page_count_attempted_at: stale,
+      page_count_fail_reason: "provider_no_data",
+    };
+  }
+
+  function emptyUpstreamFetch(): typeof fetch {
+    return vi.fn(async (input: URL | RequestInfo) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("openlibrary.org/search.json")) {
+        return new Response(JSON.stringify({ numFound: 0, docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("googleapis.com/books")) {
+        return new Response(
+          JSON.stringify({ kind: "books#volumes", totalItems: 0, items: [] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(null, { status: 404 });
+    }) as unknown as typeof fetch;
+  }
+
+  it("SELECTs the existing row by the stored lookup key, not the re-derived key", async () => {
+    const supabase = createMockSupabase();
+    // 1st select → initial lookup HITS the drifted row; 2nd → selectBySha miss.
+    supabase._resultsQueue.set("book_catalog.select", [
+      { data: [driftedRow()], error: null },
+      { data: null, error: null },
+    ]);
+    supabase._results.set("rpc.upsert_book_catalog_by_title_author", {
+      data: null,
+      error: null,
+    });
+    supabase._results.set("book_catalog.update", { data: null, error: null });
+
+    await resolveTitleAuthor(
+      supabase as never,
+      "1984 (adaptation)",
+      "Michael Dean, George Orwell",
+      deps({ fetchFn: emptyUpstreamFetch(), mutex: noopMutex }),
+      undefined, // _fields
+      "1984|george orwell", // lookupKey — the row's STORED key
+    );
+
+    // The initial book_catalog lookup must filter normalized_title_author by
+    // the STORED lookup key, never by the re-derived drifted key.
+    const eqCalls = supabase._chainCalls.filter(
+      (c) =>
+        c.operation === "select" &&
+        c.method === "eq" &&
+        c.args[0] === "normalized_title_author",
+    );
+    const filteredKeys = eqCalls.map((c) => c.args[1]);
+    expect(filteredKeys).toContain("1984|george orwell");
+    expect(filteredKeys).not.toContain(
+      "1984 adaptation|michael dean george orwell",
+    );
+  });
+});

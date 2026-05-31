@@ -1545,9 +1545,22 @@ export async function resolveTitleAuthor(
   // Replay-cron field-scoping param; see resolveIsbn for rationale.
   // Optimization tracked in #439 — not consumed yet.
   _fields?: TrackedField[],
+  // Stored `normalized_title_author` of the catalog row being re-resolved.
+  // When a caller (admin requeue, replay cron) re-resolves an EXISTING row,
+  // it passes the row's stored key here so the lookup + upsert target that
+  // row by its current key — even if the row's title/author have since
+  // drifted away from what the key was derived from. Without it, the
+  // resolver re-derives the key from the (possibly drifted) title/author,
+  // misses the existing row's `ON CONFLICT` target, and INSERTs a duplicate
+  // (issue #489 Fix A). Undefined for a fresh cold-resolve (no row yet).
+  lookupKey?: string,
 ): Promise<ResolveResult> {
   const key = normalizeTitleAuthor(title, author);
   if (!key) throw new InvalidTitleAuthorError();
+  // The key the EXISTING row is found and written under. Prefer the caller's
+  // stored key (Fix A) so a drifted row updates in place rather than forking;
+  // fall back to the derived key for a fresh resolve.
+  const rowKey = lookupKey ?? key;
   const now = currentTime(deps);
   const upload = deps.coverStorage?.uploadCover ?? defaultUploadCover;
   const mutex = deps.mutex ?? noopMutex;
@@ -1556,7 +1569,7 @@ export async function resolveTitleAuthor(
     .from("book_catalog")
     .select(RESOLVE_SELECT)
     .is("isbn", null)
-    .eq("normalized_title_author", key)
+    .eq("normalized_title_author", rowKey)
     .maybeSingle();
   if (selErr) throw new Error(`book_catalog select: ${selErr.message}`);
 
@@ -1583,7 +1596,7 @@ export async function resolveTitleAuthor(
     return {
       cached: false,
       rateLimited: true,
-      row: existing ?? { normalized_title_author: key },
+      row: existing ?? { normalized_title_author: rowKey },
     };
   }
 
@@ -1593,7 +1606,7 @@ export async function resolveTitleAuthor(
       return {
         cached: false,
         rateLimited: true,
-        row: existing ?? { normalized_title_author: key },
+        row: existing ?? { normalized_title_author: rowKey },
       };
     }
 
@@ -1775,7 +1788,7 @@ export async function resolveTitleAuthor(
 
     const pendingRow = buildPendingRow({
       isbn: null,
-      normalizedTitleAuthor: key,
+      normalizedTitleAuthor: rowKey,
       cover,
       coverStateInUpsert,
       coverFailReason,
@@ -1815,12 +1828,12 @@ export async function resolveTitleAuthor(
             ((existing?.cover_attempts as number | undefined) ?? 0) + 1,
         })
         .is("isbn", null)
-        .eq("normalized_title_author", key);
+        .eq("normalized_title_author", rowKey);
       if (finalErr)
         throw new Error(`book_catalog storage finalize: ${finalErr.message}`);
     }
 
-    await reportSuspectLowBpp(cover, audit, { normalizedTitleAuthor: key });
+    await reportSuspectLowBpp(cover, audit, { normalizedTitleAuthor: rowKey });
 
     const resultRow = {
       ...pendingRow,

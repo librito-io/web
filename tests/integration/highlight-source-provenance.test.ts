@@ -70,14 +70,15 @@ describe.skipIf(SKIP)("highlight source provenance (#496)", () => {
   });
 
   it("rejects a papers3 row with a NULL word field (papers3_requires_word_index)", async () => {
-    // Typed null so the SQL-tag interpolation has a non-string operand type;
-    // postgres-js still binds it as a real SQL NULL parameter.
-    const nullStartWord: number | null = null;
+    // NULL is a fixed SQL literal here (not user data), so write it directly in
+    // the statement rather than interpolating a JS `null` — interpolating null
+    // trips the "implicit operand conversion" check, and a typed local still
+    // carries `null` in its type. The bound params are all non-null.
     await expect(
       sql`
         INSERT INTO public.highlights
           (book_id, user_id, source, chapter_index, start_word, end_word, text)
-        VALUES (${bookId}, ${user.id}, ${"papers3"}, ${0}, ${nullStartWord}, ${5}, ${"bad native row"})
+        VALUES (${bookId}, ${user.id}, ${"papers3"}, ${0}, NULL, ${5}, ${"bad native row"})
       `,
     ).rejects.toThrow(/papers3_requires_word_index/);
   });

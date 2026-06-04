@@ -133,7 +133,7 @@ const fns: Fn[] = [
   // import route uses the service-role client; no anon/authenticated caller.
   {
     name: "upsert_kobo_highlights",
-    args: "jsonb",
+    args: "uuid, jsonb",
     denyRoles: ["anon", "authenticated"],
     allowRoles: ["service_role"],
     rpcSlug: "upsert_kobo_highlights",

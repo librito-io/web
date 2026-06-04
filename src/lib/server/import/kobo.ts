@@ -65,13 +65,18 @@ function isOptionalString(v: unknown, max: number): boolean {
 export function validateKoboPayload(
   body: unknown,
 ): { items: KoboImportItem[] } | { error: string } {
-  const rawItems = Array.isArray(body)
-    ? body
-    : body &&
-        typeof body === "object" &&
-        Array.isArray((body as Record<string, unknown>).items)
-      ? ((body as Record<string, unknown>).items as unknown[])
-      : null;
+  let rawItems: unknown[] | null;
+  if (Array.isArray(body)) {
+    rawItems = body;
+  } else if (
+    body &&
+    typeof body === "object" &&
+    Array.isArray((body as Record<string, unknown>).items)
+  ) {
+    rawItems = (body as Record<string, unknown>).items as unknown[];
+  } else {
+    rawItems = null;
+  }
 
   if (!rawItems) {
     return { error: "Request body must be a JSON array of import items" };
@@ -141,8 +146,18 @@ export function validateKoboPayload(
         error: `chapter_title must be a string ≤${MAX_METADATA_LEN} chars`,
       };
     }
-    if (!isOptionalString(it.created_at, MAX_METADATA_LEN)) {
-      return { error: "created_at must be an ISO string" };
+    // created_at is optional, but when present must be a real parseable
+    // timestamp — we forward it to the RPC as the highlight's origin time, so
+    // an unparseable value would silently default to now() at the DB and the
+    // agent author would get no signal.
+    if (it.created_at !== undefined && it.created_at !== null) {
+      if (
+        typeof it.created_at !== "string" ||
+        it.created_at.length > MAX_METADATA_LEN ||
+        Number.isNaN(Date.parse(it.created_at))
+      ) {
+        return { error: "created_at must be a parseable ISO 8601 timestamp" };
+      }
     }
 
     const bookKey = hasIsbn ? `isbn:${it.isbn}` : `cid:${it.content_id}`;
@@ -158,7 +173,7 @@ export function validateKoboPayload(
       isbn: hasIsbn ? (it.isbn as string) : null,
       title: it.title as string,
       author: it.author as string,
-      content_id: (it.content_id as string) ?? "",
+      content_id: (it.content_id as string | null | undefined) ?? "",
       chapter_title: (it.chapter_title as string | null | undefined) ?? null,
       created_at: (it.created_at as string | null | undefined) ?? null,
     });
@@ -259,24 +274,37 @@ export async function processKoboImport(
   // catalog enrichment. Else upsert a synthesized-hash book.
   const bookKeyToId = new Map<string, string>();
 
+  // Batch the ISBN lookups into one SELECT ... WHERE isbn = ANY(...) instead of
+  // one round trip per book — a large multi-book import would otherwise be
+  // O(N) sequential queries against the 1k-scale target.
+  const isbns = Array.from(
+    new Set(groups.map((g) => g.isbn).filter((v): v is string => !!v)),
+  );
+  const isbnToId = new Map<string, string>();
+  if (isbns.length > 0) {
+    const { data: existing, error: lookupErr } = await supabase
+      .from("books")
+      .select("id, isbn")
+      .eq("user_id", userId)
+      .in("isbn", isbns)
+      .overrideTypes<{ id: string; isbn: string }[], { merge: false }>();
+    if (lookupErr) {
+      throw new Error(`Failed to look up books by isbn: ${lookupErr.message}`);
+    }
+    // A user could in principle have >1 row per ISBN today (no unique
+    // constraint — convergence follow-up #500); first match wins, stable
+    // because re-import reuses whichever row was picked.
+    for (const row of existing ?? []) {
+      if (!isbnToId.has(row.isbn)) isbnToId.set(row.isbn, row.id);
+    }
+  }
+
   for (const g of groups) {
     const key = g.isbn ? `isbn:${g.isbn}` : `cid:${g.contentId}`;
 
-    if (g.isbn) {
-      const { data: existing, error: lookupErr } = await supabase
-        .from("books")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("isbn", g.isbn)
-        .limit(1)
-        .maybeSingle();
-      if (lookupErr) {
-        throw new Error(`Failed to look up book by isbn: ${lookupErr.message}`);
-      }
-      if (existing?.id) {
-        bookKeyToId.set(key, existing.id);
-        continue;
-      }
+    if (g.isbn && isbnToId.has(g.isbn)) {
+      bookKeyToId.set(key, isbnToId.get(g.isbn)!);
+      continue;
     }
 
     // No ISBN match (or no ISBN at all): upsert by synthesized hash.
@@ -314,15 +342,18 @@ export async function processKoboImport(
     if (!bookId) throw new Error(`Book ${key} missing from resolve result`);
     return g.items.map((it) => ({
       book_id: bookId,
-      user_id: userId,
+      // user_id is NOT in the row payload — the RPC pins it from p_user_id
+      // server-side so a payload value can never bind a row to another user.
       source_uid: it.source_uid,
       text: it.text,
       chapter_title: it.chapter_title ?? null,
+      created_at: it.created_at ?? null,
     }));
   });
 
   if (highlightRows.length > 0) {
     const { error: hlErr } = await supabase.rpc("upsert_kobo_highlights", {
+      p_user_id: userId,
       p_rows: highlightRows,
     });
     if (hlErr) {

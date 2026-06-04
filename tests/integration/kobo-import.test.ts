@@ -118,6 +118,33 @@ describe.skipIf(SKIP)("kobo import (#497)", () => {
     expect(rows[0].text).toBe("second"); // updated in place
   });
 
+  it("persists the agent's created_at and does not rewrite it on re-import", async () => {
+    const origin = "2020-05-06T07:08:09.000Z";
+    await processKoboImport(admin, user.id, [
+      item({ source_uid: "ca-bm", text: "v1", created_at: origin }),
+    ]);
+    const [first] = await sql<{ created_at: string }[]>`
+      SELECT created_at FROM public.highlights
+      WHERE user_id = ${user.id} AND source_uid = ${"ca-bm"}
+    `;
+    expect(new Date(first.created_at).toISOString()).toBe(origin);
+
+    // Re-import with a different created_at — origin time must NOT change.
+    await processKoboImport(admin, user.id, [
+      item({
+        source_uid: "ca-bm",
+        text: "v2",
+        created_at: "2099-01-01T00:00:00.000Z",
+      }),
+    ]);
+    const [second] = await sql<{ created_at: string; text: string }[]>`
+      SELECT created_at, text FROM public.highlights
+      WHERE user_id = ${user.id} AND source_uid = ${"ca-bm"}
+    `;
+    expect(new Date(second.created_at).toISOString()).toBe(origin); // unchanged
+    expect(second.text).toBe("v2"); // text still updated
+  });
+
   it("does not resurrect a web soft-deleted highlight on re-import", async () => {
     const dItem = item({ source_uid: "del-bm", text: "trash me" });
     await processKoboImport(admin, user.id, [dItem]);

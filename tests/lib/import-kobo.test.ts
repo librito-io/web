@@ -121,6 +121,15 @@ describe("validateKoboPayload", () => {
     const res = validateKoboPayload([item(), item()]); // same source_uid + book
     expect(res).toHaveProperty("error");
   });
+
+  it("accepts a parseable created_at and rejects an unparseable one", () => {
+    expect(
+      validateKoboPayload([item({ created_at: "2024-01-02T03:04:05Z" })]),
+    ).toHaveProperty("items");
+    expect(
+      validateKoboPayload([item({ created_at: "not-a-date" })]),
+    ).toHaveProperty("error");
+  });
 });
 
 describe("processKoboImport", () => {
@@ -143,11 +152,16 @@ describe("processKoboImport", () => {
       (c) => c.name === "upsert_kobo_highlights",
     );
     expect(rpcCall).toBeDefined();
-    const rows = (rpcCall!.args as { p_rows: Record<string, unknown>[] })
-      .p_rows;
+    const args = rpcCall!.args as {
+      p_user_id: string;
+      p_rows: Record<string, unknown>[];
+    };
+    // user_id is pinned server-side via p_user_id, NOT carried per-row.
+    expect(args.p_user_id).toBe("user-1");
+    const rows = args.p_rows;
     expect(rows[0].source_uid).toBe("bm-1");
     expect(rows[0].book_id).toBe("book-1");
-    expect(rows[0].user_id).toBe("user-1");
+    expect("user_id" in rows[0]).toBe(false);
     // Load-bearing: deleted_at must NOT be in the payload (no resurrection).
     expect("deleted_at" in rows[0]).toBe(false);
     // Word fields must NOT be set (Kobo rows are not word-index based).
@@ -179,9 +193,9 @@ describe("processKoboImport", () => {
 
   it("reuses an existing book on an ISBN hit (no books upsert)", async () => {
     const mock = createMockSupabase();
-    // ISBN lookup hit.
+    // Batched ISBN lookup hit — keyed by isbn in the result map.
     mock._results.set("books.select", {
-      data: [{ id: "existing-book" }],
+      data: [{ id: "existing-book", isbn: "9780000000001" }],
       error: null,
     });
 
@@ -198,6 +212,56 @@ describe("processKoboImport", () => {
       .p_rows;
     expect(rows[0].book_id).toBe("existing-book");
     expect(result.imported).toBe(1);
+  });
+
+  it("synthesizes a book when the ISBN lookup misses (upsert with synthesized hash + isbn)", async () => {
+    const mock = createMockSupabase();
+    // Batched ISBN lookup returns no rows → miss → synthesize path.
+    mock._results.set("books.select", { data: [], error: null });
+    mock._results.set("books.upsert", {
+      data: [{ id: "new-book", book_hash: "feedface" }],
+      error: null,
+    });
+
+    const result = await processKoboImport(mock, "user-1", [
+      item({ isbn: "9780000000099", content_id: "" }),
+    ]);
+
+    const bookUpsert = mock._upsertCalls.find((c) => c.table === "books");
+    expect(bookUpsert).toBeDefined();
+    const row = bookUpsert!.rows as Record<string, unknown>;
+    expect(row.isbn).toBe("9780000000099");
+    expect(row.book_hash).toMatch(/^[0-9a-f]{8}$/);
+    const rpcCall = mock._rpcCalls.find(
+      (c) => c.name === "upsert_kobo_highlights",
+    );
+    const rows = (rpcCall!.args as { p_rows: Record<string, unknown>[] })
+      .p_rows;
+    expect(rows[0].book_id).toBe("new-book");
+    expect(result.imported).toBe(1);
+  });
+
+  it("forwards a valid created_at to the RPC and defaults absent to null", async () => {
+    const mock = createMockSupabase();
+    mock._results.set("books.upsert", {
+      data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+
+    await processKoboImport(mock, "user-1", [
+      item({ source_uid: "ts-1", created_at: "2024-01-02T03:04:05Z" }),
+      item({ source_uid: "ts-2", created_at: null }),
+    ]);
+
+    const rpcCall = mock._rpcCalls.find(
+      (c) => c.name === "upsert_kobo_highlights",
+    );
+    const rows = (rpcCall!.args as { p_rows: Record<string, unknown>[] })
+      .p_rows;
+    expect(rows.find((r) => r.source_uid === "ts-1")!.created_at).toBe(
+      "2024-01-02T03:04:05Z",
+    );
+    expect(rows.find((r) => r.source_uid === "ts-2")!.created_at).toBeNull();
   });
 
   it("groups multiple highlights of the same book under one book resolve", async () => {
@@ -227,6 +291,34 @@ describe("processKoboImport", () => {
     });
     await expect(processKoboImport(mock, "user-1", [item()])).rejects.toThrow(
       /Failed to upsert book/,
+    );
+  });
+
+  it("throws when the batched ISBN lookup errors", async () => {
+    const mock = createMockSupabase();
+    mock._results.set("books.select", {
+      data: null,
+      error: { message: "lookup boom" },
+    });
+    await expect(
+      processKoboImport(mock, "user-1", [
+        item({ isbn: "9780000000001", content_id: "" }),
+      ]),
+    ).rejects.toThrow(/Failed to look up books by isbn/);
+  });
+
+  it("throws when the highlight upsert RPC errors", async () => {
+    const mock = createMockSupabase();
+    mock._results.set("books.upsert", {
+      data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    mock._results.set("rpc.upsert_kobo_highlights", {
+      data: null,
+      error: { message: "rpc boom" },
+    });
+    await expect(processKoboImport(mock, "user-1", [item()])).rejects.toThrow(
+      /Failed to upsert highlights/,
     );
   });
 });

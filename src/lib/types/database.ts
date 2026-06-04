@@ -496,15 +496,17 @@ export type Database = {
       highlights: {
         Row: {
           book_id: string
-          chapter_index: number
+          chapter_index: number | null
           chapter_title: string | null
           created_at: string
           deleted_at: string | null
           device_timestamp_raw: number | null
-          end_word: number
+          end_word: number | null
           id: string
           paragraph_breaks: Json | null
-          start_word: number
+          source: string
+          source_uid: string | null
+          start_word: number | null
           styles: string | null
           text: string
           updated_at: string
@@ -512,15 +514,17 @@ export type Database = {
         }
         Insert: {
           book_id: string
-          chapter_index: number
+          chapter_index?: number | null
           chapter_title?: string | null
           created_at?: string
           deleted_at?: string | null
           device_timestamp_raw?: number | null
-          end_word: number
+          end_word?: number | null
           id?: string
           paragraph_breaks?: Json | null
-          start_word: number
+          source?: string
+          source_uid?: string | null
+          start_word?: number | null
           styles?: string | null
           text: string
           updated_at?: string
@@ -528,15 +532,17 @@ export type Database = {
         }
         Update: {
           book_id?: string
-          chapter_index?: number
+          chapter_index?: number | null
           chapter_title?: string | null
           created_at?: string
           deleted_at?: string | null
           device_timestamp_raw?: number | null
-          end_word?: number
+          end_word?: number | null
           id?: string
           paragraph_breaks?: Json | null
-          start_word?: number
+          source?: string
+          source_uid?: string | null
+          start_word?: number | null
           styles?: string | null
           text?: string
           updated_at?: string

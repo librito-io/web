@@ -342,6 +342,16 @@ export const syncLimiter = createLimiter({
   failMode: "open",
 });
 
+// Kobo highlight import (device, per device). Slightly looser than sync since
+// imports are batchy (agent auto-syncs on WiFi-up). Dedicated prefix so it
+// does not contend with PaperS3 sync on a dual-device user. Fail-OPEN matches
+// the device-write posture: an Upstash outage must not block ingest.
+export const importKoboLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(2, "30s"),
+  prefix: "rl:import:kobo:device",
+  failMode: "open",
+});
+
 // Transfer: upload initiation (browser, per user)
 export const transferUploadLimiter = createLimiter({
   window: Ratelimit.slidingWindow(5, "1m"),

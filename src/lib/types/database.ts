@@ -796,6 +796,10 @@ export type Database = {
         Args: { p_row: Json }
         Returns: undefined
       }
+      upsert_kobo_highlights: {
+        Args: { p_rows: Json; p_user_id: string }
+        Returns: number
+      }
     }
     Enums: {
       [_ in never]: never

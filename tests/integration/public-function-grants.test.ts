@@ -129,6 +129,15 @@ const fns: Fn[] = [
     allowRoles: ["service_role"],
     rpcSlug: "compute_catalog_fill_rate",
   },
+  // Kobo import highlight upsert (2026-06-04 #497). Service-role only — the
+  // import route uses the service-role client; no anon/authenticated caller.
+  {
+    name: "upsert_kobo_highlights",
+    args: "uuid, jsonb",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: "upsert_kobo_highlights",
+  },
 ];
 
 describe.skipIf(SKIP)("public function grants (issue #327)", () => {

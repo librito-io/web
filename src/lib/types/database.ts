@@ -454,9 +454,11 @@ export type Database = {
           id: string
           last_synced_at: string | null
           last_used_at: string | null
+          model: string | null
           name: string
           paired_at: string
           revoked_at: string | null
+          type: string
           user_id: string
         }
         Insert: {
@@ -466,9 +468,11 @@ export type Database = {
           id?: string
           last_synced_at?: string | null
           last_used_at?: string | null
+          model?: string | null
           name?: string
           paired_at?: string
           revoked_at?: string | null
+          type?: string
           user_id: string
         }
         Update: {
@@ -478,9 +482,11 @@ export type Database = {
           id?: string
           last_synced_at?: string | null
           last_used_at?: string | null
+          model?: string | null
           name?: string
           paired_at?: string
           revoked_at?: string | null
+          type?: string
           user_id?: string
         }
         Relationships: [
@@ -602,6 +608,8 @@ export type Database = {
           claimed: boolean
           code: string
           created_at: string
+          device_model: string | null
+          device_type: string
           expires_at: string
           hardware_id: string
           id: string
@@ -614,6 +622,8 @@ export type Database = {
           claimed?: boolean
           code: string
           created_at?: string
+          device_model?: string | null
+          device_type?: string
           expires_at: string
           hardware_id: string
           id?: string
@@ -626,6 +636,8 @@ export type Database = {
           claimed?: boolean
           code?: string
           created_at?: string
+          device_model?: string | null
+          device_type?: string
           expires_at?: string
           hardware_id?: string
           id?: string

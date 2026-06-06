@@ -28,3 +28,6 @@ test-results/
 playwright-report/
 blob-report/
 .playwright-cache/
+
+# Kobo mod packages (third-party GPL prereqs for kobo-agent; install-time, not vendored)
+*-KoboRoot.tgz

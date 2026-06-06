@@ -80,7 +80,50 @@ describe("POST /api/pair/request — layered rate limits", () => {
   it("returns 200 and forwards hardwareId when both limiters allow", async () => {
     const res = await POST(buildEvent({ hardwareId: HW_ID }));
     expect(res.status).toBe(200);
-    expect(requestSpy).toHaveBeenCalledWith(expect.any(Object), HW_ID);
+    // No deviceType/deviceModel in body → forwarded as null; coercion to
+    // defaults happens inside requestPairingCode (unit-tested separately).
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.any(Object),
+      HW_ID,
+      null,
+      null,
+    );
+  });
+
+  it("forwards string deviceType and deviceModel to requestPairingCode", async () => {
+    const res = await POST(
+      buildEvent({
+        hardwareId: HW_ID,
+        deviceType: "kobo",
+        deviceModel: "Kobo Libra Colour",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.any(Object),
+      HW_ID,
+      "kobo",
+      "Kobo Libra Colour",
+    );
+  });
+
+  it("forwards non-string deviceType/deviceModel as null (defaults applied downstream)", async () => {
+    // A non-string (number, object) must not reach requestPairingCode as a
+    // coerced "[object Object]" — the route gates on typeof === "string".
+    const res = await POST(
+      buildEvent({
+        hardwareId: HW_ID,
+        deviceType: 42,
+        deviceModel: { evil: true },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.any(Object),
+      HW_ID,
+      null,
+      null,
+    );
   });
 
   it("checks per-IP first, then per-hardwareId; both keyed correctly", async () => {

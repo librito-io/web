@@ -121,6 +121,130 @@ describe("requestPairingCode", () => {
       /retry exhausted/,
     );
   });
+
+  // ---- device type / model (issue #505) ----
+  // type is a closed discriminator coerced to a valid literal in this layer
+  // so the DB CHECK only ever sees a known value; model is free-text
+  // debugging telemetry, trimmed/capped and stored as-is (NULL when absent).
+
+  function setupInsertOk(supabase: ReturnType<typeof createMockSupabase>) {
+    supabase._results.set("pairing_codes.insert", {
+      data: { id: "pairing-uuid-123" },
+      error: null,
+    });
+  }
+
+  it("defaults device_type to 'papers3' and device_model to null when omitted", async () => {
+    // The PaperS3 firmware sends neither field. Absent → silent default,
+    // not a warning (this is the expected back-compat path, not an error).
+    const supabase = createMockSupabase();
+    setupInsertOk(supabase);
+
+    await requestPairingCode(supabase, "hw-1");
+
+    const inserted = supabase._insertCalls[0].payload as Record<
+      string,
+      unknown
+    >;
+    expect(inserted.device_type).toBe("papers3");
+    expect(inserted.device_model).toBeNull();
+    expect(logWrites.some((l) => String(l.event).includes("device_type"))).toBe(
+      false,
+    );
+  });
+
+  it("passes a recognized device_type through unchanged", async () => {
+    const supabase = createMockSupabase();
+    setupInsertOk(supabase);
+
+    await requestPairingCode(supabase, "hw-1", "kobo", "Kobo Libra Colour");
+
+    const inserted = supabase._insertCalls[0].payload as Record<
+      string,
+      unknown
+    >;
+    expect(inserted.device_type).toBe("kobo");
+    expect(inserted.device_model).toBe("Kobo Libra Colour");
+  });
+
+  it("coerces an unrecognized device_type to 'papers3' and warns", async () => {
+    // Forward-compat: a future agent type the web's CHECK doesn't know yet
+    // must not be able to break pairing. Coerce + log rather than reject.
+    const supabase = createMockSupabase();
+    setupInsertOk(supabase);
+
+    await requestPairingCode(supabase, "hw-1", "pwned");
+
+    const inserted = supabase._insertCalls[0].payload as Record<
+      string,
+      unknown
+    >;
+    expect(inserted.device_type).toBe("papers3");
+    expect(
+      logWrites.some(
+        (l) =>
+          String(l.event).includes("device_type") &&
+          JSON.stringify(l).includes("pwned"),
+      ),
+    ).toBe(true);
+  });
+
+  it("sanitizes the logged device_type: caps length, strips newlines (log-injection defense)", async () => {
+    // `received` is unauthenticated client input on the pairing route. It
+    // must be logged bounded and newline-free so an attacker cannot forge
+    // or bloat operator log lines. Mirrors the device_model posture.
+    const supabase = createMockSupabase();
+    setupInsertOk(supabase);
+
+    const evil = "evil\nFORGED LOG LINE\r" + "x".repeat(200);
+    await requestPairingCode(supabase, "hw-1", evil);
+
+    const warn = logWrites.find((l) => String(l.event).includes("device_type"));
+    expect(warn).toBeDefined();
+    const received = warn!.received as string;
+    expect(received.length).toBeLessThanOrEqual(64);
+    expect(received).not.toMatch(/[\r\n]/);
+    // Coercion still happens — bad type never reaches the row.
+    expect(
+      (supabase._insertCalls[0].payload as Record<string, unknown>).device_type,
+    ).toBe("papers3");
+  });
+
+  it("trims device_model and stores null for empty/whitespace", async () => {
+    const supabase = createMockSupabase();
+    setupInsertOk(supabase);
+
+    await requestPairingCode(supabase, "hw-1", "kobo", "  Kobo Clara BW  ");
+    expect(
+      (supabase._insertCalls[0].payload as Record<string, unknown>)
+        .device_model,
+    ).toBe("Kobo Clara BW");
+
+    const supabase2 = createMockSupabase();
+    setupInsertOk(supabase2);
+    await requestPairingCode(supabase2, "hw-2", "kobo", "   ");
+    expect(
+      (supabase2._insertCalls[0].payload as Record<string, unknown>)
+        .device_model,
+    ).toBeNull();
+  });
+
+  it("caps device_model at 100 chars and warns on truncation", async () => {
+    const supabase = createMockSupabase();
+    setupInsertOk(supabase);
+
+    const longModel = "x".repeat(250);
+    await requestPairingCode(supabase, "hw-1", "kobo", longModel);
+
+    const inserted = supabase._insertCalls[0].payload as Record<
+      string,
+      unknown
+    >;
+    expect((inserted.device_model as string).length).toBe(100);
+    expect(
+      logWrites.some((l) => String(l.event).includes("device_model")),
+    ).toBe(true);
+  });
 });
 
 describe("checkPairingStatus", () => {

@@ -20,7 +20,16 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
   );
   if (ipLimited) return ipLimited;
 
-  let body: { hardwareId?: string };
+  let body: {
+    hardwareId?: string;
+    // Optional device identity (issue #505). Validation/coercion lives in
+    // requestPairingCode: unknown deviceType coerces to 'papers3', model is
+    // trimmed/capped. We pass through only when the type is a string so a
+    // non-string (number, object) becomes the silent default rather than a
+    // coerced "[object Object]". PaperS3 firmware sends neither field.
+    deviceType?: unknown;
+    deviceModel?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -53,7 +62,16 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 
   try {
     const supabase = createAdminClient();
-    const result = await requestPairingCode(supabase, body.hardwareId);
+    const deviceType =
+      typeof body.deviceType === "string" ? body.deviceType : null;
+    const deviceModel =
+      typeof body.deviceModel === "string" ? body.deviceModel : null;
+    const result = await requestPairingCode(
+      supabase,
+      body.hardwareId,
+      deviceType,
+      deviceModel,
+    );
     return jsonSuccess(result);
   } catch (err) {
     Sentry.captureException(err);

@@ -72,10 +72,82 @@ function pairingIdPrefix(id: string): string {
   return id.slice(0, 8);
 }
 
+// Device-type discriminator allowed set. Mirrors highlights.source's
+// valid_highlight_source CHECK and the devices.valid_device_type CHECK.
+// Keep in sync with both SQL constraints. See issue #505.
+const DEVICE_TYPES = ["papers3", "kobo", "kindle"] as const;
+export type DeviceType = (typeof DEVICE_TYPES)[number];
+const DEFAULT_DEVICE_TYPE: DeviceType = "papers3";
+
+// Free-text model is debugging telemetry, not a key. Cap defensively so a
+// pathological device string can't bloat the row; truncate rather than
+// reject (dropping the whole pairing over a long model string would be a
+// worse failure than a clipped debug field).
+const DEVICE_MODEL_MAX_LEN = 100;
+
+// Coerce an arbitrary client-supplied device type to a valid literal.
+// Unknown / future values fall back to the default so a stricter web can
+// never brick a deployed agent that ships a type the CHECK doesn't list
+// yet (forward-compat). An explicit non-empty unrecognized value is
+// logged; absent (undefined/null) is the silent PaperS3 back-compat path.
+function normalizeDeviceType(
+  raw: string | undefined | null,
+  hardwareId: string,
+): DeviceType {
+  if (raw == null) return DEFAULT_DEVICE_TYPE;
+  if ((DEVICE_TYPES as readonly string[]).includes(raw)) {
+    return raw as DeviceType;
+  }
+  logger().warn(
+    {
+      event: "pairing.device_type_coerced",
+      // Cap + collapse whitespace: `raw` is unauthenticated client input,
+      // so log it bounded and newline-free to deny log-injection / bloat.
+      // Mirrors the device_model path, which logs only originalLength.
+      received: raw.slice(0, 64).replace(/\s+/g, " "),
+      coercedTo: DEFAULT_DEVICE_TYPE,
+      hardwareId,
+    },
+    "pairing.device_type_coerced",
+  );
+  return DEFAULT_DEVICE_TYPE;
+}
+
+// Trim, null-on-empty, cap at DEVICE_MODEL_MAX_LEN. Truncation is logged
+// since a >100-char model is anomalous (real model strings are short).
+function normalizeDeviceModel(
+  raw: string | undefined | null,
+  hardwareId: string,
+): string | null {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  if (trimmed.length > DEVICE_MODEL_MAX_LEN) {
+    logger().warn(
+      {
+        event: "pairing.device_model_truncated",
+        originalLength: trimmed.length,
+        hardwareId,
+      },
+      "pairing.device_model_truncated",
+    );
+    return trimmed.slice(0, DEVICE_MODEL_MAX_LEN);
+  }
+  return trimmed;
+}
+
 export async function requestPairingCode(
   supabase: SupabaseClient,
   hardwareId: string,
+  // Optional device identity (issue #505). PaperS3 firmware sends neither
+  // today, so both default: type → 'papers3', model → NULL. The Kobo agent
+  // and (per reader#57) future PaperS3 firmware send them explicitly.
+  deviceType?: string | null,
+  deviceModel?: string | null,
 ): Promise<PairingResult> {
+  const normalizedType = normalizeDeviceType(deviceType, hardwareId);
+  const normalizedModel = normalizeDeviceModel(deviceModel, hardwareId);
+
   // pollSecret generated once per request and reused across the unique-
   // violation retry: the failed insert leaves no row, so the secret was
   // never observable. Re-using avoids a second crypto.randomBytes(32) on
@@ -95,6 +167,8 @@ export async function requestPairingCode(
         hardware_id: hardwareId,
         expires_at: expiresAt.toISOString(),
         poll_secret_hash: pollSecretHash,
+        device_type: normalizedType,
+        device_model: normalizedModel,
       })
       .select("id")
       .single();

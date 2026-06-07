@@ -16,10 +16,15 @@ export default defineConfig({
   },
   test: {
     include: ["tests/integration/**/*.test.ts"],
+    // Serial, single-process execution — all tests mutate one shared Postgres,
+    // so parallel files collide on fixed catalog rows / unique keys. Vitest 4
+    // removed `poolOptions` (and the `forks.singleFork` flag that lived under
+    // it); the equivalent is now top-level `maxWorkers: 1` + `fileParallelism:
+    // false`. Without these, v4 fans files out across forks and the catalog
+    // RPC suites fail non-deterministically.
     pool: "forks",
-    poolOptions: {
-      forks: { singleFork: true },
-    },
+    maxWorkers: 1,
+    fileParallelism: false,
     sequence: { concurrent: false },
     testTimeout: 30_000,
     hookTimeout: 30_000,

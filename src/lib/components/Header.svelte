@@ -45,6 +45,6 @@
     position: sticky;
     top: 0;
     z-index: 60;
-    border-bottom: 1px solid #2a2a2a;
+    border-bottom: 1px solid #232629;
   }
 </style>

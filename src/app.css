@@ -471,6 +471,11 @@ h2 {
   font-size: 0.875rem;
   font-weight: 500;
   font-family: inherit;
+  /* Pin line-height so every row's box is uniform regardless of script.
+     Default `normal` is font-dependent; Arabic/CJK fallbacks have a taller
+     intrinsic line box, which surfaced as a taller hover background on the
+     Arabic row only (transparent resting bg hid it). */
+  line-height: 1.5;
   letter-spacing: var(--tracking-sm);
   transition: background 0.1s;
   cursor: pointer;

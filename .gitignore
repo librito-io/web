@@ -18,6 +18,9 @@ supabase/signing_keys.json
 # Local-only dev seed (contains a dev login credential — never push to the public repo)
 supabase/seed.local.sql
 
+# Local-only dev scratch doc (schema notes — not for the public repo)
+docs/dev/schema-highlights-and-books.md
+
 # Working audit docs (mid-session fix trackers). Mirrors docs/superpowers/
 # pattern. Closed audits graduate to tracked docs/audits/ via dedicated PR.
 docs/audits-wip/

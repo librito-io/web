@@ -9,6 +9,7 @@ import {
 } from "./helpers";
 import {
   processKoboImport,
+  synthesizeBookHash,
   type KoboImportItem,
 } from "../../src/lib/server/import/kobo";
 
@@ -204,5 +205,80 @@ describe.skipIf(SKIP)("kobo import (#497)", () => {
       `;
     });
     expect(rows.some((r) => r.text === "feed me")).toBe(true);
+  });
+
+  it("orders 'recent' by authoring time (created_at), not collapsed updated_at, after a full re-import", async () => {
+    // Regression for the feed bug exposed by the Kobo full-resend: the agent
+    // re-POSTs the entire highlight set every sync, so ON CONFLICT DO UPDATE
+    // fires update_updated_at on every row and collapses updated_at to one
+    // value. The 'recent' sort keyed on updated_at then ties on every row and
+    // falls back to the random-UUID tiebreak — arbitrary order. 'recent' must
+    // instead order by created_at (stable authoring time, INSERT-only).
+    const contentId = "file:///mnt/onboard/recent-ordering.epub";
+    const bookHash = synthesizeBookHash({ contentId });
+    const uids = ["ord-a", "ord-b", "ord-c", "ord-d"];
+
+    // Full set, one synthesized book. created_at defaults here; we overwrite it
+    // below so authoring time is ANTI-correlated with the random highlight UUID.
+    // That makes the buggy (updated_at-tie → id DESC) order the exact reverse of
+    // the correct (created_at DESC) order: a deterministic failure under the
+    // bug, not a 1/N! coincidence.
+    const set = uids.map((uid) =>
+      item({
+        source_uid: uid,
+        text: uid,
+        title: "Recent Ordering",
+        author: "A",
+        content_id: contentId,
+        isbn: null,
+        created_at: null,
+      }),
+    );
+    await processKoboImport(admin, user.id, set);
+
+    // Read the assigned UUIDs ascending, then stamp created_at so the smallest
+    // id is the NEWEST highlight. → id ASC == created_at DESC == expected order.
+    const seeded = await sql<{ id: string; source_uid: string }[]>`
+      SELECT id, source_uid FROM public.highlights
+      WHERE user_id = ${user.id} AND source_uid = ANY(${uids})
+      ORDER BY id ASC
+    `;
+    const dates = [
+      "2026-06-10T00:00:00.000Z",
+      "2026-06-09T00:00:00.000Z",
+      "2026-06-08T00:00:00.000Z",
+      "2026-06-07T00:00:00.000Z",
+    ];
+    for (let i = 0; i < seeded.length; i++) {
+      await sql`
+        UPDATE public.highlights SET created_at = ${dates[i]}
+        WHERE id = ${seeded[i].id}
+      `;
+    }
+    const expectedOrder = seeded.map((r) => r.source_uid); // newest → oldest
+
+    // Full re-send: collapses updated_at across the set; created_at preserved.
+    await processKoboImport(admin, user.id, set);
+
+    const [collapse] = await sql<{ du: number; dc: number }[]>`
+      SELECT count(DISTINCT updated_at)::int AS du,
+             count(DISTINCT created_at)::int AS dc
+      FROM public.highlights
+      WHERE user_id = ${user.id} AND source_uid = ANY(${uids})
+    `;
+    expect(collapse.du).toBe(1); // updated_at collapsed (the bug condition)
+    expect(collapse.dc).toBe(4); // created_at intact (the recovery signal)
+
+    const feed = await sql.begin(async (txn) => {
+      await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
+        sub: user.id,
+        role: "authenticated",
+      })}, true)`;
+      await txn`SET LOCAL ROLE authenticated`;
+      return txn<{ text: string }[]>`
+        SELECT text FROM get_highlight_feed('recent', NULL, 50, ${bookHash})
+      `;
+    });
+    expect(feed.map((r) => r.text)).toEqual(expectedOrder);
   });
 });

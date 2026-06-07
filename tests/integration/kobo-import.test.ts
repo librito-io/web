@@ -207,13 +207,145 @@ describe.skipIf(SKIP)("kobo import (#497)", () => {
     expect(rows.some((r) => r.text === "feed me")).toBe(true);
   });
 
-  it("orders 'recent' by authoring time (created_at), not collapsed updated_at, after a full re-import", async () => {
-    // Regression for the feed bug exposed by the Kobo full-resend: the agent
-    // re-POSTs the entire highlight set every sync, so ON CONFLICT DO UPDATE
-    // fires update_updated_at on every row and collapses updated_at to one
-    // value. The 'recent' sort keyed on updated_at then ties on every row and
-    // falls back to the random-UUID tiebreak — arbitrary order. 'recent' must
-    // instead order by created_at (stable authoring time, INSERT-only).
+  it("leaves updated_at unchanged on every row across a no-op full re-import (#512)", async () => {
+    // The agent re-POSTs the full highlight set every sync. A sync that changed
+    // nothing must NOT rewrite rows — the conditional DO UPDATE skips the write
+    // (and the update_updated_at trigger) when text + chapter_title are
+    // byte-identical, so updated_at stays put. Collapses per-sync write/Realtime
+    // amplification.
+    const contentId = "file:///mnt/onboard/noop-resync.epub";
+    const uids = ["noop-a", "noop-b", "noop-c"];
+    const set = uids.map((uid) =>
+      item({
+        source_uid: uid,
+        text: `noop ${uid}`,
+        title: "Noop Resync",
+        author: "A",
+        content_id: contentId,
+        chapter_title: `ch ${uid}`,
+      }),
+    );
+
+    await processKoboImport(admin, user.id, set);
+    const before = await sql<{ source_uid: string; updated_at: string }[]>`
+      SELECT source_uid, updated_at FROM public.highlights
+      WHERE user_id = ${user.id} AND source_uid = ANY(${uids})
+      ORDER BY source_uid
+    `;
+
+    // Identical re-send — no meaningful column changed.
+    await processKoboImport(admin, user.id, set);
+    const after = await sql<{ source_uid: string; updated_at: string }[]>`
+      SELECT source_uid, updated_at FROM public.highlights
+      WHERE user_id = ${user.id} AND source_uid = ANY(${uids})
+      ORDER BY source_uid
+    `;
+
+    expect(after.map((r) => r.updated_at)).toEqual(
+      before.map((r) => r.updated_at),
+    );
+  });
+
+  it("bumps updated_at only for the row whose text changed (#512)", async () => {
+    const contentId = "file:///mnt/onboard/selective-bump.epub";
+    const set = [
+      item({
+        source_uid: "bump-changed",
+        text: "v1",
+        title: "Selective Bump",
+        author: "A",
+        content_id: contentId,
+      }),
+      item({
+        source_uid: "bump-static",
+        text: "stays",
+        title: "Selective Bump",
+        author: "A",
+        content_id: contentId,
+      }),
+    ];
+    await processKoboImport(admin, user.id, set);
+    const before = new Map(
+      (
+        await sql<{ source_uid: string; updated_at: string }[]>`
+          SELECT source_uid, updated_at FROM public.highlights
+          WHERE user_id = ${user.id}
+            AND source_uid = ANY(${["bump-changed", "bump-static"]})
+        `
+      ).map((r) => [r.source_uid, r.updated_at]),
+    );
+
+    // Re-send with one row's text edited, the other byte-identical.
+    set[0].text = "v2";
+    await processKoboImport(admin, user.id, set);
+    const after = new Map(
+      (
+        await sql<{ source_uid: string; updated_at: string }[]>`
+          SELECT source_uid, updated_at FROM public.highlights
+          WHERE user_id = ${user.id}
+            AND source_uid = ANY(${["bump-changed", "bump-static"]})
+        `
+      ).map((r) => [r.source_uid, r.updated_at]),
+    );
+
+    expect(new Date(after.get("bump-changed")!).getTime()).toBeGreaterThan(
+      new Date(before.get("bump-changed")!).getTime(),
+    );
+    expect(new Date(after.get("bump-static")!).getTime()).toBe(
+      new Date(before.get("bump-static")!).getTime(),
+    ); // untouched
+  });
+
+  it("keeps a web-deleted highlight deleted AND untouched across a no-op re-sync (#512)", async () => {
+    // Regression guard beyond the issue's two cases: the conditional update must
+    // not disturb a server-owned soft-delete. A web-trashed highlight that the
+    // agent re-POSTs unchanged stays deleted_at-set, and — because the row is
+    // byte-identical — the row is not rewritten at all (updated_at unchanged).
+    const dItem = item({
+      source_uid: "noop-del-bm",
+      text: "trash and resend",
+      content_id: "file:///mnt/onboard/noop-del.epub",
+    });
+    await processKoboImport(admin, user.id, [dItem]);
+    await sql`
+      UPDATE public.highlights SET deleted_at = now()
+      WHERE user_id = ${user.id} AND source_uid = ${"noop-del-bm"}
+    `;
+    const [before] = await sql<
+      { deleted_at: string | null; updated_at: string }[]
+    >`
+      SELECT deleted_at, updated_at FROM public.highlights
+      WHERE user_id = ${user.id} AND source_uid = ${"noop-del-bm"}
+    `;
+
+    // Agent re-POSTs the identical (trashed) highlight.
+    await processKoboImport(admin, user.id, [dItem]);
+
+    const [after] = await sql<
+      { deleted_at: string | null; updated_at: string }[]
+    >`
+      SELECT deleted_at, updated_at FROM public.highlights
+      WHERE user_id = ${user.id} AND source_uid = ${"noop-del-bm"}
+    `;
+    expect(after.deleted_at).not.toBeNull(); // still trashed, not resurrected
+    expect(new Date(after.updated_at).getTime()).toBe(
+      new Date(before.updated_at).getTime(),
+    ); // no-op skipped the write
+  });
+
+  it("orders 'recent' by authoring time (created_at), not updated_at, after a full re-import", async () => {
+    // Regression for the feed bug exposed by the Kobo full-resend (#513): the
+    // 'recent' sort must key on created_at (stable authoring time, INSERT-only),
+    // not updated_at (last-touched). This test stamps created_at ANTI-correlated
+    // with the random highlight UUID and with updated_at, so a sort keyed on
+    // either updated_at or the id tiebreak returns the exact REVERSE of the
+    // correct created_at-DESC order — a deterministic failure under the old bug.
+    //
+    // Note: post-#512 the no-op full re-send no longer rewrites unchanged rows,
+    // so it no longer collapses updated_at (each row keeps the distinct
+    // updated_at left by its per-row created_at backfill below). The guard holds
+    // either way — the feed must follow created_at regardless of updated_at's
+    // distribution.
     const contentId = "file:///mnt/onboard/recent-ordering.epub";
     const bookHash = synthesizeBookHash({ contentId });
     const uids = ["ord-a", "ord-b", "ord-c", "ord-d"];
@@ -257,17 +389,16 @@ describe.skipIf(SKIP)("kobo import (#497)", () => {
     }
     const expectedOrder = seeded.map((r) => r.source_uid); // newest → oldest
 
-    // Full re-send: collapses updated_at across the set; created_at preserved.
+    // Full re-send: no-op (text unchanged) so updated_at is NOT rewritten;
+    // created_at preserved.
     await processKoboImport(admin, user.id, set);
 
-    const [collapse] = await sql<{ du: number; dc: number }[]>`
-      SELECT count(DISTINCT updated_at)::int AS du,
-             count(DISTINCT created_at)::int AS dc
+    const [{ dc }] = await sql<{ dc: number }[]>`
+      SELECT count(DISTINCT created_at)::int AS dc
       FROM public.highlights
       WHERE user_id = ${user.id} AND source_uid = ANY(${uids})
     `;
-    expect(collapse.du).toBe(1); // updated_at collapsed (the bug condition)
-    expect(collapse.dc).toBe(4); // created_at intact (the recovery signal)
+    expect(dc).toBe(4); // created_at intact — the signal the feed sorts on
 
     const feed = await sql.begin(async (txn) => {
       await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({

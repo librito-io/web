@@ -11,9 +11,12 @@ vi.mock("resend", () => {
     .fn()
     .mockResolvedValue({ data: { id: "test-id" }, error: null });
   return {
-    Resend: vi.fn().mockImplementation(() => ({
-      emails: { send: mockSend },
-    })),
+    // Regular function (not arrow) so `new Resend()` is constructable —
+    // vitest 4 invokes a mock's implementation with `new` when the mock is
+    // called with `new`, and arrow functions throw "is not a constructor".
+    Resend: vi.fn().mockImplementation(function () {
+      return { emails: { send: mockSend } };
+    }),
   };
 });
 

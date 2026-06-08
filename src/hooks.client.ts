@@ -74,9 +74,13 @@ if (publicEnv.PUBLIC_SENTRY_DSN) {
     // Pipeline: drop SvelteKit hover-preload AbortError noise first
     // (see isSvelteKitFetchNoise — issue #412) and stale-chunk dynamic-
     // import failures (see isStaleModuleImportNoise — issue #413), then
-    // scrub the rest. Both filters are browser-only; server-side
-    // scrubEvent in hooks.server.ts stays unchanged because both
-    // signatures originate client-side.
+    // scrub the rest. The `vite:preloadError` handler in +layout.svelte
+    // recovers the stale-chunk case via a one-shot reload; this filter
+    // drops the benign error captured in the brief pre-reload window. It
+    // is message-keyed (mechanism-agnostic) so the same failure is caught
+    // whether it surfaces via onunhandledrejection or handle_error — the
+    // gap that let #413 recur. Both filters are browser-only; server-side
+    // scrubEvent in hooks.server.ts stays unchanged.
     beforeSend: ((event: ScrubableEvent, hint: unknown) => {
       if (isSvelteKitFetchNoise(event)) return null;
       if (isStaleModuleImportNoise(event)) return null;

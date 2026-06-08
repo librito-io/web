@@ -363,7 +363,7 @@ describe("isStaleModuleImportNoise", () => {
     };
   };
 
-  function makeRejectionEvent(overrides: {
+  function makeEvent(overrides: {
     type?: string;
     value?: string;
     mechanismType?: string;
@@ -375,11 +375,9 @@ describe("isStaleModuleImportNoise", () => {
           {
             type: overrides.type ?? "TypeError",
             value: overrides.value ?? "Importing a module script failed.",
-            mechanism: {
-              type:
-                overrides.mechanismType ??
-                "auto.browser.global_handlers.onunhandledrejection",
-            },
+            ...(overrides.mechanismType
+              ? { mechanism: { type: overrides.mechanismType } }
+              : {}),
           },
         ],
       },
@@ -389,7 +387,7 @@ describe("isStaleModuleImportNoise", () => {
   it("drops Safari stale-chunk: 'Importing a module script failed.'", () => {
     expect(
       isStaleModuleImportNoise(
-        makeRejectionEvent({ value: "Importing a module script failed." }),
+        makeEvent({ value: "Importing a module script failed." }),
       ),
     ).toBe(true);
   });
@@ -397,7 +395,7 @@ describe("isStaleModuleImportNoise", () => {
   it("drops Chrome stale-chunk: 'Failed to fetch dynamically imported module: <url>'", () => {
     expect(
       isStaleModuleImportNoise(
-        makeRejectionEvent({
+        makeEvent({
           value:
             "Failed to fetch dynamically imported module: https://librito.io/_app/immutable/chunks/abc.js",
         }),
@@ -408,7 +406,7 @@ describe("isStaleModuleImportNoise", () => {
   it("drops Firefox stale-chunk: 'error loading dynamically imported module: <url>'", () => {
     expect(
       isStaleModuleImportNoise(
-        makeRejectionEvent({
+        makeEvent({
           value:
             "error loading dynamically imported module: https://librito.io/_app/immutable/chunks/abc.js",
         }),
@@ -416,36 +414,43 @@ describe("isStaleModuleImportNoise", () => {
     ).toBe(true);
   });
 
-  it("passes through matching mechanism but non-matching message", () => {
-    // Real bugs that happen to surface as unhandledrejection must still
-    // reach Sentry — only the specific stale-chunk messages are dropped.
+  it("drops the message regardless of mechanism (the #413 recurrence gap)", () => {
+    // Message-only matching: the same failure must be dropped whether it
+    // surfaces via onunhandledrejection (same-page import, fire-and-forget)
+    // or handle_error (import inside a SvelteKit render/load path). The
+    // prior mechanism-keyed filter let the handle_error variant through —
+    // Sentry LIBRITO-WEB-C recurrence.
+    for (const mech of [
+      "auto.browser.global_handlers.onunhandledrejection",
+      "auto.function.sveltekit.handle_error",
+    ]) {
+      expect(
+        isStaleModuleImportNoise(
+          makeEvent({
+            value: "Importing a module script failed.",
+            mechanismType: mech,
+          }),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("passes through unrelated messages", () => {
     expect(
       isStaleModuleImportNoise(
-        makeRejectionEvent({ value: "Cannot read properties of undefined" }),
+        makeEvent({ value: "Cannot read properties of undefined" }),
       ),
     ).toBe(false);
   });
 
-  it("passes through matching message but SvelteKit-routed mechanism", () => {
-    // Mechanism discriminator keeps isStaleModuleImportNoise and
-    // isSvelteKitFetchNoise independent — neither should subsume the
-    // other's signature.
+  it("passes through the downstream undefined.default TypeError (LIBRITO-WEB-M)", () => {
+    // This generic message must keep reaching Sentry; its cause (the
+    // preventDefault on vite:preloadError) was removed at the source, not
+    // scrubbed here.
     expect(
       isStaleModuleImportNoise(
-        makeRejectionEvent({
-          value: "Importing a module script failed.",
-          mechanismType: "auto.function.sveltekit.handle_error",
-        }),
-      ),
-    ).toBe(false);
-  });
-
-  it("passes through non-TypeError exceptions with matching mechanism + message", () => {
-    expect(
-      isStaleModuleImportNoise(
-        makeRejectionEvent({
-          type: "Error",
-          value: "Importing a module script failed.",
+        makeEvent({
+          value: "undefined is not an object (evaluating 'i.default')",
         }),
       ),
     ).toBe(false);

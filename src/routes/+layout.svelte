@@ -63,6 +63,36 @@
     document.addEventListener("gestureend", blockGesture);
     document.addEventListener("touchmove", blockMultiTouch, { passive: false });
 
+    // Recover from stale-chunk dynamic-import failures across a deploy.
+    // After a Vercel deploy, a page kept open references chunk URLs from
+    // the previous build; the production alias now points at the new
+    // deploy and the old chunks have rotated away. Vite fires
+    // `vite:preloadError` whenever its preload helper fails to import a
+    // chunk — covering BOTH route navigations and same-page lazy imports,
+    // the residual the version poll (svelte.config.js) + `beforeNavigate`
+    // hard-reload above cannot catch (same-page imports fire no nav; any
+    // import between 5-min poll ticks is unguarded). A one-shot reload
+    // (throttled via sessionStorage) fetches the new chunk graph fresh.
+    //
+    // Do NOT preventDefault: Vite's __vitePreload does
+    // `baseModule().catch(handlePreloadError)`, so preventing the re-throw
+    // makes the failed import RESOLVE to `undefined` instead of rejecting.
+    // Consumers then read `.default` off undefined and throw a confusing
+    // downstream TypeError (svelte-i18n runtime.js:131 `partial.default` —
+    // Sentry LIBRITO-WEB-M). Letting Vite throw keeps the import a clean
+    // rejection; the benign stale-chunk message that surfaces in the brief
+    // pre-reload window is dropped by the message-keyed beforeSend filter
+    // in hooks.client.ts (isStaleModuleImportNoise). Issue #413, Sentry
+    // LIBRITO-WEB-C.
+    const onPreloadError = (): void => {
+      const KEY = "vite-preload-reload-ts";
+      const last = Number(sessionStorage.getItem(KEY) ?? "0");
+      if (Date.now() - last < 10_000) return; // already retried → let it surface
+      sessionStorage.setItem(KEY, String(Date.now()));
+      location.reload();
+    };
+    window.addEventListener("vite:preloadError", onPreloadError);
+
     const {
       data: { subscription },
     } = data.supabase.auth.onAuthStateChange((_, session) => {
@@ -76,6 +106,7 @@
       document.removeEventListener("gesturechange", blockGesture);
       document.removeEventListener("gestureend", blockGesture);
       document.removeEventListener("touchmove", blockMultiTouch);
+      window.removeEventListener("vite:preloadError", onPreloadError);
     };
   });
 

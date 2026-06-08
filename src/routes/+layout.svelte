@@ -63,6 +63,32 @@
     document.addEventListener("gestureend", blockGesture);
     document.addEventListener("touchmove", blockMultiTouch, { passive: false });
 
+    // Recover from stale-chunk dynamic-import failures across a deploy.
+    // After a Vercel deploy, a page kept open references chunk URLs from
+    // the previous build; the production alias now points at the new
+    // deploy and the old chunks have rotated away. Vite fires
+    // `vite:preloadError` whenever its preload helper fails to import a
+    // chunk — covering BOTH route navigations and same-page lazy imports,
+    // the residual the version poll (svelte.config.js) + `beforeNavigate`
+    // hard-reload above cannot catch (same-page imports fire no nav; any
+    // import between 5-min poll ticks is unguarded). A one-shot reload
+    // (throttled via sessionStorage) fetches the new chunk graph fresh.
+    // `preventDefault` on the recover branch stops Vite re-throwing, so a
+    // recovered deploy-race never reaches handleError/Sentry. A genuine
+    // non-deploy failure (CDN edge, adblock) reloads once, fails again
+    // within the window, then falls through un-prevented so it surfaces in
+    // Sentry instead of looping. Replaces the brittle mechanism-keyed
+    // beforeSend scrub — issue #413, Sentry LIBRITO-WEB-C.
+    const onPreloadError = (event: Event): void => {
+      const KEY = "vite-preload-reload-ts";
+      const last = Number(sessionStorage.getItem(KEY) ?? "0");
+      if (Date.now() - last < 10_000) return; // already retried → let it surface
+      event.preventDefault();
+      sessionStorage.setItem(KEY, String(Date.now()));
+      location.reload();
+    };
+    window.addEventListener("vite:preloadError", onPreloadError);
+
     const {
       data: { subscription },
     } = data.supabase.auth.onAuthStateChange((_, session) => {
@@ -76,6 +102,7 @@
       document.removeEventListener("gesturechange", blockGesture);
       document.removeEventListener("gestureend", blockGesture);
       document.removeEventListener("touchmove", blockMultiTouch);
+      window.removeEventListener("vite:preloadError", onPreloadError);
     };
   });
 

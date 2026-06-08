@@ -36,11 +36,7 @@ import * as Sentry from "@sentry/sveltekit";
 //     so PUBLIC_* refs collapsed to undefined in the browser bundle.
 import { env as publicEnv } from "$env/dynamic/public";
 import type { HandleClientError } from "@sveltejs/kit";
-import {
-  scrubEvent,
-  isSvelteKitFetchNoise,
-  isStaleModuleImportNoise,
-} from "$lib/sentry-scrub";
+import { scrubEvent, isSvelteKitFetchNoise } from "$lib/sentry-scrub";
 import type { ScrubableEvent } from "$lib/sentry-scrub";
 
 // Release SHA injection: the Sentry Vite plugin (sentrySvelteKit in
@@ -72,14 +68,16 @@ if (publicEnv.PUBLIC_SENTRY_DSN) {
     // type. Runtime shape is structurally compatible.
     //
     // Pipeline: drop SvelteKit hover-preload AbortError noise first
-    // (see isSvelteKitFetchNoise — issue #412) and stale-chunk dynamic-
-    // import failures (see isStaleModuleImportNoise — issue #413), then
-    // scrub the rest. Both filters are browser-only; server-side
-    // scrubEvent in hooks.server.ts stays unchanged because both
-    // signatures originate client-side.
+    // (see isSvelteKitFetchNoise — issue #412), then scrub the rest.
+    // Stale-chunk dynamic-import failures (issue #413) are no longer
+    // filtered here — the `vite:preloadError` handler in +layout.svelte
+    // recovers them via a guarded reload and preventDefaults the throw,
+    // so a recovered deploy-race never reaches this pipeline; a genuine
+    // looping failure should surface, not be swallowed. Both remaining
+    // filters are browser-only; server-side scrubEvent in
+    // hooks.server.ts stays unchanged.
     beforeSend: ((event: ScrubableEvent, hint: unknown) => {
       if (isSvelteKitFetchNoise(event)) return null;
-      if (isStaleModuleImportNoise(event)) return null;
       return scrubEvent(event, hint);
     }) as unknown as NonNullable<
       Parameters<typeof Sentry.init>[0]

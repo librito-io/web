@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import {
   scrubEvent,
   isSvelteKitFetchNoise,
-  isStaleModuleImportNoise,
   REDACTED_FIELDS,
   type ScrubableEvent,
 } from "$lib/sentry-scrub";
@@ -349,109 +348,5 @@ describe("isSvelteKitFetchNoise", () => {
       },
     } as ExceptionEvent;
     expect(isSvelteKitFetchNoise(event)).toBe(false);
-  });
-});
-
-describe("isStaleModuleImportNoise", () => {
-  type ExceptionEvent = ScrubableEvent & {
-    exception?: {
-      values?: Array<{
-        type?: string;
-        value?: string;
-        mechanism?: { type?: string };
-      }>;
-    };
-  };
-
-  function makeRejectionEvent(overrides: {
-    type?: string;
-    value?: string;
-    mechanismType?: string;
-  }): ExceptionEvent {
-    return {
-      event_id: "evt-stale-chunk",
-      exception: {
-        values: [
-          {
-            type: overrides.type ?? "TypeError",
-            value: overrides.value ?? "Importing a module script failed.",
-            mechanism: {
-              type:
-                overrides.mechanismType ??
-                "auto.browser.global_handlers.onunhandledrejection",
-            },
-          },
-        ],
-      },
-    };
-  }
-
-  it("drops Safari stale-chunk: 'Importing a module script failed.'", () => {
-    expect(
-      isStaleModuleImportNoise(
-        makeRejectionEvent({ value: "Importing a module script failed." }),
-      ),
-    ).toBe(true);
-  });
-
-  it("drops Chrome stale-chunk: 'Failed to fetch dynamically imported module: <url>'", () => {
-    expect(
-      isStaleModuleImportNoise(
-        makeRejectionEvent({
-          value:
-            "Failed to fetch dynamically imported module: https://librito.io/_app/immutable/chunks/abc.js",
-        }),
-      ),
-    ).toBe(true);
-  });
-
-  it("drops Firefox stale-chunk: 'error loading dynamically imported module: <url>'", () => {
-    expect(
-      isStaleModuleImportNoise(
-        makeRejectionEvent({
-          value:
-            "error loading dynamically imported module: https://librito.io/_app/immutable/chunks/abc.js",
-        }),
-      ),
-    ).toBe(true);
-  });
-
-  it("passes through matching mechanism but non-matching message", () => {
-    // Real bugs that happen to surface as unhandledrejection must still
-    // reach Sentry — only the specific stale-chunk messages are dropped.
-    expect(
-      isStaleModuleImportNoise(
-        makeRejectionEvent({ value: "Cannot read properties of undefined" }),
-      ),
-    ).toBe(false);
-  });
-
-  it("passes through matching message but SvelteKit-routed mechanism", () => {
-    // Mechanism discriminator keeps isStaleModuleImportNoise and
-    // isSvelteKitFetchNoise independent — neither should subsume the
-    // other's signature.
-    expect(
-      isStaleModuleImportNoise(
-        makeRejectionEvent({
-          value: "Importing a module script failed.",
-          mechanismType: "auto.function.sveltekit.handle_error",
-        }),
-      ),
-    ).toBe(false);
-  });
-
-  it("passes through non-TypeError exceptions with matching mechanism + message", () => {
-    expect(
-      isStaleModuleImportNoise(
-        makeRejectionEvent({
-          type: "Error",
-          value: "Importing a module script failed.",
-        }),
-      ),
-    ).toBe(false);
-  });
-
-  it("passes through events with no exception block", () => {
-    expect(isStaleModuleImportNoise({ event_id: "msg-only" })).toBe(false);
   });
 });

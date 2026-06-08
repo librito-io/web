@@ -194,3 +194,54 @@ export function isSvelteKitFetchNoise(event: ScrubableEvent): boolean {
     value.startsWith("Failed to fetch ")
   );
 }
+
+/**
+ * Drops stale-chunk dynamic-import failures from cross-deploy races.
+ *
+ * After a Vercel deploy, a page kept open references chunk URLs from the
+ * previous build; the production alias now points at the new deploy whose
+ * output does not contain those chunks. A subsequent dynamic `import()`
+ * 404s. The `vite:preloadError` handler in +layout.svelte recovers this
+ * transparently via a one-shot reload, but the underlying error still
+ * surfaces in the brief window before navigation commits — this filter
+ * drops that benign capture.
+ *
+ * Discriminator: MESSAGE ONLY, deliberately mechanism-agnostic. The prior
+ * version keyed on `auto.browser.global_handlers.onunhandledrejection`,
+ * which let the same failure through when it surfaced via
+ * `auto.function.sveltekit.handle_error` (a same-page lazy import that
+ * threw inside a render/load path) — the recurrence in issue #413 /
+ * Sentry LIBRITO-WEB-C. The dynamic-import-failure message is specific
+ * enough across every browser that the message alone is a safe key:
+ *   - Safari:  "Importing a module script failed."
+ *   - Chrome:  "Failed to fetch dynamically imported module: <url>"
+ *   - Firefox: "error loading dynamically imported module: <url>"
+ * Safari elides stack traces for cross-origin script errors, so the
+ * message is in any case the only reliable signal.
+ *
+ * Note this does NOT match the downstream "undefined is not an object
+ * (evaluating 'X.default')" TypeError (Sentry LIBRITO-WEB-M): that was an
+ * artefact of `preventDefault`-ing the preload error, now removed at the
+ * source. That message is generic and must keep reaching Sentry.
+ *
+ * Scope: also drops genuine module-import failures with the same surface
+ * (network blip, ad blocker, broken CDN edge). These have no actionable
+ * handler beyond "reload" — which the preload handler already does — and
+ * the population of non-deploy-race causes for these exact messages is
+ * small enough that swallowing them is the right trade for a clean signal.
+ * See issue #413 / Sentry LIBRITO-WEB-C.
+ */
+export function isStaleModuleImportNoise(event: ScrubableEvent): boolean {
+  const exception = (event as { exception?: unknown }).exception;
+  if (!exception || typeof exception !== "object") return false;
+  const values = (exception as { values?: unknown }).values;
+  if (!Array.isArray(values) || values.length === 0) return false;
+  const first = values[0] as { value?: unknown } | undefined;
+  if (!first) return false;
+  const value = typeof first.value === "string" ? first.value : "";
+  return (
+    value.startsWith("Importing a module script failed") ||
+    value.startsWith("Failed to fetch dynamically imported module") ||
+    value.startsWith("error loading dynamically imported module")
+  );
+}

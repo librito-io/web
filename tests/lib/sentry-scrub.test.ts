@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   scrubEvent,
   isSvelteKitFetchNoise,
+  isStaleModuleImportNoise,
   REDACTED_FIELDS,
   type ScrubableEvent,
 } from "$lib/sentry-scrub";
@@ -348,5 +349,114 @@ describe("isSvelteKitFetchNoise", () => {
       },
     } as ExceptionEvent;
     expect(isSvelteKitFetchNoise(event)).toBe(false);
+  });
+});
+
+describe("isStaleModuleImportNoise", () => {
+  type ExceptionEvent = ScrubableEvent & {
+    exception?: {
+      values?: Array<{
+        type?: string;
+        value?: string;
+        mechanism?: { type?: string };
+      }>;
+    };
+  };
+
+  function makeEvent(overrides: {
+    type?: string;
+    value?: string;
+    mechanismType?: string;
+  }): ExceptionEvent {
+    return {
+      event_id: "evt-stale-chunk",
+      exception: {
+        values: [
+          {
+            type: overrides.type ?? "TypeError",
+            value: overrides.value ?? "Importing a module script failed.",
+            ...(overrides.mechanismType
+              ? { mechanism: { type: overrides.mechanismType } }
+              : {}),
+          },
+        ],
+      },
+    };
+  }
+
+  it("drops Safari stale-chunk: 'Importing a module script failed.'", () => {
+    expect(
+      isStaleModuleImportNoise(
+        makeEvent({ value: "Importing a module script failed." }),
+      ),
+    ).toBe(true);
+  });
+
+  it("drops Chrome stale-chunk: 'Failed to fetch dynamically imported module: <url>'", () => {
+    expect(
+      isStaleModuleImportNoise(
+        makeEvent({
+          value:
+            "Failed to fetch dynamically imported module: https://librito.io/_app/immutable/chunks/abc.js",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("drops Firefox stale-chunk: 'error loading dynamically imported module: <url>'", () => {
+    expect(
+      isStaleModuleImportNoise(
+        makeEvent({
+          value:
+            "error loading dynamically imported module: https://librito.io/_app/immutable/chunks/abc.js",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("drops the message regardless of mechanism (the #413 recurrence gap)", () => {
+    // Message-only matching: the same failure must be dropped whether it
+    // surfaces via onunhandledrejection (same-page import, fire-and-forget)
+    // or handle_error (import inside a SvelteKit render/load path). The
+    // prior mechanism-keyed filter let the handle_error variant through —
+    // Sentry LIBRITO-WEB-C recurrence.
+    for (const mech of [
+      "auto.browser.global_handlers.onunhandledrejection",
+      "auto.function.sveltekit.handle_error",
+    ]) {
+      expect(
+        isStaleModuleImportNoise(
+          makeEvent({
+            value: "Importing a module script failed.",
+            mechanismType: mech,
+          }),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("passes through unrelated messages", () => {
+    expect(
+      isStaleModuleImportNoise(
+        makeEvent({ value: "Cannot read properties of undefined" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("passes through the downstream undefined.default TypeError (LIBRITO-WEB-M)", () => {
+    // This generic message must keep reaching Sentry; its cause (the
+    // preventDefault on vite:preloadError) was removed at the source, not
+    // scrubbed here.
+    expect(
+      isStaleModuleImportNoise(
+        makeEvent({
+          value: "undefined is not an object (evaluating 'i.default')",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("passes through events with no exception block", () => {
+    expect(isStaleModuleImportNoise({ event_id: "msg-only" })).toBe(false);
   });
 });

@@ -73,17 +73,21 @@
     // hard-reload above cannot catch (same-page imports fire no nav; any
     // import between 5-min poll ticks is unguarded). A one-shot reload
     // (throttled via sessionStorage) fetches the new chunk graph fresh.
-    // `preventDefault` on the recover branch stops Vite re-throwing, so a
-    // recovered deploy-race never reaches handleError/Sentry. A genuine
-    // non-deploy failure (CDN edge, adblock) reloads once, fails again
-    // within the window, then falls through un-prevented so it surfaces in
-    // Sentry instead of looping. Replaces the brittle mechanism-keyed
-    // beforeSend scrub — issue #413, Sentry LIBRITO-WEB-C.
-    const onPreloadError = (event: Event): void => {
+    //
+    // Do NOT preventDefault: Vite's __vitePreload does
+    // `baseModule().catch(handlePreloadError)`, so preventing the re-throw
+    // makes the failed import RESOLVE to `undefined` instead of rejecting.
+    // Consumers then read `.default` off undefined and throw a confusing
+    // downstream TypeError (svelte-i18n runtime.js:131 `partial.default` —
+    // Sentry LIBRITO-WEB-M). Letting Vite throw keeps the import a clean
+    // rejection; the benign stale-chunk message that surfaces in the brief
+    // pre-reload window is dropped by the message-keyed beforeSend filter
+    // in hooks.client.ts (isStaleModuleImportNoise). Issue #413, Sentry
+    // LIBRITO-WEB-C.
+    const onPreloadError = (): void => {
       const KEY = "vite-preload-reload-ts";
       const last = Number(sessionStorage.getItem(KEY) ?? "0");
       if (Date.now() - last < 10_000) return; // already retried → let it surface
-      event.preventDefault();
       sessionStorage.setItem(KEY, String(Date.now()));
       location.reload();
     };

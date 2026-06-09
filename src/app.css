@@ -238,6 +238,11 @@ h2 {
   justify-content: space-between;
   align-items: center;
 }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
 .site-header h1 {
   font-size: 1.125rem;
   font-weight: 700;

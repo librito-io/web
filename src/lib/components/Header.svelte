@@ -10,7 +10,7 @@
 <header class="site-header">
   <div class="header-inner">
     <h1>Librito</h1>
-    <div style="display: flex; align-items: center; gap: 16px">
+    <div class="header-actions">
       <LanguageDropdown />
       <div class="menu-wrap">
         <button

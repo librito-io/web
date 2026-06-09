@@ -36,10 +36,11 @@
 <style>
   /* Site-header chrome. Scoped to this component (Svelte hashes the
      selector) so the sticky positioning + z-index physically cannot match
-     any other <header> in the app. Keeping layout off a globally-reachable
-     selector is the rule that prevents the book-detail menu-overlay
-     stacking regression class. Typography (.site-header h1) + .header-inner
-     layout stay centralized in app.css per the type convention (#421). */
+     any other <header> in the app. Layout on a globally-reachable selector
+     is how the book-detail menu-overlay stacking bug happened (#473) —
+     scoping prevents that category of regression. Typography (.site-header
+     h1) + .header-inner layout stay centralized in app.css per the type
+     convention (#421). */
   .site-header {
     background: #0a0c0f;
     position: sticky;

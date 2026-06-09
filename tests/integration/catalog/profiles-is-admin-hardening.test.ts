@@ -1,30 +1,12 @@
 import { describe, it, expect, afterAll } from "vitest";
-import type { TransactionSql } from "postgres";
 import {
+  asAuthUser,
   getAdmin,
   getSql,
   shutdown,
   createTestUser,
   deleteTestUser,
 } from "../helpers";
-
-/**
- * Per-transaction impersonation helper. Same shape as the RLS suite
- * (catalog-admin-actions-rls.test.ts).
- */
-async function asAuthUser<T>(
-  userId: string,
-  work: (txn: TransactionSql) => Promise<T> | T,
-): Promise<T> {
-  return getSql().begin(async (txn) => {
-    await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
-      sub: userId,
-      role: "authenticated",
-    })}, true)`;
-    await txn`SET LOCAL ROLE authenticated`;
-    return work(txn);
-  }) as Promise<T>;
-}
 
 /**
  * Three-layered defence against profiles.is_admin self-promotion:

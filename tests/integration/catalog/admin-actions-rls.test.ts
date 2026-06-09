@@ -1,32 +1,11 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import type { TransactionSql } from "postgres";
 import {
+  asAuthUser,
   getAdmin,
-  getSql,
   shutdown,
   createTestUser,
   deleteTestUser,
 } from "../helpers";
-
-/**
- * Per-transaction impersonation helper. Mirrors the established pattern
- * in devices-write-surface-rls.test.ts: set request.jwt.claims + SET
- * LOCAL ROLE authenticated, then execute caller's work inside that
- * transaction. RLS policies evaluate against the impersonated identity.
- */
-async function asAuthUser<T>(
-  userId: string,
-  work: (txn: TransactionSql) => Promise<T> | T,
-): Promise<T> {
-  return getSql().begin(async (txn) => {
-    await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
-      sub: userId,
-      role: "authenticated",
-    })}, true)`;
-    await txn`SET LOCAL ROLE authenticated`;
-    return work(txn);
-  }) as Promise<T>;
-}
 
 describe.skipIf(!process.env.INTEGRATION)("catalog_admin_actions RLS", () => {
   let aliceId: string;

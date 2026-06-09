@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { TransactionSql } from "postgres";
 import {
+  asAuthUser,
   createTestUser,
   deleteTestUser,
   getAdmin,
@@ -51,24 +51,6 @@ describe.skipIf(SKIP)("catalog_dlq_archive RLS", () => {
     await shutdown();
   });
 
-  // Matches devices-write-surface-rls.test.ts:78-89 — sets jwt claims via
-  // set_config(..., true) THEN SET LOCAL ROLE, inside one sql.begin txn.
-  // The cast pins postgres-js's `sql.begin` generic which collapses to
-  // `never` when chained through a local helper.
-  async function asUser<T>(
-    user: TestUser,
-    work: (txn: TransactionSql) => Promise<T>,
-  ): Promise<T> {
-    return sql.begin(async (txn) => {
-      await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
-        sub: user.id,
-        role: "authenticated",
-      })}, true)`;
-      await txn`SET LOCAL ROLE authenticated`;
-      return work(txn);
-    }) as Promise<T>;
-  }
-
   it("anon SELECT returns empty (no SELECT policy for anon)", async () => {
     const { data, error } = await getAnon()
       .from("catalog_dlq_archive")
@@ -78,16 +60,16 @@ describe.skipIf(SKIP)("catalog_dlq_archive RLS", () => {
   });
 
   it("authenticated non-admin SELECT returns empty", async () => {
-    const rows = await asUser(
-      normalUser,
+    const rows = await asAuthUser(
+      normalUser.id,
       (txn) => txn`SELECT id FROM catalog_dlq_archive`,
     );
     expect(rows.length).toBe(0);
   });
 
   it("authenticated admin SELECT allowed", async () => {
-    const rows = await asUser(
-      adminUser,
+    const rows = await asAuthUser(
+      adminUser.id,
       (txn) =>
         txn<{ id: number }[]>`
           SELECT id FROM catalog_dlq_archive WHERE id = ${archiveRowId}

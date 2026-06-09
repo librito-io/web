@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { TransactionSql } from "postgres";
 import {
+  asAuthUser,
   createTestUser,
   deleteTestUser,
   getSql,
@@ -70,23 +71,9 @@ describe.skipIf(SKIP)("devices write surface — column GRANT + RLS", () => {
     await shutdown();
   });
 
-  // Helper: run a block as the authenticated role with userA's JWT claims.
-  // The explicit cast is because postgres-js's `sql.begin` is overloaded and
-  // its inferred-return generic collapses to `never` when chained through a
-  // local helper. The runtime contract is "txn is a TransactionSql"; the
-  // cast pins that for the typechecker without changing behaviour.
-  async function asUserA<T>(
-    work: (txn: TransactionSql) => Promise<T>,
-  ): Promise<T> {
-    return sql.begin(async (txn) => {
-      await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
-        sub: userA.id,
-        role: "authenticated",
-      })}, true)`;
-      await txn`SET LOCAL ROLE authenticated`;
-      return work(txn);
-    }) as Promise<T>;
-  }
+  // Run a block as the authenticated role with userA's JWT claims.
+  const asUserA = <T>(work: (txn: TransactionSql) => Promise<T>): Promise<T> =>
+    asAuthUser(userA.id, work);
 
   // -----------------------------------------------------------------
   // Layer 1 — column GRANT scope

@@ -11,7 +11,13 @@ Librito is split across two repos under the `librito-io` GitHub org:
 
 The device never talks to Supabase directly. All device communication goes through SvelteKit API routes, which use the Supabase `service_role` key server-side.
 
-**Multi-source direction (2026-06).** Librito is reframing from "companion app for the PaperS3 firmware" to "a highlights companion for any e-reader." The PaperS3 is now one **highlight source** among several; **Kobo** is the first new source, ingested via an on-device WiFi sync agent (not yet built) that reads stock-Nickel highlights and POSTs them to `POST /api/import/kobo`. Track 1 backend has shipped (#496 provenance schema, #497 import endpoint). Imported highlights are char-offset based, not word-index based, so they carry `source='kobo'` + a `source_uid`, leave the word-index columns NULL, and render as plain quoted text. The import write path is **separate code from `processSync`** (`src/lib/server/import/kobo.ts`). The "`notes` are web-created, device never writes notes" invariant is load-bearing (Realtime push + RLS + word-index down-path keying) — Kobo annotations are deliberately out of v1 scope; reopening that requires a separate table, not overloading `notes`. Open follow-on: #500 (converge Kobo + PaperS3 books on a shared ISBN — no `UNIQUE(user_id, isbn)` today). Remaining pivot work (on-device agent, installer/pairing, live browser updates, annotations model) is tracked as forward issues.
+**Multi-source direction (2026-06).** Librito is reframing from "companion app for the PaperS3 firmware" to "a highlights companion for any e-reader." The PaperS3 is now one **highlight source** among several.
+
+**Kobo integration (v1).** Kobo is the first new source, ingested via an on-device WiFi sync agent (not yet built) that reads stock-Nickel highlights and POSTs them to `POST /api/import/kobo`. Track 1 backend has shipped (#496 provenance schema, #497 import endpoint). Imported highlights are char-offset based, not word-index based, so they carry `source='kobo'` + a `source_uid`, leave the word-index columns NULL, and render as plain quoted text. The import write path is **separate code from `processSync`** (`src/lib/server/import/kobo.ts`).
+
+**Data-model invariants.** The "`notes` are web-created, device never writes notes" invariant is load-bearing (Realtime push + RLS + word-index down-path keying). Kobo annotations are deliberately out of v1 scope; reopening that requires a separate table, not overloading `notes`.
+
+**Outstanding follow-on work.** Open follow-on: #500 (converge Kobo + PaperS3 books on a shared ISBN — no `UNIQUE(user_id, isbn)` today). Remaining pivot work (on-device agent, installer/pairing, live browser updates, annotations model) is tracked as forward issues.
 
 Design spec and implementation plans live in the reader repo at `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 
@@ -87,9 +93,13 @@ supabase stop           # Stop local Supabase
 
 `npm test` runs the fast hermetic unit suite (`tests/lib/`, `tests/routes/`) against mocks. **`npm run test:integration`** sets `INTEGRATION=1` and runs `vitest.integration.config.ts` against a running local Supabase (port `54322`); without the env var every `describe` is `.skipIf`'d. Helpers shell out to `supabase status -o env` for `DB_URL`/`API_URL`/`SERVICE_ROLE_KEY`, so no env wiring needed.
 
-**Scope**: behavior-level guards unit tests can't catch — RPC tombstone filtering, `pg_cron` job presence + schedule, `supabase_realtime` publication membership, `REPLICA IDENTITY FULL` on replicated tables. Connects as superuser via `postgres-js`, impersonates via `request.jwt.claims` / `SET LOCAL ROLE authenticated` where needed. **RLS is out of scope** — separate suite. Serial: `pool: 'forks'`, `singleFork: true`, `sequence.concurrent` disabled.
+**Scope**: behavior-level guards unit tests can't catch — RPC tombstone filtering, `pg_cron` job presence + schedule, `supabase_realtime` publication membership, `REPLICA IDENTITY FULL` on replicated tables. Connects as superuser via `postgres-js`, impersonates via `request.jwt.claims` / `SET LOCAL ROLE authenticated` where needed. **RLS is out of scope** — separate suite. Serial: `pool: 'forks'`, `maxWorkers: 1` + `fileParallelism: false` (Vitest 4 replacement for the removed `singleFork`), `sequence.concurrent` disabled.
 
-**Migration CI gate** (`.github/workflows/migration-smoke.yml`): runs `supabase start && supabase db reset --local` then the integration suite + `gen:types` diff on every PR / `main` push that touches `supabase/migrations/**`, `supabase/seed.sql`, `supabase/config.toml`, `src/lib/types/database.ts`, `tests/integration/**`, or `vitest.integration.config.ts`. **CLI pin ≥ v2.91.1** — earlier versions carry the [`atomic` parser bug](https://github.com/supabase/cli/pull/5064) (function names containing "atomic" trip SQLSTATE 42601 on subsequent statements; hit prod via PR #40 → hotfix #41). Bumping the pin requires a coordinated bump of every contributor's local CLI and the laptop that runs `supabase db push`. Re-run `supabase db reset --local` locally before pushing migration edits — CI is the safety net, not the primary signal.
+**Migration CI gate** (`.github/workflows/migration-smoke.yml`): runs `supabase start && supabase db reset --local` then the integration suite + `gen:types` diff on every PR / `main` push that touches `supabase/migrations/**`, `supabase/seed.sql`, `supabase/config.toml`, `src/lib/types/database.ts`, `tests/integration/**`, or `vitest.integration.config.ts`.
+
+**CLI pin must be ≥ v2.91.1** — earlier versions carry the [`atomic` parser bug](https://github.com/supabase/cli/pull/5064) (function names containing "atomic" trip SQLSTATE 42601 on subsequent statements; hit prod via PR #40 → hotfix #41). The current pin lives in the workflow files and the Release Process section below.
+
+**Contributor workflow**: bumping the pin requires a coordinated bump of every contributor's local CLI and the laptop that runs `supabase db push`. Re-run `supabase db reset --local` locally before pushing migration edits — CI is the safety net, not the primary signal.
 
 ### E2E suite (`tests/e2e/`)
 
@@ -132,7 +142,7 @@ Vercel git auto-deploy on `main` is disabled in `vercel.ts` — the workflow is 
 
 **One-time GitHub setup**: create the `production` environment (a required reviewer is optional — see migrate job above; currently none is set, so deploys run unattended). Secrets needed: `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `VERCEL_TOKEN`, `CRON_SECRET`. Variables: `SUPABASE_PROJECT_REF`, `VERCEL_ORG_ID` (from `.vercel/project.json`), `VERCEL_PROJECT_ID` (ditto). Workflow fails loudly when any are missing. **Token rotation**: 90 days.
 
-**Migration CI gate** (still active): `.github/workflows/migration-smoke.yml` runs `supabase start && supabase db reset --local` on every PR and `main` push that touches migration files **or `src/lib/types/database.ts`**. This is the PR-time validator; `production-deploy.yml` is the production pusher. Both must stay in sync on Supabase CLI version (currently `2.95.4`). The previous post-`db push` drift-check job was removed because the production gen API drifts independently of project state on Supabase platform metadata changes — see Database Schema section.
+**Migration CI gate** (still active): `.github/workflows/migration-smoke.yml` runs `supabase start && supabase db reset --local` on every PR and `main` push that touches migration files **or `src/lib/types/database.ts`**. This is the PR-time validator; `production-deploy.yml` is the production pusher. All three CLI-pinning workflows (`migration-smoke.yml`, `e2e-smoke.yml`, `production-deploy.yml`) must stay in sync on Supabase CLI version (currently `2.95.4`). The previous post-`db push` drift-check job was removed because the production gen API drifts independently of project state on Supabase platform metadata changes — see Database Schema section.
 
 ## Self-hosting
 
@@ -201,7 +211,11 @@ Tables (see `supabase/migrations/` for full DDL):
 
 **Token lookup index**: `devices.api_token_hash` indexed for O(1) device authentication.
 
-**Generated TS types** (`src/lib/types/database.ts`): regenerated by `npm run gen:types`, which wraps `supabase gen types typescript --local > src/lib/types/database.ts`. Requires local Supabase running (`supabase status`); the script connects to the local Postgres on port 54322. After adding or changing a column on any table, run `npm run gen:types` and commit the updated `src/lib/types/database.ts` in the same PR as the migration. CI gates drift via `migration-smoke.yml`, which re-runs `gen:types` after `db reset --local` and fails on `git diff --exit-code src/lib/types/database.ts`. The trigger fires on changes to `supabase/migrations/**`, `supabase/seed.sql`, `supabase/config.toml`, **or `src/lib/types/database.ts`** — so a PR that manually edits the types file (without touching migrations) still goes through the same `--local` regen-and-diff validation. Production-side schema drift is monitored asynchronously by a separate weekly cron workflow (planned, see `docs/audits-wip/`); per-deploy production gen comparisons were removed because `supabase gen types typescript --project-id <ref>` output drifts independently of project state when the Supabase platform updates its emitted metadata, turning the gate into a flaky deploy blocker on changes outside our control.
+**Generated TS types** (`src/lib/types/database.ts`): regenerated by `npm run gen:types`, which wraps `supabase gen types typescript --local > src/lib/types/database.ts`. Requires local Supabase running (`supabase status`); the script connects to the local Postgres on port 54322. After adding or changing a column on any table, run `npm run gen:types` and commit the updated `src/lib/types/database.ts` in the same PR as the migration.
+
+CI gates drift via `migration-smoke.yml`, which re-runs `gen:types` after `db reset --local` and fails on `git diff --exit-code src/lib/types/database.ts`. The trigger fires on changes to `supabase/migrations/**`, `supabase/seed.sql`, `supabase/config.toml`, **or `src/lib/types/database.ts`** — so a PR that manually edits the types file (without touching migrations) still goes through the same `--local` regen-and-diff validation.
+
+Production-side schema drift has no automated monitor — deliberate: migration-smoke is the only schema gate; the no-Studio policy plus runtime errors backstop prod drift (revisit if the team grows). Per-deploy production gen comparisons were removed because `supabase gen types typescript --project-id <ref>` output drifts independently of project state when the Supabase platform updates its emitted metadata, turning the gate into a flaky deploy blocker on changes outside our control.
 
 Hand-maintained TS types that mirror DB tables derive from `Database['public']['Tables']['<name>']['Row']` (see `BookCatalogRow` in `src/lib/server/catalog/types.ts`) so a new column without a regenerated type file fails typecheck deterministically rather than drifting silently. When the generated row widens a project-specific literal union to `string | null` (e.g. `cover_storage_backend`), use `Omit<Row, '<field>'> & { <field>: <LiteralUnion> | null }` to preserve the narrow type.
 
@@ -274,7 +288,7 @@ Cold-miss resolves route through Upstash QStash when `QSTASH_TOKEN + QSTASH_CONS
 | Field-state TTL replay cron   | nightly         | Per-field value-level partial successes       |
 | `catalog_dlq_archive` + admin | operator-driven | QStash exhausted retries; permanent failures  |
 
-**Producer publish-failure posture:** try/catch around `batchJSON` logs `catalog.queue.publish_failed` + `Sentry.captureException` with `{ queue: "catalog-resolve", phase: "publish" }`, then swallows. Surfacing to the load function would render an error page over readable feed content (cosmetic-enrichment posture per `feed-enrichment.ts:23-28`). Recovery is the nightly replay cron.
+**Producer publish-failure posture:** try/catch around `batchJSON` logs `catalog.queue.publish_failed` + `Sentry.captureException` with `{ queue: "catalog-resolve", phase: "publish" }`, then swallows. Surfacing to the load function would render an error page over readable feed content (cosmetic-enrichment posture per `catalog/feed-enrichment.ts:24-27`). Recovery is the nightly replay cron.
 
 **DLQ archive cron:** `/api/cron/catalog-dlq-drain` (05:00 UTC daily) pulls QStash DLQ contents into `catalog_dlq_archive` with 23505-tolerant INSERT (idempotent on partial-success retries), then deletes from QStash to free the 3-day retention slot. Implicit self-hoster gate on `!privateEnv.QSTASH_TOKEN` — returns `{ skipped: true }` matching the `catalog-replay` skip pattern. Per-iteration try/catch absorbs malformed-message edge cases without aborting the batch. Sentry extras strip `userId` (Supabase auth UUID) and forward only `{ fail_reason, item }`. Not wrapped in `Sentry.withMonitor` (free-tier slot allocated to `transfer-sweep`); `captureMessage` per archived item is the observability surface — `await Sentry.flush(2000)` before every return prevents Vercel function suspension from dropping events.
 
@@ -286,7 +300,7 @@ Cold-miss resolves route through Upstash QStash when `QSTASH_TOKEN + QSTASH_CONS
 
 ### Field-state model (introduced 2026-05-27)
 
-`book_catalog` carries per-field state — `<field>_attempted_at`, `<field>_attempts`, `<field>_fail_reason`, `<field>_provider` — for the six tracked fields: cover, description, publisher, published_date, subjects, page_count. Resolver gates per-field via `shouldAttempt(field, row, now)` (`src/lib/server/catalog/fetcher.ts`); chain walker (`src/lib/server/catalog/chain.ts`) aggregates per-leg `LegOutcome` into one `FailReason` per field. TTL ladder lives in SQL via `_field_replay_due()` (migration `20260527000004`) and in TS via `TTL_MS` — keep both in sync manually when editing the buckets. The tracked-field literal set + `FailReason` union live in [`src/lib/catalog/tracked-fields.ts`](src/lib/catalog/tracked-fields.ts) — under `$lib/catalog/`, NOT `$lib/server/catalog/`, so the admin `+page.svelte` files can value-import without tripping SvelteKit's server-only-bundle boundary.
+`book_catalog` carries per-field state — `<field>_attempted_at`, `<field>_attempts`, `<field>_fail_reason`, `<field>_provider` — for the six tracked fields: cover, description, publisher, published_date, subjects, page_count. Resolver gates per-field via `shouldAttempt(field, row, now)` (defined in `src/lib/server/catalog/chain.ts`, called from `fetcher.ts`); the chain walker (also `chain.ts`) aggregates per-leg `LegOutcome` into one `FailReason` per field. TTL ladder lives in SQL via `_field_replay_due()` (migration `20260527000004`) and in TS via `TTL_MS` (`chain.ts`) — keep both in sync manually when editing the buckets. The tracked-field literal set + `FailReason` union live in [`src/lib/catalog/tracked-fields.ts`](src/lib/catalog/tracked-fields.ts) — under `$lib/catalog/`, NOT `$lib/server/catalog/`, so the admin `+page.svelte` files can value-import without tripping SvelteKit's server-only-bundle boundary.
 
 **Replay surface**: `select_replay_candidates(p_limit)` powers the nightly `/api/cron/catalog-replay` cron (4 UTC). `requeue_catalog_resolve(id, fields[])` nulls value + state columns per field AND resets `do_not_refetch_description=FALSE` for description — memory `feedback_catalog_reset_sql_misses_flag` is the failure mode this prevents.
 
@@ -340,7 +354,7 @@ See `.env.example`. Required:
 - `SUPABASE_SERVICE_ROLE_KEY` — Service role key (server-side only, bypasses RLS)
 - `UPSTASH_REDIS_REST_URL` — Upstash Redis URL
 - `UPSTASH_REDIS_REST_TOKEN` — Upstash Redis token
-- `LIBRITO_JWT_PRIVATE_KEY_JWK` — Full JWK JSON (single line, includes `d`) of the Supabase standby signing key. Server-side only. Signs `/api/realtime-token` ES256 tokens; Realtime verifies via Supabase's project JWKS where the public side is published. Rotation runbook: `docs/ws-rt-follow-ups.md` item 8.
+- `LIBRITO_JWT_PRIVATE_KEY_JWK` — Full JWK JSON (single line, includes `d`) of the Supabase standby signing key. Server-side only. Signs `/api/realtime-token` ES256 tokens; Realtime verifies via Supabase's project JWKS where the public side is published. Rotation runbook: not yet in tracked docs — migration tracked in issue #103 (content formerly in the deleted `docs/ws-rt-follow-ups.md`).
 - `PUBLIC_SITE_URL` — _Optional._ Canonical site URL for outbound email links (defaults to `https://librito.io` when unset). Self-hosters should set this to their deployed origin.
 - `GOOGLE_BOOKS_API_KEY` — _Optional but strongly recommended._ Google Books API key used by the catalog resolver. Anonymous v1 quota is **0/day per project** (Google removed free anon access), so without a key the entire Google Books leg of the cover chain returns 429 → `tryGoogleBooksExtraLarge` and `enrichDescriptionWithGoogleBooks` both silently fall through, costing the premium 1200 px+ cover tier AND every book description. Free tier ~1000 req/day after enabling the Books API in any Google Cloud project. Self-hosters can omit; covers degrade to iTunes/OpenLibrary (300–500 px) and descriptions stay null. Mark as **Sensitive** in Vercel and read via `$env/dynamic/private` (see rule below).
 - `SENTRY_DSN` — _Optional._ Sentry project DSN. When set, server-side errors (including `runInBackground` throws) flow to Sentry for operator alerting. librito.io: set in Vercel production + preview (Sensitive). Self-hosters: leave unset to disable, or set to your own Sentry / Sentry-compatible endpoint. Mark as **Sensitive** in Vercel and read via `$env/dynamic/private` (see rule below).
@@ -351,7 +365,34 @@ See `.env.example`. Required:
 
 Vercel env vars have a per-var `type`: `encrypted` (default, decryptable via CLI) or `sensitive` (locked, never decryptable post-creation — even by Vercel CLI). `vercel pull` redacts sensitive vars to empty strings. Our production-deploy.yml uses `vercel pull` → `vercel build --prebuilt` → `vercel deploy --prebuilt`, so any sensitive var read via `$env/static/private` gets baked into the deployed bundle as `""` and the route silently misbehaves at runtime (401 forever on auth-checked routes, silent fallback to defaults on config gates).
 
-**Rule:** sensitive Vercel envs must be read via `$env/dynamic/private` (runtime read), never `$env/static/private` (build-time inlined). Verify type via `npx vercel env ls -F json production | jq '.envs[] | select(.key=="X") | .type'`. Currently sensitive in this project (must use dynamic): `CRON_SECRET`, `CATALOG_WARMUP_ENABLED`, `COVER_STORAGE_BACKEND`, `NYT_BOOKS_API_KEY`, `GOOGLE_BOOKS_API_KEY`, `LIBRITO_JWT_PRIVATE_KEY_JWK`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_IMAGES_API_TOKEN`, `PUBLIC_CLOUDFLARE_IMAGES_HASH`, `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `RESEND_API_KEY`, `QSTASH_TOKEN`, `QSTASH_CONSUMER_URL`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`. The smoke job catches CRON_SECRET regressions; other sensitive vars rely on this rule + code review. Add explicit `server_misconfigured` (500) guards at handler entry for the value you read, so a config drift surfaces loudly rather than silently. See `src/routes/api/cron/*/+server.ts` and `src/lib/server/cover-storage.ts` for the established pattern. Background: the bug surfaced via #195 / #196 after PR #195 added the smoke probe; rule applies to both production and any future preview-build flows that use `--prebuilt`.
+**Rule:** sensitive Vercel envs must be read via `$env/dynamic/private` (runtime read), never `$env/static/private` (build-time inlined).
+
+Currently sensitive in this project (must use dynamic):
+
+- `CRON_SECRET`
+- `CATALOG_WARMUP_ENABLED`
+- `COVER_STORAGE_BACKEND`
+- `NYT_BOOKS_API_KEY`
+- `GOOGLE_BOOKS_API_KEY`
+- `LIBRITO_JWT_PRIVATE_KEY_JWK`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_IMAGES_API_TOKEN`
+- `PUBLIC_CLOUDFLARE_IMAGES_HASH` — exception: `PUBLIC_`-prefixed, so SvelteKit's private env modules exclude it; read via `$env/dynamic/public` server-side only (`src/lib/server/cover-storage.ts`). Runtime read is what matters — Sensitive redaction only affects `vercel pull` build-time; the value never ships in the client bundle, only in server-built image URLs.
+- `SENTRY_DSN`
+- `SENTRY_AUTH_TOKEN`
+- `SENTRY_ORG`
+- `SENTRY_PROJECT`
+- `RESEND_API_KEY`
+- `QSTASH_TOKEN`
+- `QSTASH_CONSUMER_URL`
+- `QSTASH_CURRENT_SIGNING_KEY`
+- `QSTASH_NEXT_SIGNING_KEY`
+
+Verify type via `npx vercel env ls -F json production | jq '.envs[] | select(.key=="X") | .type'`.
+
+The smoke job catches CRON_SECRET regressions; other sensitive vars rely on this rule + code review. Add explicit `server_misconfigured` (500) guards at handler entry for the value you read, so a config drift surfaces loudly rather than silently. See `src/routes/api/cron/*/+server.ts` and `src/lib/server/cover-storage.ts` for the established pattern.
+
+Background: the bug surfaced via #195 / #196 after PR #195 added the smoke probe; rule applies to both production and any future preview-build flows that use `--prebuilt`.
 
 **Inverse rule for `PUBLIC_*` vars:** `$env/dynamic/public` (and `$env/static/public`) publish values to the browser bundle. Sensitive vars are redacted to empty strings by `vercel pull` before `vercel build --prebuilt` runs, so a Sensitive-typed `PUBLIC_*` var becomes the empty string in the deployed bundle. Currently `PUBLIC_SENTRY_DSN` is the only var subject to this rule — it MUST be Encrypted in Vercel. Verify type via `npx vercel env ls -F json production | jq '.envs[] | select(.key=="PUBLIC_SENTRY_DSN") | .type'` — expected output: `"encrypted"`.
 

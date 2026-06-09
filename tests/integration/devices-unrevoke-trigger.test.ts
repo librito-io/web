@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  asAuthUser,
   createTestUser,
   deleteTestUser,
   getSql,
@@ -81,12 +82,7 @@ describe.skipIf(SKIP)(
       // Run under the authenticated role so RLS + GRANTs apply the same way
       // PostgREST would route a PATCH. The trigger fires regardless of role.
       await expect(
-        sql.begin(async (txn) => {
-          await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
-            sub: user.id,
-            role: "authenticated",
-          })}, true)`;
-          await txn`SET LOCAL ROLE authenticated`;
+        asAuthUser(user.id, async (txn) => {
           await txn`UPDATE public.devices SET revoked_at = NULL WHERE id = ${deviceId} AND user_id = ${user.id}`;
         }),
       ).rejects.toMatchObject({ code: "23514" });
@@ -100,12 +96,7 @@ describe.skipIf(SKIP)(
       // fires. SQLSTATE 42501 = insufficient_privilege. This is the second
       // layer of defense after the trigger.
       await expect(
-        sql.begin(async (txn) => {
-          await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
-            sub: user.id,
-            role: "authenticated",
-          })}, true)`;
-          await txn`SET LOCAL ROLE authenticated`;
+        asAuthUser(user.id, async (txn) => {
           await txn`UPDATE public.devices SET revoked_at = NULL, api_token_hash = ${"attacker-chosen"} WHERE id = ${deviceId}`;
         }),
       ).rejects.toMatchObject({ code: "42501" });

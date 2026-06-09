@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import postgres from "postgres";
+import postgres, { type TransactionSql } from "postgres";
 
 // Resolve local Supabase connection info at module init. Works both locally
 // and in CI (where `supabase start` has already run) by shelling out to the
@@ -120,4 +120,28 @@ export async function deleteTestUser(id: string): Promise<void> {
   if (error) {
     throw new Error(`deleteTestUser failed: ${error.message}`);
   }
+}
+
+/**
+ * Per-transaction impersonation: run `work` inside one sql.begin txn with
+ * `request.jwt.claims` set (sub + role) and SET LOCAL ROLE authenticated,
+ * so SECURITY INVOKER functions see the right auth.uid() and RLS/GRANTs
+ * apply the same way PostgREST would route the call.
+ *
+ * The trailing cast pins postgres-js's overloaded `sql.begin` generic,
+ * which collapses to `never` when chained through a helper; the runtime
+ * contract is "txn is a TransactionSql".
+ */
+export async function asAuthUser<T>(
+  userId: string,
+  work: (txn: TransactionSql) => Promise<T> | T,
+): Promise<T> {
+  return getSql().begin(async (txn) => {
+    await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
+      sub: userId,
+      role: "authenticated",
+    })}, true)`;
+    await txn`SET LOCAL ROLE authenticated`;
+    return work(txn);
+  }) as Promise<T>;
 }

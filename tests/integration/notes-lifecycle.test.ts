@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  asAuthUser,
   createTestUser,
   deleteTestUser,
   getSql,
@@ -59,16 +60,13 @@ describe.skipIf(SKIP)("notes lifecycle: tombstone filtering via RPC", () => {
   });
 
   async function feedAsUser(uid: string) {
-    return sql.begin(async (txn) => {
-      await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
-        sub: uid,
-        role: "authenticated",
-      })}, true)`;
-      await txn`SET LOCAL ROLE authenticated`;
-      return txn<
-        { highlight_id: string; note_text: string | null }[]
-      >`SELECT highlight_id, note_text FROM get_highlight_feed('recent', NULL, 50, NULL)`;
-    });
+    return asAuthUser(
+      uid,
+      (txn) =>
+        txn<
+          { highlight_id: string; note_text: string | null }[]
+        >`SELECT highlight_id, note_text FROM get_highlight_feed('recent', NULL, 50, NULL)`,
+    );
   }
 
   it("returns note_text before soft-delete", async () => {

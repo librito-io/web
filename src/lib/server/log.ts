@@ -4,6 +4,7 @@ import pino, {
   stdTimeFunctions,
 } from "pino";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { REDACTED_FIELDS } from "$lib/sentry-scrub";
 
 interface LogContext {
   requestId: string;
@@ -19,26 +20,14 @@ function makeBase(): Logger {
   return pino(
     {
       level: process.env.LOG_LEVEL ?? "info",
-      // Pino's `*` glob matches a single path segment — `*.token` covers
-      // nested fields (e.g. `req.token`) but not top-level `token`. List
-      // both root and nested forms so a future contributor doesn't shrink
-      // the list and silently lose top-level redaction.
+      // Base names derive from REDACTED_FIELDS (the Sentry scrub list) so
+      // the two redaction layers stay in sync by construction — add new
+      // fields there, not here. Pino's `*` glob matches a single path
+      // segment — `*.field` covers nested fields (e.g. `req.token`) but
+      // not top-level `token`, hence both forms per name.
       redact: {
         paths: [
-          "token",
-          "*.token",
-          "api_token_hash",
-          "*.api_token_hash",
-          "password",
-          "*.password",
-          "email",
-          "*.email",
-          "userEmail",
-          "*.userEmail",
-          "privateKey",
-          "*.privateKey",
-          "jwk",
-          "*.jwk",
+          ...REDACTED_FIELDS.flatMap((f) => [f, `*.${f}`]),
           "req.headers.authorization",
           "req.headers.cookie",
         ],

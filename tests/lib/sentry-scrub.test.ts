@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
 import {
   scrubEvent,
   isSvelteKitFetchNoise,
@@ -216,24 +215,6 @@ describe("scrubEvent", () => {
     const scrubbed = (out.extra as Record<string, Record<string, unknown>>).bag;
     expect(scrubbed.token).toBe("[REDACTED]");
     expect(scrubbed.route).toBe("/api/sync");
-  });
-
-  it("every REDACTED_FIELDS entry appears in pino's redact list (sync guard)", () => {
-    const logSrc = readFileSync(
-      new URL("../../src/lib/server/log.ts", import.meta.url),
-      "utf8",
-    );
-    for (const field of REDACTED_FIELDS) {
-      // Pino lists redact paths as either `"field"` or `"*.field"`. Either
-      // form satisfies the sync requirement. If a future contributor adds
-      // a field to REDACTED_FIELDS without adding it to pino, this fails.
-      const hasTopLevel = logSrc.includes(`"${field}"`);
-      const hasNested = logSrc.includes(`"*.${field}"`);
-      expect(
-        hasTopLevel || hasNested,
-        `${field} missing from pino redact paths in log.ts`,
-      ).toBe(true);
-    }
   });
 });
 

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  asAuthUser,
   createTestUser,
   deleteTestUser,
   getAdmin,
@@ -194,16 +195,13 @@ describe.skipIf(SKIP)("kobo import (#497)", () => {
     expect(hl.styles).toBeNull();
 
     // The feed RPC must return the row without error despite NULL word fields.
-    const rows = await sql.begin(async (txn) => {
-      await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
-        sub: user.id,
-        role: "authenticated",
-      })}, true)`;
-      await txn`SET LOCAL ROLE authenticated`;
-      return txn<{ text: string }[]>`
+    const rows = await asAuthUser(
+      user.id,
+      (txn) =>
+        txn<{ text: string }[]>`
         SELECT text FROM get_highlight_feed('recent', NULL, 50, NULL)
-      `;
-    });
+      `,
+    );
     expect(rows.some((r) => r.text === "feed me")).toBe(true);
   });
 
@@ -400,16 +398,13 @@ describe.skipIf(SKIP)("kobo import (#497)", () => {
     `;
     expect(dc).toBe(4); // created_at intact — the signal the feed sorts on
 
-    const feed = await sql.begin(async (txn) => {
-      await txn`SELECT set_config('request.jwt.claims', ${JSON.stringify({
-        sub: user.id,
-        role: "authenticated",
-      })}, true)`;
-      await txn`SET LOCAL ROLE authenticated`;
-      return txn<{ text: string }[]>`
+    const feed = await asAuthUser(
+      user.id,
+      (txn) =>
+        txn<{ text: string }[]>`
         SELECT text FROM get_highlight_feed('recent', NULL, 50, ${bookHash})
-      `;
-    });
+      `,
+    );
     expect(feed.map((r) => r.text)).toEqual(expectedOrder);
   });
 });

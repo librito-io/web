@@ -104,6 +104,19 @@ describe("log.ts", () => {
       logger().info({ event: "login", password: "hunter2" }, "login");
       expect(writes[0].password).toBe("[REDACTED]");
     });
+
+    it("redacts *.privateKey", () => {
+      logger().info({ event: "realtime_token", privateKey: "PEM..." }, "mint");
+      expect(writes[0].privateKey).toBe("[REDACTED]");
+    });
+
+    it("redacts *.jwk", () => {
+      logger().info(
+        { event: "realtime_token", jwk: { kty: "EC", d: "secret" } },
+        "mint",
+      );
+      expect(writes[0].jwk).toBe("[REDACTED]");
+    });
   });
 
   describe("level filtering", () => {

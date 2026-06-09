@@ -34,9 +34,12 @@ export interface ScrubableEvent {
  *   - pino lists `req.headers.authorization` + `req.headers.cookie` as
  *     explicit paths; this scrub deletes those headers structurally in
  *     `scrubEvent` (see header-strip block below), not via this set.
- * Base-name additions here should also be added to pino's `paths`
- * (root + `*.` form) and vice versa. Header additions are pino-only —
- * add a sibling `delete headers.<name>` in `scrubEvent` to mirror.
+ * pino derives its base-name redact paths from this list (root + `*.`
+ * form via flatMap in log.ts), so additions here propagate to both
+ * layers automatically — and removals here de-redact pino logs too;
+ * tests/lib/log.test.ts asserts pino behavior per field. Header
+ * additions are pino-only — add a sibling `delete headers.<name>` in
+ * `scrubEvent` to mirror.
  *
  * Scope: `scrubEvent` is wired as `beforeSend` in BOTH `hooks.server.ts`
  * and `hooks.client.ts`, so this set redacts client-originated Sentry

@@ -47,7 +47,7 @@ Browser ──cookie session──→ App Routes (/app/*) ──anon key + RLS�
 - **Device API** (`/api/sync`, `/api/pair/*`, `/api/transfer/*`): Device sends `Authorization: Bearer sk_device_xxx`. Auth middleware (`src/lib/server/auth.ts`) hashes the token with SHA-256, looks up `devices.api_token_hash`, rejects if revoked. Uses `createAdminClient()` (service_role, bypasses RLS).
 - **Browser sessions** (`/app/*`): Supabase SSR cookie-based auth via `@supabase/ssr`. Auth guard in `/app/+layout.server.ts` redirects unauthenticated users to `/auth/login`.
 
-**Server hooks** (`hooks.server.ts`): Creates a per-request Supabase client with cookie persistence and exposes `safeGetSession()` on `event.locals`.
+**Server hooks** (`hooks.server.ts`): Creates a per-request Supabase client with cookie persistence and exposes `safeGetSession()` on `event.locals`. Also resolves the request locale (`librito.locale` cookie → `Accept-Language` → `en`) into `event.locals.locale` and rewrites the `<html lang dir>` open tag (RTL for `ar`); the root layout passes it to `initI18n()` so SSR text renders in the user's language (issue #523). svelte-i18n state is module-global — a narrow concurrent-SSR race can render one request in another's language; cosmetic, corrected at hydration, accepted in #523.
 
 ## Scaling Target
 

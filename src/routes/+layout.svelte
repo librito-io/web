@@ -6,10 +6,15 @@
   import * as Sentry from "@sentry/sveltekit";
   import Header from "$lib/components/Header.svelte";
   import MenuOverlay from "$lib/components/MenuOverlay.svelte";
-  import { PRELOAD_FONTS } from "$lib/fonts";
+  import { PRELOAD_FONTS, notoPreloadForLocale } from "$lib/fonts";
 
   let { data, children } = $props();
   let menuOpen = $state(false);
+
+  // Locale-gated Noto subset preloads (issue #416). Empty for every
+  // locale except ar/hi — emitted alongside the universal Inter/Literata
+  // preloads below. data.locale is server-resolved (issue #523).
+  const notoPreloads = $derived(notoPreloadForLocale(data.locale));
 
   // Tag Sentry events with the Supabase user ID so client-side errors
   // can be correlated with the user that hit them. ID only — NEVER
@@ -119,6 +124,15 @@
 
 <svelte:head>
   {#each PRELOAD_FONTS as href (href)}
+    <link
+      rel="preload"
+      {href}
+      as="font"
+      type="font/woff2"
+      crossorigin="anonymous"
+    />
+  {/each}
+  {#each notoPreloads as href (href)}
     <link
       rel="preload"
       {href}

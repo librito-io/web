@@ -28,12 +28,15 @@ export function resolveLocale(
         .find((p) => p.startsWith("q="));
       const parsedQ = qParam ? Number(qParam.slice(2)) : 1;
       return {
+        // RFC 7231 §5.3.1: q ranges 0..1; clamp out-of-range values so a
+        // crafted q=5 can't outrank legitimate entries.
         tag: rawTag.trim(),
-        q: Number.isFinite(parsedQ) ? parsedQ : 0,
+        q: Number.isFinite(parsedQ) ? Math.min(1, Math.max(0, parsedQ)) : 0,
         index,
       };
     })
-    .filter((c) => c.tag !== "" && c.tag !== "*")
+    // q=0 means "not acceptable" — never a candidate.
+    .filter((c) => c.tag !== "" && c.tag !== "*" && c.q > 0)
     .sort((a, b) => b.q - a.q || a.index - b.index);
 
   for (const candidate of candidates) {

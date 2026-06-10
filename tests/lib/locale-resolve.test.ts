@@ -44,6 +44,16 @@ describe("resolveLocale", () => {
     expect(resolveLocale(null, " de , fr;q=0.9 ")).toBe("de");
   });
 
+  it("never selects a q=0 entry (RFC 7231: not acceptable)", () => {
+    expect(resolveLocale(null, "de;q=0")).toBe("en");
+    expect(resolveLocale(null, "de;q=0,fr;q=0.5")).toBe("fr");
+  });
+
+  it("clamps out-of-range q so it cannot outrank legitimate entries", () => {
+    expect(resolveLocale(null, "de;q=5,fr")).toBe("de");
+    expect(resolveLocale(null, "fr,de;q=5")).toBe("fr");
+  });
+
   it("returns 'en' when nothing in the header is supported", () => {
     expect(resolveLocale(null, "xx,zz;q=0.5")).toBe("en");
   });

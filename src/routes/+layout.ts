@@ -38,5 +38,14 @@ export const load: LayoutLoad = async ({ data, depends, fetch }) => {
     error: userError,
   } = await supabase.auth.getUser();
 
-  return { session, user: userError ? null : user, supabase };
+  // Re-expose the server-resolved locale to the component tree: a
+  // universal load's return replaces (not merges with) the server data
+  // for the page `data` prop, so +layout.svelte's locale-gated Noto
+  // preload (issue #416) needs it threaded through here.
+  return {
+    session,
+    user: userError ? null : user,
+    supabase,
+    locale: data.locale,
+  };
 };

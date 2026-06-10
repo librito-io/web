@@ -9,8 +9,13 @@
    load on-demand via fontsource's per-subset @font-face blocks
    with unicode-range — the woff2 only fetches when a matching
    glyph is rendered, so Latin/Cyrillic users pay near-zero bytes.
-   Cold-cache first paint on non-Latin locales sees ~100-300ms
-   FOUT; locale-gated preload tracked in issue #416. */
+
+   Arabic + Devanagari additionally get a self-hosted, font-display:
+   optional 400/600 face (below) that is preloaded only on the ar/hi
+   locale, so those scripts render at first paint instead of FOUTing
+   (issue #416). CJK first paint still FOUTs ~100-300ms — its fontsource
+   packages slice each weight into ~120 unicode-range files with no
+   single-file subset to self-host, so ja/ko/zh stay swap-only. */
 @import "@fontsource/inter/500.css";
 @import "@fontsource/noto-sans-arabic/400.css";
 @import "@fontsource/noto-sans-arabic/500.css";
@@ -93,6 +98,81 @@
   font-weight: 100 900;
   font-display: optional;
   src: url("/fonts/inter-variable.woff2") format("woff2");
+}
+
+/* Locale-gated Noto script subsets (issue #416). Self-hosted Arabic +
+   Devanagari 400/600 woff2 with font-display: optional, preloaded only
+   on the ar/hi locale (notoPreloadForLocale in $lib/fonts) so a cold
+   first paint in those scripts renders Noto instead of FOUTing from the
+   system fallback — the same critical-preload + optional pattern as
+   Inter/Literata above.
+
+   These DELIBERATELY carry the fontsource script unicode-range (copied
+   verbatim from @fontsource/noto-sans-{arabic,devanagari}/400.css). The
+   range scopes the override to script codepoints only: declared after
+   the fontsource @imports, last-matching-face wins, so for an Arabic or
+   Devanagari glyph this optional self-hosted face shadows the
+   fontsource `swap` face, while latin / latin-ext / math / symbols
+   glyphs in the same family (and every other weight — 500, 700) stay on
+   the fontsource imports untouched. Without the range, this face would
+   also claim Latin codepoints it has no glyphs for → tofu on any char
+   Inter doesn't cover. CJK (ja/ko/zh) is intentionally absent: its
+   fontsource packages slice each weight into ~120 files with no
+   single-file subset to self-host. Keep the 400/600 src URLs identical
+   to the preload hrefs for single-fetch reuse. */
+@font-face {
+  font-family: "Noto Sans Arabic";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/fonts/noto-sans-arabic-400.woff2") format("woff2");
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1,
+    U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF,
+    U+FE70-FE74, U+FE76-FEFC, U+102E0-102FB, U+10E60-10E7E, U+10EC2-10EC4,
+    U+10EFC-10EFF, U+1EE00-1EE03, U+1EE05-1EE1F, U+1EE21-1EE22, U+1EE24,
+    U+1EE27, U+1EE29-1EE32, U+1EE34-1EE37, U+1EE39, U+1EE3B, U+1EE42, U+1EE47,
+    U+1EE49, U+1EE4B, U+1EE4D-1EE4F, U+1EE51-1EE52, U+1EE54, U+1EE57, U+1EE59,
+    U+1EE5B, U+1EE5D, U+1EE5F, U+1EE61-1EE62, U+1EE64, U+1EE67-1EE6A,
+    U+1EE6C-1EE72, U+1EE74-1EE77, U+1EE79-1EE7C, U+1EE7E, U+1EE80-1EE89,
+    U+1EE8B-1EE9B, U+1EEA1-1EEA3, U+1EEA5-1EEA9, U+1EEAB-1EEBB, U+1EEF0-1EEF1;
+}
+@font-face {
+  font-family: "Noto Sans Arabic";
+  font-style: normal;
+  font-weight: 600;
+  font-display: optional;
+  src: url("/fonts/noto-sans-arabic-600.woff2") format("woff2");
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1,
+    U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF,
+    U+FE70-FE74, U+FE76-FEFC, U+102E0-102FB, U+10E60-10E7E, U+10EC2-10EC4,
+    U+10EFC-10EFF, U+1EE00-1EE03, U+1EE05-1EE1F, U+1EE21-1EE22, U+1EE24,
+    U+1EE27, U+1EE29-1EE32, U+1EE34-1EE37, U+1EE39, U+1EE3B, U+1EE42, U+1EE47,
+    U+1EE49, U+1EE4B, U+1EE4D-1EE4F, U+1EE51-1EE52, U+1EE54, U+1EE57, U+1EE59,
+    U+1EE5B, U+1EE5D, U+1EE5F, U+1EE61-1EE62, U+1EE64, U+1EE67-1EE6A,
+    U+1EE6C-1EE72, U+1EE74-1EE77, U+1EE79-1EE7C, U+1EE7E, U+1EE80-1EE89,
+    U+1EE8B-1EE9B, U+1EEA1-1EEA3, U+1EEA5-1EEA9, U+1EEAB-1EEBB, U+1EEF0-1EEF1;
+}
+@font-face {
+  font-family: "Noto Sans Devanagari";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/fonts/noto-sans-devanagari-400.woff2") format("woff2");
+  unicode-range:
+    U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+20F0, U+25CC,
+    U+A830-A839, U+A8E0-A8FF, U+11B00-11B09;
+}
+@font-face {
+  font-family: "Noto Sans Devanagari";
+  font-style: normal;
+  font-weight: 600;
+  font-display: optional;
+  src: url("/fonts/noto-sans-devanagari-600.woff2") format("woff2");
+  unicode-range:
+    U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+20F0, U+25CC,
+    U+A830-A839, U+A8E0-A8FF, U+11B00-11B09;
 }
 
 /* Inter Text tracking. Rasmus Andersson dynmetrics formula

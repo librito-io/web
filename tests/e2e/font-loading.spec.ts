@@ -32,8 +32,11 @@ import { awaitHydration } from "./helpers/hydrate";
 //                                    interpolate the opsz axis to the
 //                                    font-size (#421).
 //
-// FOUT on cold cache for non-Latin locales is not asserted — locale-gated
-// preload to eliminate it tracked in issue #416.
+// Invariant 1 asserts no Noto preload on `/`, which is the default (en)
+// locale. ar/hi now DO emit a self-hosted Noto subset preload, gated on
+// the server-resolved locale (issue #416) — that contract lives in
+// locale-noto-preload.spec.ts. CJK (ja/ko/zh) stays on the on-demand
+// fontsource `swap` path asserted below.
 
 test.describe("font loading", () => {
   test("preload links: Inter + Literata, no Noto", async ({ page }) => {

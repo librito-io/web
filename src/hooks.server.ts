@@ -10,6 +10,8 @@ import * as Sentry from "@sentry/sveltekit";
 import { runWithContext, logger } from "$lib/server/log";
 import { scrubEvent } from "$lib/sentry-scrub";
 import { jsonError } from "$lib/server/errors";
+import { LOCALE_COOKIE } from "$lib/i18n/locales";
+import { resolveLocale } from "$lib/i18n/resolve";
 
 // Sensitive vars (SENTRY_DSN among them) are redacted by `vercel pull`,
 // so $env/static/private would inline an empty string into the prebuilt
@@ -61,6 +63,33 @@ const requestContext: Handle = async ({ event, resolve }) => {
       return response;
     },
   );
+};
+
+// Resolves the request locale (explicit cookie choice → Accept-Language
+// → "en") into event.locals.locale, and rewrites app.html's static
+// `<html lang="en" dir="ltr">` so first paint carries the correct
+// language and text direction (RTL for Arabic) before any JS runs.
+// The root layout load passes locals.locale to initI18n() so SSR text
+// renders in the same locale the <html> tag declares. Issue #523.
+//
+// The replace targets the exact literal in app.html — keep the two in
+// sync. transformPageChunk runs per chunk; the open tag sits in the
+// first chunk and the replace is a no-op on the rest.
+// Exported for direct unit testing (tests/hooks.server.test.ts).
+export const localeSetup: Handle = async ({ event, resolve }) => {
+  const locale = resolveLocale(
+    event.cookies.get(LOCALE_COOKIE) ?? null,
+    event.request.headers.get("accept-language"),
+  );
+  event.locals.locale = locale;
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  return resolve(event, {
+    transformPageChunk: ({ html }) =>
+      html.replace(
+        '<html lang="en" dir="ltr">',
+        `<html lang="${locale}" dir="${dir}">`,
+      ),
+  });
 };
 
 const supabaseSetup: Handle = async ({ event, resolve }) => {
@@ -153,6 +182,7 @@ export const appAuthGuard: Handle = async ({ event, resolve }) => {
 export const handle = sequence(
   Sentry.sentryHandle(),
   requestContext,
+  localeSetup,
   supabaseSetup,
   appAuthGuard,
 );

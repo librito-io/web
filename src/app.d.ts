@@ -1,4 +1,5 @@
 import type { SupabaseClient, Session, User } from "@supabase/supabase-js";
+import type { SupportedLocale } from "$lib/i18n/locales";
 
 declare module "*?raw" {
   const content: string;
@@ -21,6 +22,10 @@ declare global {
       session: Session | null;
       user: User | null;
       requestId: string;
+      // Resolved by localeSetup (hooks.server.ts): locale cookie →
+      // Accept-Language → "en". Drives SSR i18n init and the <html>
+      // lang/dir rewrite. Issue #523.
+      locale: SupportedLocale;
     }
     interface PageData {
       session?: Session | null;

@@ -34,7 +34,7 @@ vi.mock("@supabase/ssr", () => ({
   })),
 }));
 
-import { handle } from "../src/hooks.server";
+import { handle, localeSetup } from "../src/hooks.server";
 import {
   logger,
   __setTestDestination,
@@ -47,12 +47,86 @@ function fakeEvent(headers: Record<string, string> = {}) {
       method: "POST",
       headers,
     }),
-    cookies: { getAll: () => [], set: vi.fn() },
+    cookies: { get: () => undefined, getAll: () => [], set: vi.fn() },
     locals: {} as Record<string, unknown>,
     route: { id: "/api/test" },
     platform: undefined,
   } as unknown as Parameters<typeof handle>[0]["event"];
 }
+
+describe("hooks.server.ts localeSetup", () => {
+  function localeEvent({
+    cookie,
+    acceptLanguage,
+  }: {
+    cookie?: string;
+    acceptLanguage?: string;
+  }) {
+    return {
+      request: new Request("https://example.com/", {
+        headers: acceptLanguage ? { "accept-language": acceptLanguage } : {},
+      }),
+      cookies: {
+        get: (name: string) => (name === "librito.locale" ? cookie : undefined),
+        getAll: () => [],
+        set: vi.fn(),
+      },
+      locals: {} as Record<string, unknown>,
+      route: { id: "/" },
+      platform: undefined,
+    } as unknown as Parameters<typeof localeSetup>[0]["event"];
+  }
+
+  const SSR_HTML = '<!doctype html>\n<html lang="en" dir="ltr">\n<head>';
+
+  async function runLocaleSetup(
+    event: Parameters<typeof localeSetup>[0]["event"],
+  ) {
+    let transformed: string | undefined;
+    await localeSetup({
+      event,
+      resolve: async (_e, opts) => {
+        transformed = opts?.transformPageChunk?.({
+          html: SSR_HTML,
+          done: true,
+        }) as string | undefined;
+        return new Response("ok");
+      },
+    });
+    return transformed;
+  }
+
+  it("sets locals.locale from the cookie", async () => {
+    const event = localeEvent({ cookie: "ja", acceptLanguage: "de-DE" });
+    await runLocaleSetup(event);
+    expect(event.locals.locale).toBe("ja");
+  });
+
+  it("falls back to Accept-Language when no cookie", async () => {
+    const event = localeEvent({ acceptLanguage: "ko-KR,ko;q=0.9" });
+    await runLocaleSetup(event);
+    expect(event.locals.locale).toBe("ko");
+  });
+
+  it("rewrites the html open tag with the resolved lang", async () => {
+    const event = localeEvent({ cookie: "ja" });
+    const transformed = await runLocaleSetup(event);
+    expect(transformed).toContain('<html lang="ja" dir="ltr">');
+  });
+
+  it("sets dir=rtl for Arabic", async () => {
+    const event = localeEvent({ cookie: "ar" });
+    const transformed = await runLocaleSetup(event);
+    expect(transformed).toContain('<html lang="ar" dir="rtl">');
+  });
+
+  it("leaves the html tag unchanged for English", async () => {
+    const event = localeEvent({});
+    const transformed = await runLocaleSetup(event);
+    expect(transformed).toContain('<html lang="en" dir="ltr">');
+    expect(event.locals.locale).toBe("en");
+  });
+});
 
 describe("hooks.server.ts requestId", () => {
   let writes: Record<string, unknown>[];

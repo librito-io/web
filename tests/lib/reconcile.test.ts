@@ -48,6 +48,10 @@ describe("containsAtWordBoundary", () => {
   it("rejects an empty needle", () => {
     expect(containsAtWordBoundary("anything", "")).toBe(false);
   });
+
+  it("matches a needle anchored at the end of a longer haystack", () => {
+    expect(containsAtWordBoundary("hello world", "world")).toBe(true);
+  });
 });
 
 describe("textMatch", () => {
@@ -66,5 +70,87 @@ describe("textMatch", () => {
 
   it("equal length but different strings do not match", () => {
     expect(textMatch("abcde", "abcdf")).toBe(false);
+  });
+});
+
+import { __pairOverlap } from "$lib/server/import/reconcile";
+import type {
+  ExistingHighlight,
+  IncomingItem,
+} from "$lib/server/import/reconcile";
+
+function ex(overrides: Partial<ExistingHighlight> = {}): ExistingHighlight {
+  return {
+    id: "ex-1",
+    book_id: "book-1",
+    source: "kobo",
+    source_uid: "old-uid",
+    text: "the quick brown fox jumps over",
+    chapter_title: null,
+    deleted_at: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function inc(overrides: Partial<IncomingItem> = {}): IncomingItem {
+  return {
+    book_id: "book-1",
+    source_uid: "new-uid",
+    text: "the quick brown fox jumps over",
+    chapter_title: null,
+    ...overrides,
+  };
+}
+
+describe("__pairOverlap guards", () => {
+  it("returns the shorter normalized length when contained and >= 20", () => {
+    // "the quick brown fox jumps" is 25 chars, contained in the longer text.
+    const a = ex({ text: "the quick brown fox jumps" });
+    const n = inc({ text: "well the quick brown fox jumps over the lazy dog" });
+    expect(__pairOverlap(a, n)).toBe(25);
+  });
+
+  it("returns null when texts do not match", () => {
+    expect(
+      __pairOverlap(ex({ text: "completely different words here" }), inc()),
+    ).toBeNull();
+  });
+
+  it("length floor: 19 rejects, 20 accepts, 21 accepts", () => {
+    const t19 = "a".repeat(9) + " " + "b".repeat(9); // 19 chars
+    const t20 = "a".repeat(9) + " " + "b".repeat(10); // 20 chars
+    const t21 = "a".repeat(10) + " " + "b".repeat(10); // 21 chars
+    expect(__pairOverlap(ex({ text: t19 }), inc({ text: t19 }))).toBeNull();
+    expect(__pairOverlap(ex({ text: t20 }), inc({ text: t20 }))).toBe(20);
+    expect(__pairOverlap(ex({ text: t21 }), inc({ text: t21 }))).toBe(21);
+  });
+
+  it("chapter gate: both non-empty + different → no match", () => {
+    const a = ex({ chapter_title: "Chapter One" });
+    const n = inc({ chapter_title: "Chapter Two" });
+    expect(__pairOverlap(a, n)).toBeNull();
+  });
+
+  it("chapter gate: empty/null on either side passes", () => {
+    expect(
+      __pairOverlap(
+        ex({ chapter_title: null }),
+        inc({ chapter_title: "Chapter Two" }),
+      ),
+    ).not.toBeNull();
+    expect(
+      __pairOverlap(
+        ex({ chapter_title: "Chapter One" }),
+        inc({ chapter_title: "" }),
+      ),
+    ).not.toBeNull();
+  });
+
+  it("chapter gate compares after whitespace normalization", () => {
+    // Same chapter, differing only by whitespace → must NOT block.
+    const a = ex({ chapter_title: "Chapter   One" });
+    const n = inc({ chapter_title: " Chapter One " });
+    expect(__pairOverlap(a, n)).not.toBeNull();
   });
 });

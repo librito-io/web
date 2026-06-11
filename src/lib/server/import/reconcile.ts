@@ -50,6 +50,7 @@ export interface Amend {
   source_uid: string;
   /** Verbatim incoming text (never the normalized form). */
   text: string;
+  /** Verbatim incoming chapter title (same provenance as text). */
   chapter_title: string | null;
 }
 
@@ -136,3 +137,127 @@ function pairOverlap(a: ExistingHighlight, n: IncomingItem): number | null {
 
 /** @internal test seam for the guard table tests — not part of the API. */
 export const __pairOverlap = pairOverlap;
+
+interface Pair {
+  aIdx: number;
+  nIdx: number;
+  overlap: number;
+}
+
+/**
+ * For each key index (0..count-1), the partner index of its strict UNIQUE
+ * maximum-overlap pair, or -1 when none exists or the top two overlaps tie.
+ * `keyField` selects the grouping side, `partnerField` the returned side.
+ * Order-independent: only the max and whether it is unique matter.
+ */
+function bestPartner(
+  pairs: Pair[],
+  keyField: "aIdx" | "nIdx",
+  partnerField: "aIdx" | "nIdx",
+  count: number,
+): number[] {
+  const best = new Array<number>(count).fill(-1);
+  const bestOverlap = new Array<number>(count).fill(-1);
+  const tied = new Array<boolean>(count).fill(false);
+  for (const p of pairs) {
+    const k = p[keyField];
+    if (p.overlap > bestOverlap[k]) {
+      bestOverlap[k] = p.overlap;
+      best[k] = p[partnerField];
+      tied[k] = false; // a strictly greater value clears any earlier tie
+    } else if (p.overlap === bestOverlap[k]) {
+      tied[k] = true;
+    }
+  }
+  for (let k = 0; k < count; k++) if (tied[k]) best[k] = -1;
+  return best;
+}
+
+/**
+ * Pair "absent" existing kobo rows with "new" incoming items per book and
+ * emit in-place amends. Mutual-unique-best: a pair is accepted iff it is the
+ * strict unique maximum-overlap guard-passing pair for BOTH its absent row
+ * and its new item (ties bail; no second-best cascade; iteration-order
+ * independent). Determinism: candidates iterate in sorted source_uid order so
+ * the amend array is stable across replays.
+ */
+export function computeReconcile(
+  existing: ExistingHighlight[],
+  incoming: IncomingItem[],
+): ReconcileResult {
+  const amends: Amend[] = [];
+  const matchedAbsentCreatedAt: string[] = [];
+  let unmatchedAbsentCount = 0;
+
+  // Group incoming by book (defines the COVERED books).
+  const incomingByBook = new Map<string, IncomingItem[]>();
+  for (const it of incoming) {
+    const arr = incomingByBook.get(it.book_id);
+    if (arr) arr.push(it);
+    else incomingByBook.set(it.book_id, [it]);
+  }
+
+  // Group existing kobo rows by book (source scoping is load-bearing — a
+  // PaperS3 row's NULL source_uid would otherwise read as "absent").
+  const existingByBook = new Map<string, ExistingHighlight[]>();
+  for (const e of existing) {
+    if (e.source !== "kobo" || e.source_uid === null) continue;
+    const arr = existingByBook.get(e.book_id);
+    if (arr) arr.push(e);
+    else existingByBook.set(e.book_id, [e]);
+  }
+
+  // Covered books in sorted id order → deterministic output across books.
+  const bookIds = Array.from(incomingByBook.keys()).sort();
+  for (const bookId of bookIds) {
+    const inc = (incomingByBook.get(bookId) ?? [])
+      .slice()
+      .sort((x, y) => (x.source_uid < y.source_uid ? -1 : 1));
+    const ex = (existingByBook.get(bookId) ?? [])
+      .slice()
+      .sort((x, y) =>
+        (x.source_uid as string) < (y.source_uid as string) ? -1 : 1,
+      );
+
+    const incomingUids = new Set(inc.map((i) => i.source_uid));
+    const existingUids = new Set(ex.map((e) => e.source_uid as string));
+
+    const absent = ex.filter((e) => !incomingUids.has(e.source_uid as string));
+    const fresh = inc.filter((i) => !existingUids.has(i.source_uid));
+    if (absent.length === 0 || fresh.length === 0) {
+      unmatchedAbsentCount += absent.length;
+      continue;
+    }
+
+    // Guard-passing candidate pairs.
+    const pairs: Pair[] = [];
+    for (let a = 0; a < absent.length; a++) {
+      for (let n = 0; n < fresh.length; n++) {
+        const o = pairOverlap(absent[a], fresh[n]);
+        if (o !== null) pairs.push({ aIdx: a, nIdx: n, overlap: o });
+      }
+    }
+
+    const bestForA = bestPartner(pairs, "aIdx", "nIdx", absent.length);
+    const bestForN = bestPartner(pairs, "nIdx", "aIdx", fresh.length);
+
+    const matched = new Set<number>();
+    for (const p of pairs) {
+      if (bestForA[p.aIdx] === p.nIdx && bestForN[p.nIdx] === p.aIdx) {
+        const a = absent[p.aIdx];
+        const n = fresh[p.nIdx];
+        amends.push({
+          id: a.id,
+          source_uid: n.source_uid,
+          text: n.text, // verbatim incoming, never normalized
+          chapter_title: n.chapter_title,
+        });
+        matchedAbsentCreatedAt.push(a.created_at);
+        matched.add(p.aIdx);
+      }
+    }
+    unmatchedAbsentCount += absent.length - matched.size;
+  }
+
+  return { amends, matchedAbsentCreatedAt, unmatchedAbsentCount };
+}

@@ -350,6 +350,21 @@ describe("processKoboImport", () => {
     );
   });
 
+  it("throws when the existing-rows SELECT errors", async () => {
+    const mock = createMockSupabase();
+    mock._results.set("books.upsert", {
+      data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    mock._results.set("highlights.select", {
+      data: null,
+      error: { message: "select boom" },
+    });
+    await expect(processKoboImport(mock, "user-1", [item()])).rejects.toThrow(
+      /Failed to load existing kobo highlights/,
+    );
+  });
+
   it("SELECTs existing rows scoped to source='kobo' for the covered books", async () => {
     const mock = createMockSupabase();
     mock._results.set("books.upsert", {

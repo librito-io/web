@@ -393,4 +393,18 @@ describe("computeReconcile", () => {
     );
     expect(r1.amends).toEqual(r2.amends); // order-independent result
   });
+
+  it("counts an absent row as unmatched when the book has no fresh items (early-continue path)", () => {
+    // absent.length > 0 but fresh.length === 0 → the per-book early-continue
+    // branch must still count the absent row (unmatchedAbsentCount drives the
+    // downstream stamp decision).
+    const existing = [
+      ex({ id: "GONE", source_uid: "u_gone", text: BASE }), // absent (uid not in incoming)
+      ex({ id: "STAY", source_uid: "u_stay", text: BASE }), // present (uid in incoming)
+    ];
+    const incoming = [inc({ source_uid: "u_stay", text: BASE })]; // only u_stay → no fresh items
+    const r = computeReconcile(existing, incoming);
+    expect(r.amends).toEqual([]);
+    expect(r.unmatchedAbsentCount).toBe(1);
+  });
 });

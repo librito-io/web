@@ -138,6 +138,15 @@ const fns: Fn[] = [
     allowRoles: ["service_role"],
     rpcSlug: "upsert_kobo_highlights",
   },
+  // Kobo reconcile RPC (2026-06-11 #527). Replaces upsert_kobo_highlights in
+  // the import flow. Service-role only — same posture as upsert_kobo_highlights.
+  {
+    name: "reconcile_kobo_highlights",
+    args: "uuid, jsonb, jsonb",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: "reconcile_kobo_highlights",
+  },
 ];
 
 describe.skipIf(SKIP)("public function grants (issue #327)", () => {

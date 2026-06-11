@@ -7,6 +7,7 @@ import {
   processKoboImport,
   type KoboImportItem,
 } from "$lib/server/import/kobo";
+import { __setTestDestination, __resetTestDestination } from "$lib/server/log";
 
 function item(overrides: Partial<KoboImportItem> = {}): KoboImportItem {
   return {
@@ -133,11 +134,15 @@ describe("validateKoboPayload", () => {
 });
 
 describe("processKoboImport", () => {
-  it("upserts kobo highlights via the upsert_kobo_highlights RPC and omits deleted_at", async () => {
+  it("reconciles kobo highlights via the reconcile_kobo_highlights RPC and omits deleted_at", async () => {
     const mock = createMockSupabase();
-    // No-ISBN path: book upsert returns an id.
     mock._results.set("books.upsert", {
       data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    mock._results.set("highlights.select", { data: [], error: null }); // no existing rows
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 0, cleared: 0, cross_book_uid_hits: 0 },
       error: null,
     });
 
@@ -145,27 +150,24 @@ describe("processKoboImport", () => {
 
     expect(result.imported).toBe(1);
     expect(result.books).toBe(1);
+    expect(result.amended).toBe(0);
 
-    // Highlights go through the RPC (partial-index upsert; supabase-js
-    // .upsert() can't thread the WHERE predicate).
     const rpcCall = mock._rpcCalls.find(
-      (c) => c.name === "upsert_kobo_highlights",
+      (c) => c.name === "reconcile_kobo_highlights",
     );
     expect(rpcCall).toBeDefined();
     const args = rpcCall!.args as {
       p_user_id: string;
       p_rows: Record<string, unknown>[];
+      p_amends: unknown[];
     };
-    // user_id is pinned server-side via p_user_id, NOT carried per-row.
     expect(args.p_user_id).toBe("user-1");
+    expect(Array.isArray(args.p_amends)).toBe(true);
     const rows = args.p_rows;
     expect(rows[0].source_uid).toBe("bm-1");
     expect(rows[0].book_id).toBe("book-1");
     expect("user_id" in rows[0]).toBe(false);
-    // Load-bearing: deleted_at must NOT be in the payload (no resurrection).
     expect("deleted_at" in rows[0]).toBe(false);
-    // Word fields must NOT be set (Kobo rows are not word-index based).
-    // (source='kobo' is forced inside the RPC, not in the JS payload.)
     expect("start_word" in rows[0]).toBe(false);
     expect("chapter_index" in rows[0]).toBe(false);
   });
@@ -174,6 +176,11 @@ describe("processKoboImport", () => {
     const mock = createMockSupabase();
     mock._results.set("books.upsert", {
       data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    mock._results.set("highlights.select", { data: [], error: null });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 0, cleared: 0, cross_book_uid_hits: 0 },
       error: null,
     });
 
@@ -198,6 +205,11 @@ describe("processKoboImport", () => {
       data: [{ id: "existing-book", isbn: "9780000000001" }],
       error: null,
     });
+    mock._results.set("highlights.select", { data: [], error: null });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 0, cleared: 0, cross_book_uid_hits: 0 },
+      error: null,
+    });
 
     const result = await processKoboImport(mock, "user-1", [
       item({ isbn: "9780000000001", content_id: "" }),
@@ -206,7 +218,7 @@ describe("processKoboImport", () => {
     // No books upsert fired — reused the existing row.
     expect(mock._upsertCalls.find((c) => c.table === "books")).toBeUndefined();
     const rpcCall = mock._rpcCalls.find(
-      (c) => c.name === "upsert_kobo_highlights",
+      (c) => c.name === "reconcile_kobo_highlights",
     );
     const rows = (rpcCall!.args as { p_rows: Record<string, unknown>[] })
       .p_rows;
@@ -222,6 +234,11 @@ describe("processKoboImport", () => {
       data: [{ id: "new-book", book_hash: "feedface" }],
       error: null,
     });
+    mock._results.set("highlights.select", { data: [], error: null });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 0, cleared: 0, cross_book_uid_hits: 0 },
+      error: null,
+    });
 
     const result = await processKoboImport(mock, "user-1", [
       item({ isbn: "9780000000099", content_id: "" }),
@@ -233,7 +250,7 @@ describe("processKoboImport", () => {
     expect(row.isbn).toBe("9780000000099");
     expect(row.book_hash).toMatch(/^[0-9a-f]{8}$/);
     const rpcCall = mock._rpcCalls.find(
-      (c) => c.name === "upsert_kobo_highlights",
+      (c) => c.name === "reconcile_kobo_highlights",
     );
     const rows = (rpcCall!.args as { p_rows: Record<string, unknown>[] })
       .p_rows;
@@ -247,6 +264,11 @@ describe("processKoboImport", () => {
       data: [{ id: "book-1", book_hash: "deadbeef" }],
       error: null,
     });
+    mock._results.set("highlights.select", { data: [], error: null });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 0, cleared: 0, cross_book_uid_hits: 0 },
+      error: null,
+    });
 
     await processKoboImport(mock, "user-1", [
       item({ source_uid: "ts-1", created_at: "2024-01-02T03:04:05Z" }),
@@ -254,7 +276,7 @@ describe("processKoboImport", () => {
     ]);
 
     const rpcCall = mock._rpcCalls.find(
-      (c) => c.name === "upsert_kobo_highlights",
+      (c) => c.name === "reconcile_kobo_highlights",
     );
     const rows = (rpcCall!.args as { p_rows: Record<string, unknown>[] })
       .p_rows;
@@ -268,6 +290,11 @@ describe("processKoboImport", () => {
     const mock = createMockSupabase();
     mock._results.set("books.upsert", {
       data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    mock._results.set("highlights.select", { data: [], error: null });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 0, cleared: 0, cross_book_uid_hits: 0 },
       error: null,
     });
 
@@ -307,18 +334,131 @@ describe("processKoboImport", () => {
     ).rejects.toThrow(/Failed to look up books by isbn/);
   });
 
-  it("throws when the highlight upsert RPC errors", async () => {
+  it("throws when the reconcile RPC errors", async () => {
     const mock = createMockSupabase();
     mock._results.set("books.upsert", {
       data: [{ id: "book-1", book_hash: "deadbeef" }],
       error: null,
     });
-    mock._results.set("rpc.upsert_kobo_highlights", {
+    mock._results.set("highlights.select", { data: [], error: null });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
       data: null,
       error: { message: "rpc boom" },
     });
     await expect(processKoboImport(mock, "user-1", [item()])).rejects.toThrow(
-      /Failed to upsert highlights/,
+      /Failed to reconcile highlights/,
     );
+  });
+
+  it("throws when the existing-rows SELECT errors", async () => {
+    const mock = createMockSupabase();
+    mock._results.set("books.upsert", {
+      data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    mock._results.set("highlights.select", {
+      data: null,
+      error: { message: "select boom" },
+    });
+    await expect(processKoboImport(mock, "user-1", [item()])).rejects.toThrow(
+      /Failed to load existing kobo highlights/,
+    );
+  });
+
+  it("SELECTs existing rows scoped to source='kobo' for the covered books", async () => {
+    const mock = createMockSupabase();
+    mock._results.set("books.upsert", {
+      data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    mock._results.set("highlights.select", { data: [], error: null });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 0, cleared: 0, cross_book_uid_hits: 0 },
+      error: null,
+    });
+
+    await processKoboImport(mock, "user-1", [item()]);
+
+    const sourceFilter = mock._chainCalls.find(
+      (c) =>
+        c.table === "highlights" &&
+        c.operation === "select" &&
+        c.method === "eq" &&
+        c.args[0] === "source" &&
+        c.args[1] === "kobo",
+    );
+    expect(sourceFilter).toBeDefined();
+  });
+
+  it("passes the matcher's amends to the RPC and returns the amended count", async () => {
+    const mock = createMockSupabase();
+    mock._results.set("books.upsert", {
+      data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    // One absent existing row whose text is contained in the incoming item.
+    mock._results.set("highlights.select", {
+      data: [
+        {
+          id: "row-A",
+          book_id: "book-1",
+          source: "kobo",
+          source_uid: "old-uid",
+          text: "the quick brown fox jumps over",
+          chapter_title: null,
+          deleted_at: null,
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 1, stamped: 0, cleared: 0, cross_book_uid_hits: 0 },
+      error: null,
+    });
+
+    const result = await processKoboImport(mock, "user-1", [
+      item({
+        source_uid: "new-uid",
+        text: "well the quick brown fox jumps over the lazy dog",
+      }),
+    ]);
+
+    const rpcCall = mock._rpcCalls.find(
+      (c) => c.name === "reconcile_kobo_highlights",
+    );
+    const amends = (
+      rpcCall!.args as { p_amends: Array<Record<string, unknown>> }
+    ).p_amends;
+    expect(amends).toHaveLength(1);
+    expect(amends[0]).toMatchObject({ id: "row-A", source_uid: "new-uid" });
+    // imported is the FULL batch size, unchanged by the amend (agent baseline).
+    expect(result.imported).toBe(1);
+    expect(result.amended).toBe(1);
+  });
+
+  it("logs the RPC's cross_book_uid_hits count on the reconcile line", async () => {
+    const mock = createMockSupabase();
+    mock._results.set("books.upsert", {
+      data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    mock._results.set("highlights.select", { data: [], error: null });
+    // The RPC reports one incoming uid living under another book_id.
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 0, cleared: 0, cross_book_uid_hits: 1 },
+      error: null,
+    });
+    const logs: string[] = [];
+    __setTestDestination((line) => logs.push(line));
+
+    await processKoboImport(mock, "user-1", [item({ source_uid: "bm-1" })]);
+    __resetTestDestination();
+
+    const line = logs
+      .map((l) => JSON.parse(l))
+      .find((o) => o.event === "import.kobo.reconcile");
+    expect(line).toBeDefined();
+    expect(line.crossBookUidHits).toBe(1);
   });
 });

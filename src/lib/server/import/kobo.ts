@@ -1,4 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { computeReconcile } from "./reconcile";
+import type { ExistingHighlight } from "./reconcile";
+import { logger } from "$lib/server/log";
 
 // Kobo highlight import — Track 1, Issue 2 (librito-io/web#497).
 //
@@ -37,6 +40,7 @@ export interface KoboImportItem {
 export interface KoboImportResult {
   imported: number;
   books: number;
+  amended: number;
 }
 
 // --- Validation (mirrors the strictness of validateSyncPayload) ---
@@ -328,22 +332,19 @@ export async function processKoboImport(
     bookKeyToId.set(key, upserted[0].id);
   }
 
-  // 2. Batch-upsert highlights via the upsert_kobo_highlights RPC.
+  // 2. Reconcile + write via the reconcile_kobo_highlights RPC.
   //
-  // The dedup key highlights_source_uid_key is a PARTIAL unique index
-  // (WHERE source_uid IS NOT NULL); supabase-js `.upsert({ onConflict })`
-  // cannot thread the partial predicate, so the conflict target must carry the
-  // matching WHERE — which only the SQL function can express. The RPC forces
-  // source='kobo', leaves word/style columns NULL, and omits deleted_at on
-  // conflict (server owns soft-delete; no resurrection on re-import).
+  // FULL-SET import (kobo-sync invariant #5): the agent re-POSTs the entire
+  // highlight set every run. That is what makes "absent" meaningful — see
+  // reconcile.ts. p_rows is the full batch; the matcher derives in-place
+  // amends for span re-drags; the RPC also stamps first-observed removals.
   const highlightRows = groups.flatMap((g) => {
     const key = g.isbn ? `isbn:${g.isbn}` : `cid:${g.contentId}`;
     const bookId = bookKeyToId.get(key);
     if (!bookId) throw new Error(`Book ${key} missing from resolve result`);
     return g.items.map((it) => ({
       book_id: bookId,
-      // user_id is NOT in the row payload — the RPC pins it from p_user_id
-      // server-side so a payload value can never bind a row to another user.
+      // user_id is NOT in the row payload — the RPC pins it from p_user_id.
       source_uid: it.source_uid,
       text: it.text,
       chapter_title: it.chapter_title ?? null,
@@ -351,15 +352,82 @@ export async function processKoboImport(
     }));
   });
 
-  if (highlightRows.length > 0) {
-    const { error: hlErr } = await supabase.rpc("upsert_kobo_highlights", {
-      p_user_id: userId,
-      p_rows: highlightRows,
-    });
-    if (hlErr) {
-      throw new Error(`Failed to upsert highlights: ${hlErr.message}`);
-    }
+  if (highlightRows.length === 0) {
+    return { imported: 0, books: groups.length, amended: 0 };
   }
 
-  return { imported: highlightRows.length, books: groups.length };
+  const bookIds = Array.from(new Set(highlightRows.map((r) => r.book_id)));
+
+  // Load the user's existing kobo rows for the covered books (live AND
+  // trashed — trashed rows are amend candidates so trash intent survives a
+  // span re-drag). source='kobo' scoping is load-bearing: a shared-ISBN book
+  // can hold PaperS3 rows whose NULL source_uid would read as "absent".
+  const { data: existingRows, error: exErr } = await supabase
+    .from("highlights")
+    .select(
+      "id, book_id, source, source_uid, text, chapter_title, deleted_at, created_at",
+    )
+    .eq("user_id", userId)
+    .eq("source", "kobo")
+    .in("book_id", bookIds)
+    .overrideTypes<ExistingHighlight[], { merge: false }>();
+  if (exErr) {
+    throw new Error(
+      `Failed to load existing kobo highlights: ${exErr.message}`,
+    );
+  }
+
+  const incoming = highlightRows.map((r) => ({
+    book_id: r.book_id,
+    source_uid: r.source_uid,
+    text: r.text,
+    chapter_title: r.chapter_title,
+  }));
+
+  const { amends, matchedAbsentCreatedAt, unmatchedAbsentCount } =
+    computeReconcile(existingRows ?? [], incoming);
+
+  // One RPC: amends → upsert → stamps, plus the cross-book uid detector
+  // (folded into the RPC so a full-set re-POST of up to MAX_ITEMS uids never
+  // builds an unbounded .in("source_uid", …) URL — see the RPC's STEP 0).
+  const { data: counts, error: rpcErr } = await supabase.rpc(
+    "reconcile_kobo_highlights",
+    { p_user_id: userId, p_rows: highlightRows, p_amends: amends },
+  );
+  if (rpcErr) {
+    throw new Error(`Failed to reconcile highlights: ${rpcErr.message}`);
+  }
+  const {
+    amended = 0,
+    stamped = 0,
+    cleared = 0,
+    cross_book_uid_hits: crossBookUidHits = 0,
+  } = (counts ?? {}) as {
+    amended: number;
+    stamped: number;
+    cleared: number;
+    cross_book_uid_hits: number;
+  };
+
+  // Per-import structured line — instrumentation over fuzz (§8). Age is for
+  // separating fresh re-drags from dedup-across-delete; NEVER a gate.
+  const now = Date.now();
+  logger().info(
+    {
+      event: "import.kobo.reconcile",
+      books: groups.length,
+      imported: highlightRows.length,
+      amended,
+      stamped,
+      cleared,
+      unmatchedAbsent: unmatchedAbsentCount,
+      matchedAbsentAgeDays: matchedAbsentCreatedAt.map((c) =>
+        Math.round((now - Date.parse(c)) / 86_400_000),
+      ),
+      crossBookUidHits,
+    },
+    "import.kobo.reconcile",
+  );
+
+  return { imported: highlightRows.length, books: groups.length, amended };
 }

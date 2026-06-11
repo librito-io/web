@@ -510,6 +510,7 @@ export type Database = {
           end_word: number | null
           id: string
           paragraph_breaks: Json | null
+          removed_from_device_at: string | null
           source: string
           source_uid: string | null
           start_word: number | null
@@ -528,6 +529,7 @@ export type Database = {
           end_word?: number | null
           id?: string
           paragraph_breaks?: Json | null
+          removed_from_device_at?: string | null
           source?: string
           source_uid?: string | null
           start_word?: number | null
@@ -546,6 +548,7 @@ export type Database = {
           end_word?: number | null
           id?: string
           paragraph_breaks?: Json | null
+          removed_from_device_at?: string | null
           source?: string
           source_uid?: string | null
           start_word?: number | null
@@ -779,6 +782,10 @@ export type Database = {
       promote_ta_to_isbn: {
         Args: { p_isbn: string; p_ta_key: string }
         Returns: boolean
+      }
+      reconcile_kobo_highlights: {
+        Args: { p_amends: Json; p_rows: Json; p_user_id: string }
+        Returns: Json
       }
       requeue_catalog_resolve: {
         Args: { p_fields: string[]; p_id: string }

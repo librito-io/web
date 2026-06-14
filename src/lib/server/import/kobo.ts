@@ -405,8 +405,8 @@ export async function processKoboImport(
     chapter_title: r.chapter_title,
   }));
 
-  // One app-clock cutoff, shared by the matcher (candidacy) and — once threaded
-  // in Task 4 — the RPC (amend precondition). See RE_DRAG_GRACE_MS.
+  // One app-clock cutoff, shared by the matcher (candidacy) and the RPC
+  // (amend precondition, p_cutoff). See RE_DRAG_GRACE_MS.
   const cutoff = new Date(Date.now() - RE_DRAG_GRACE_MS);
 
   const {

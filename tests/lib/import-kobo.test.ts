@@ -408,6 +408,7 @@ describe("processKoboImport", () => {
           chapter_title: null,
           deleted_at: null,
           created_at: "2026-01-01T00:00:00.000Z",
+          removed_from_device_at: null,
         },
       ],
       error: null,

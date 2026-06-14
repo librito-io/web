@@ -89,6 +89,7 @@ function ex(overrides: Partial<ExistingHighlight> = {}): ExistingHighlight {
     chapter_title: null,
     deleted_at: null,
     created_at: "2026-01-01T00:00:00.000Z",
+    removed_from_device_at: null,
     ...overrides,
   };
 }
@@ -167,13 +168,15 @@ import { computeReconcile } from "$lib/server/import/reconcile";
 // of the structural tests below. Distinct fragments are built by slicing it.
 const BASE = "the quick brown fox jumps over the lazy dog tonight";
 
+const CUTOFF = new Date("2026-06-14T12:00:00.000Z");
+
 describe("computeReconcile", () => {
   it("amends an absent row when a new item contains it (one direction)", () => {
     const existing = [
       ex({ id: "A", source_uid: "u_old", text: BASE.slice(0, 30) }),
     ];
     const incoming = [inc({ source_uid: "u_new", text: BASE })];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toEqual([
       { id: "A", source_uid: "u_new", text: BASE, chapter_title: null },
     ]);
@@ -184,7 +187,7 @@ describe("computeReconcile", () => {
   it("amends in the other direction (new item is the shorter, contained text)", () => {
     const existing = [ex({ id: "A", source_uid: "u_old", text: BASE })];
     const incoming = [inc({ source_uid: "u_new", text: BASE.slice(0, 30) })];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toHaveLength(1);
     expect(r.amends[0].text).toBe(BASE.slice(0, 30)); // verbatim incoming, shorter
   });
@@ -194,7 +197,7 @@ describe("computeReconcile", () => {
       ex({ id: "A", source_uid: "u_old", text: BASE.slice(0, 30) }),
     ];
     const incoming = [inc({ source_uid: "u_new", text: "\t " + BASE })];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends[0].text).toBe("\t " + BASE); // raw, with the tab-space prefix
   });
 
@@ -210,7 +213,7 @@ describe("computeReconcile", () => {
       inc({ source_uid: "n1", text: big + " " + mid }), // contains both big and mid
       inc({ source_uid: "n2", text: mid }),
     ];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toEqual([
       {
         id: "A1",
@@ -245,7 +248,7 @@ describe("computeReconcile", () => {
       inc({ source_uid: "n1", text: N1 }), // contained in BOTH A and B (tie)
       inc({ source_uid: "n2", text: N2 }), // contained in A only, overlap 20 < 21
     ];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toEqual([]); // N1 tied → no match; (A,N2) is not A's max → rejected
     expect(r.unmatchedAbsentCount).toBe(2);
   });
@@ -257,7 +260,7 @@ describe("computeReconcile", () => {
       inc({ source_uid: "n1", text: a + " more words here" }),
       inc({ source_uid: "n2", text: "lead in " + a }),
     ];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toEqual([]); // overlap len(A) for both → tie → bail
     expect(r.unmatchedAbsentCount).toBe(1);
   });
@@ -281,7 +284,7 @@ describe("computeReconcile", () => {
         text: "the quick brown fox jumps over the lazy dog sleeps soundly",
       }),
     ];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toHaveLength(1);
     expect(r.amends[0].id).toBe("A1"); // 30 > 27, strict unique max for N
     expect(r.unmatchedAbsentCount).toBe(1); // A2 loses, will be stamped
@@ -302,7 +305,7 @@ describe("computeReconcile", () => {
       inc({ source_uid: "big", text: "the quick brown fox jumps over" }), // 30 ⊂ A
       inc({ source_uid: "small", text: "jumps over the lazy dog" }), //       23 ⊂ A
     ];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toHaveLength(1);
     expect(r.amends[0].source_uid).toBe("big"); // 30 > 23 strict max
     expect(r.amends[0].text).toBe("the quick brown fox jumps over"); // verbatim bigger fragment
@@ -319,7 +322,7 @@ describe("computeReconcile", () => {
       }),
     ];
     const incoming = [inc({ source_uid: "new", text: "quick brown" })]; // 11 chars < 20
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toEqual([]); // floor rejects the only candidate pair
     expect(r.unmatchedAbsentCount).toBe(1); // A unmatched (→ stamp); "new" inserts downstream
   });
@@ -334,7 +337,7 @@ describe("computeReconcile", () => {
       }),
     ];
     const incoming = [inc({ source_uid: "u_new", text: BASE })];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toEqual([
       { id: "T", source_uid: "u_new", text: BASE, chapter_title: null },
     ]);
@@ -345,7 +348,7 @@ describe("computeReconcile", () => {
       ex({ id: "P3", source: "papers3", source_uid: null, text: BASE }),
     ];
     const incoming = [inc({ source_uid: "u_new", text: BASE })];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toEqual([]); // papers3 row never absent/matched
     expect(r.unmatchedAbsentCount).toBe(0);
   });
@@ -362,7 +365,7 @@ describe("computeReconcile", () => {
     const incoming = [
       inc({ book_id: "book-2", source_uid: "u_new", text: BASE }),
     ];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toEqual([]);
     expect(r.unmatchedAbsentCount).toBe(0); // A's book-1 is uncovered → untouched
   });
@@ -370,7 +373,7 @@ describe("computeReconcile", () => {
   it("ignores a row whose uid is still present (not absent)", () => {
     const existing = [ex({ id: "A", source_uid: "u_keep", text: BASE })];
     const incoming = [inc({ source_uid: "u_keep", text: BASE })];
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toEqual([]);
     expect(r.unmatchedAbsentCount).toBe(0);
   });
@@ -386,10 +389,11 @@ describe("computeReconcile", () => {
       inc({ source_uid: "n_z", text: fragA + " tail" }),
       inc({ source_uid: "n_a", text: fragB + " tail" }),
     ];
-    const r1 = computeReconcile(existing, incoming);
+    const r1 = computeReconcile(existing, incoming, CUTOFF);
     const r2 = computeReconcile(
       [...existing].reverse(),
       [...incoming].reverse(),
+      CUTOFF,
     );
     expect(r1.amends).toEqual(r2.amends); // order-independent result
   });
@@ -403,8 +407,116 @@ describe("computeReconcile", () => {
       ex({ id: "STAY", source_uid: "u_stay", text: BASE }), // present (uid in incoming)
     ];
     const incoming = [inc({ source_uid: "u_stay", text: BASE })]; // only u_stay → no fresh items
-    const r = computeReconcile(existing, incoming);
+    const r = computeReconcile(existing, incoming, CUTOFF);
     expect(r.amends).toEqual([]);
     expect(r.unmatchedAbsentCount).toBe(1);
+  });
+});
+
+describe("computeReconcile — windowed candidacy gate (#533)", () => {
+  const BASE2 = "the quick brown fox jumps over the lazy dog tonight";
+
+  it("unstamped absent row is a candidate (amends)", () => {
+    const existing = [
+      ex({
+        id: "A",
+        source_uid: "u_old",
+        text: BASE2.slice(0, 30),
+        removed_from_device_at: null,
+      }),
+    ];
+    const incoming = [inc({ source_uid: "u_new", text: BASE2 })];
+    const r = computeReconcile(existing, incoming, CUTOFF);
+    expect(r.amends).toHaveLength(1);
+    expect(r.amends[0].id).toBe("A");
+  });
+
+  it("absent row stamped WITHIN the window (> cutoff) is a candidate (amends)", () => {
+    const existing = [
+      ex({
+        id: "A",
+        source_uid: "u_old",
+        text: BASE2.slice(0, 30),
+        removed_from_device_at: "2026-06-14T12:01:00.000Z",
+      }),
+    ];
+    const incoming = [inc({ source_uid: "u_new", text: BASE2 })];
+    const r = computeReconcile(existing, incoming, CUTOFF);
+    expect(r.amends).toHaveLength(1);
+  });
+
+  it("absent row stamped BEYOND the window (<= cutoff) is excluded — no amend", () => {
+    const existing = [
+      ex({
+        id: "A",
+        source_uid: "u_old",
+        text: BASE2.slice(0, 30),
+        removed_from_device_at: "2026-06-14T11:59:00.000Z",
+      }),
+    ];
+    const incoming = [inc({ source_uid: "u_new", text: BASE2 })];
+    const r = computeReconcile(existing, incoming, CUTOFF);
+    expect(r.amends).toEqual([]);
+  });
+
+  it("a stale-stamped row does NOT consume a fresh item that should pair elsewhere", () => {
+    const existing = [
+      ex({
+        id: "STALE",
+        source_uid: "u_stale",
+        text: BASE2.slice(0, 30),
+        removed_from_device_at: "2026-06-14T11:00:00.000Z",
+      }),
+      ex({
+        id: "FRESH",
+        source_uid: "u_fresh",
+        text: BASE2.slice(0, 30),
+        removed_from_device_at: "2026-06-14T12:30:00.000Z",
+      }),
+    ];
+    const incoming = [inc({ source_uid: "u_new", text: BASE2 })];
+    const r = computeReconcile(existing, incoming, CUTOFF);
+    expect(r.amends).toHaveLength(1);
+    expect(r.amends[0].id).toBe("FRESH");
+  });
+
+  it("diagnostic records stamped textMatches on BOTH sides of the cutoff", () => {
+    const existing = [
+      ex({
+        id: "WITHIN",
+        source_uid: "u_within",
+        text: BASE2.slice(0, 30),
+        removed_from_device_at: "2026-06-14T12:30:00.000Z",
+      }),
+      ex({
+        id: "BEYOND",
+        source_uid: "u_beyond",
+        text: BASE2.slice(0, 30),
+        removed_from_device_at: "2026-06-14T11:30:00.000Z",
+      }),
+    ];
+    const incoming = [inc({ source_uid: "u_new", text: BASE2 })];
+    const r = computeReconcile(existing, incoming, CUTOFF);
+    expect(r.stampedTextMatches).toEqual(
+      expect.arrayContaining([
+        { removedAt: "2026-06-14T12:30:00.000Z", withinCutoff: true },
+        { removedAt: "2026-06-14T11:30:00.000Z", withinCutoff: false },
+      ]),
+    );
+    expect(r.stampedTextMatches).toHaveLength(2);
+  });
+
+  it("diagnostic does NOT record an unstamped absent row (null-gap bucket)", () => {
+    const existing = [
+      ex({
+        id: "A",
+        source_uid: "u_old",
+        text: BASE2.slice(0, 30),
+        removed_from_device_at: null,
+      }),
+    ];
+    const incoming = [inc({ source_uid: "u_new", text: BASE2 })];
+    const r = computeReconcile(existing, incoming, CUTOFF);
+    expect(r.stampedTextMatches).toEqual([]);
   });
 });

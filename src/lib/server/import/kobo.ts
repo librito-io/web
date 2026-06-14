@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { computeReconcile } from "./reconcile";
+import { computeReconcile, RE_DRAG_GRACE_MS } from "./reconcile";
 import type { ExistingHighlight } from "./reconcile";
 import { logger } from "$lib/server/log";
 
@@ -365,7 +365,7 @@ export async function processKoboImport(
   const { data: existingRows, error: exErr } = await supabase
     .from("highlights")
     .select(
-      "id, book_id, source, source_uid, text, chapter_title, deleted_at, created_at",
+      "id, book_id, source, source_uid, text, chapter_title, deleted_at, created_at, removed_from_device_at",
     )
     .eq("user_id", userId)
     .eq("source", "kobo")
@@ -384,8 +384,16 @@ export async function processKoboImport(
     chapter_title: r.chapter_title,
   }));
 
-  const { amends, matchedAbsentCreatedAt, unmatchedAbsentCount } =
-    computeReconcile(existingRows ?? [], incoming);
+  // One app-clock cutoff, shared by the matcher (candidacy) and — once threaded
+  // in Task 4 — the RPC (amend precondition). See RE_DRAG_GRACE_MS.
+  const cutoff = new Date(Date.now() - RE_DRAG_GRACE_MS);
+
+  const {
+    amends,
+    matchedAbsentCreatedAt,
+    unmatchedAbsentCount,
+    stampedTextMatches,
+  } = computeReconcile(existingRows ?? [], incoming, cutoff);
 
   // One RPC: amends → upsert → stamps, plus the cross-book uid detector
   // (folded into the RPC so a full-set re-POST of up to MAX_ITEMS uids never
@@ -425,6 +433,10 @@ export async function processKoboImport(
         Math.round((now - Date.parse(c)) / 86_400_000),
       ),
       crossBookUidHits,
+      reDragGaps: stampedTextMatches.map((m) => ({
+        gapMs: now - Date.parse(m.removedAt),
+        decision: m.withinCutoff ? "amend_within_w" : "insert_beyond_w",
+      })),
     },
     "import.kobo.reconcile",
   );

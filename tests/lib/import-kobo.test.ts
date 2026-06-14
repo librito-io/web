@@ -131,6 +131,48 @@ describe("validateKoboPayload", () => {
       validateKoboPayload([item({ created_at: "not-a-date" })]),
     ).toHaveProperty("error");
   });
+
+  it("returns complete=false for a bare array (back-compat)", () => {
+    const res = validateKoboPayload([item()]);
+    expect("items" in res).toBe(true);
+    if ("items" in res) expect(res.complete).toBe(false);
+  });
+
+  it("parses complete=true from the { items, complete } object form", () => {
+    const res = validateKoboPayload({ items: [item()], complete: true });
+    expect("items" in res).toBe(true);
+    if ("items" in res) expect(res.complete).toBe(true);
+  });
+
+  it("defaults complete=false when the object form omits it", () => {
+    const res = validateKoboPayload({ items: [item()] });
+    expect("items" in res).toBe(true);
+    if ("items" in res) expect(res.complete).toBe(false);
+  });
+
+  it("rejects a non-boolean complete", () => {
+    const res = validateKoboPayload({ items: [item()], complete: "yes" });
+    expect("error" in res).toBe(true);
+  });
+
+  it("accepts an empty items array ONLY with complete:true (total-device wipe)", () => {
+    const res = validateKoboPayload({ items: [], complete: true });
+    expect("items" in res).toBe(true);
+    if ("items" in res) {
+      expect(res.items).toHaveLength(0);
+      expect(res.complete).toBe(true);
+    }
+  });
+
+  it("rejects a bare empty array (cannot distinguish wipe from a bug)", () => {
+    const res = validateKoboPayload([]);
+    expect("error" in res).toBe(true);
+  });
+
+  it("rejects { items: [] } without complete:true", () => {
+    const res = validateKoboPayload({ items: [] });
+    expect("error" in res).toBe(true);
+  });
 });
 
 describe("processKoboImport", () => {

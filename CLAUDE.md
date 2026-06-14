@@ -19,7 +19,7 @@ The device never talks to Supabase directly. All device communication goes throu
 
 **Outstanding follow-on work.** Open follow-on: #500 (converge Kobo + PaperS3 books on a shared ISBN — no `UNIQUE(user_id, isbn)` today). Remaining pivot work (on-device agent, installer/pairing, live browser updates, annotations model) is tracked as forward issues.
 
-Design spec and implementation plans live in the reader repo at `docs/superpowers/specs/` and `docs/superpowers/plans/`.
+Design specs and implementation plans are stored locally (never committed) in the repo the work belongs to, under gitignored `docs/superpowers/specs/` and `docs/superpowers/plans/`: web + Kobo-web work in this repo, PaperS3 firmware docs in the reader repo, Kobo sync agent docs in the kobo-sync repo.
 
 Completed audit artefacts (closed working plans worth preserving in version control) live under `docs/audits/<date>-<topic>.md` — e.g. `docs/audits/2026-04-29-supabase-rls-and-migrations.md`. Working audit docs (mid-fix trackers updated as PRs land) live in the gitignored `docs/audits-wip/` folder; graduate to tracked `docs/audits/` via a dedicated PR once the audit is closed.
 
@@ -310,7 +310,20 @@ Cold-miss resolves route through Upstash QStash when `QSTASH_TOKEN + QSTASH_CONS
 
 ## Cron handlers
 
-Cron paths are declared in `vercel.ts` (`crons[]`) and live under `src/routes/api/cron/*/+server.ts`. Two invariants every cron handler must hold:
+Cron paths are declared in `vercel.ts` (`crons[]`) and live under `src/routes/api/cron/*/+server.ts`. Full inventory (keep in sync with `vercel.ts` when adding/removing a cron):
+
+| Path                          | Schedule (UTC) | Purpose                                                                                                         |
+| ----------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------- |
+| `/api/cron/transfer-sweep`    | `0 3 * * *`    | EPUB transfer queue sweep — Storage orphans + DB PII scrub. The one `Sentry.withMonitor` slot.                  |
+| `/api/cron/catalog-replay`    | `0 4 * * *`    | Nightly field-state TTL replay of partial catalog resolves (`select_replay_candidates`).                        |
+| `/api/cron/catalog-dlq-drain` | `0 5 * * *`    | Drain QStash DLQ into `catalog_dlq_archive`; `await Sentry.flush(2000)` before every return.                    |
+| `/api/cron/catalog-warmup`    | `0 8 * * 1`    | Weekly catalog warmup (Mon). NYT bestsellers default; accepts `{ "isbns": [...] }` override.                    |
+| `/api/cron/catalog-fill-rate` | `0 9 * * 1`    | Weekly (Mon) fill-rate snapshot row into `catalog_fill_rate_history`.                                           |
+| `/api/cron/pg-cron-health`    | `0 9 * * *`    | Daily `pg_cron` failure summary. NOT `withMonitor` (free-tier slot is `transfer-sweep`); `captureMessage` only. |
+
+(`/api/cron/sentry-smoke` is a POST-only operator/deploy health probe, NOT a scheduled cron — intentionally absent from `crons[]`.)
+
+Two invariants every cron handler must hold:
 
 1. **Export `GET` (Vercel cron invokes via GET).** A POST-only handler returns 405 to every fire and is invisible until something downstream notices the work isn't happening. Cost us 18 days of broken scrub — issue #187 / PR #188. The deploy-time `smoke` job catches this regression class going forward.
 
@@ -371,6 +384,8 @@ Currently sensitive in this project (must use dynamic):
 
 - `CRON_SECRET`
 - `CATALOG_WARMUP_ENABLED`
+- `CATALOG_REPLAY_ENABLED`
+- `CATALOG_FILL_RATE_ENABLED`
 - `COVER_STORAGE_BACKEND`
 - `NYT_BOOKS_API_KEY`
 - `GOOGLE_BOOKS_API_KEY`
@@ -407,4 +422,4 @@ Background: the bug surfaced via #195 / #196 after PR #195 added the smoke probe
 
 ## Implementation Phases
 
-Specs + plans live in the reader repo at `docs/superpowers/specs/` and `docs/superpowers/plans/`. Forward-looking work is tracked as Workstream values on issues (see [`docs/dev/issue-tracking.md`](docs/dev/issue-tracking.md)); Phases 1–6 are done.
+Specs + plans are stored locally (never committed) under gitignored `docs/superpowers/specs/` and `docs/superpowers/plans/` in the repo the work belongs to — this repo for web + Kobo-web work. Forward-looking work is tracked as Workstream values on issues (see [`docs/dev/issue-tracking.md`](docs/dev/issue-tracking.md)); Phases 1–6 are done.

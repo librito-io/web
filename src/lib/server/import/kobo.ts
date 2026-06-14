@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { computeReconcile } from "./reconcile";
+import { computeReconcile, RE_DRAG_GRACE_MS } from "./reconcile";
 import type { ExistingHighlight } from "./reconcile";
 import { logger } from "$lib/server/log";
 
@@ -63,21 +63,33 @@ function isOptionalString(v: unknown, max: number): boolean {
 
 /**
  * Validates and normalizes the import body. Accepts a bare array of items
- * (the issue's wire shape) or a `{ items: [...] }` wrapper. Returns the parsed
- * items or a single error string (→ 400 at the route).
+ * (the issue's wire shape) or a `{ items: [...], complete?: boolean }` wrapper.
+ * Returns the parsed items + completeness flag, or a single error string
+ * (→ 400 at the route).
+ *
+ * `complete: true` means the agent asserts this is the user's entire Kobo set.
+ * A bare array implies `complete=false` (back-compat). An empty `items` array
+ * is accepted ONLY when `complete: true` (total-device wipe), so a wipe is
+ * distinguishable from a buggy empty POST.
  */
 export function validateKoboPayload(
   body: unknown,
-): { items: KoboImportItem[] } | { error: string } {
+): { items: KoboImportItem[]; complete: boolean } | { error: string } {
   let rawItems: unknown[] | null;
+  let complete = false;
   if (Array.isArray(body)) {
-    rawItems = body;
+    rawItems = body; // bare array ⇒ complete=false (back-compat)
   } else if (
     body &&
     typeof body === "object" &&
     Array.isArray((body as Record<string, unknown>).items)
   ) {
     rawItems = (body as Record<string, unknown>).items as unknown[];
+    const c = (body as Record<string, unknown>).complete;
+    if (c !== undefined && typeof c !== "boolean") {
+      return { error: "complete must be a boolean" };
+    }
+    complete = c === true;
   } else {
     rawItems = null;
   }
@@ -85,8 +97,13 @@ export function validateKoboPayload(
   if (!rawItems) {
     return { error: "Request body must be a JSON array of import items" };
   }
+  // Empty set is a total-device wipe — accepted ONLY when completeness is
+  // explicitly asserted, so a wipe is distinguishable from a buggy empty POST.
   if (rawItems.length === 0) {
-    return { error: "Import must contain at least one item" };
+    if (!complete) {
+      return { error: "Import must contain at least one item" };
+    }
+    return { items: [], complete: true };
   }
   if (rawItems.length > MAX_ITEMS) {
     return { error: `Import must not exceed ${MAX_ITEMS} items` };
@@ -183,7 +200,7 @@ export function validateKoboPayload(
     });
   }
 
-  return { items };
+  return { items, complete };
 }
 
 // --- book_hash synthesis ---
@@ -268,6 +285,7 @@ export async function processKoboImport(
   supabase: SupabaseClient,
   userId: string,
   items: KoboImportItem[],
+  complete: boolean = false,
 ): Promise<KoboImportResult> {
   const groups = groupByBook(items);
 
@@ -352,7 +370,10 @@ export async function processKoboImport(
     }));
   });
 
-  if (highlightRows.length === 0) {
+  // Empty incoming is a no-op UNLESS the agent asserts completeness — then it is
+  // a total-device wipe and the RPC must still run STEP 3a stamp-only (spec
+  // §4c). Returning here on empty+complete would silently skip the wipe stamp.
+  if (highlightRows.length === 0 && !complete) {
     return { imported: 0, books: groups.length, amended: 0 };
   }
 
@@ -365,7 +386,7 @@ export async function processKoboImport(
   const { data: existingRows, error: exErr } = await supabase
     .from("highlights")
     .select(
-      "id, book_id, source, source_uid, text, chapter_title, deleted_at, created_at",
+      "id, book_id, source, source_uid, text, chapter_title, deleted_at, created_at, removed_from_device_at",
     )
     .eq("user_id", userId)
     .eq("source", "kobo")
@@ -384,15 +405,29 @@ export async function processKoboImport(
     chapter_title: r.chapter_title,
   }));
 
-  const { amends, matchedAbsentCreatedAt, unmatchedAbsentCount } =
-    computeReconcile(existingRows ?? [], incoming);
+  // One app-clock cutoff, shared by the matcher (candidacy) and the RPC
+  // (amend precondition, p_cutoff). See RE_DRAG_GRACE_MS.
+  const cutoff = new Date(Date.now() - RE_DRAG_GRACE_MS);
+
+  const {
+    amends,
+    matchedAbsentCreatedAt,
+    unmatchedAbsentCount,
+    stampedTextMatches,
+  } = computeReconcile(existingRows ?? [], incoming, cutoff);
 
   // One RPC: amends → upsert → stamps, plus the cross-book uid detector
   // (folded into the RPC so a full-set re-POST of up to MAX_ITEMS uids never
   // builds an unbounded .in("source_uid", …) URL — see the RPC's STEP 0).
   const { data: counts, error: rpcErr } = await supabase.rpc(
     "reconcile_kobo_highlights",
-    { p_user_id: userId, p_rows: highlightRows, p_amends: amends },
+    {
+      p_user_id: userId,
+      p_rows: highlightRows,
+      p_amends: amends,
+      p_cutoff: cutoff.toISOString(),
+      p_complete: complete,
+    },
   );
   if (rpcErr) {
     throw new Error(`Failed to reconcile highlights: ${rpcErr.message}`);
@@ -425,6 +460,10 @@ export async function processKoboImport(
         Math.round((now - Date.parse(c)) / 86_400_000),
       ),
       crossBookUidHits,
+      reDragGaps: stampedTextMatches.map((m) => ({
+        gapMs: now - Date.parse(m.removedAt),
+        decision: m.withinCutoff ? "amend_within_w" : "insert_beyond_w",
+      })),
     },
     "import.kobo.reconcile",
   );

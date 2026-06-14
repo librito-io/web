@@ -65,6 +65,7 @@ export const POST: RequestHandler = async ({ request }) => {
       supabase,
       device.userId,
       validation.items,
+      validation.complete,
     );
     return jsonSuccess(result);
   } catch (err) {

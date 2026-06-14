@@ -138,11 +138,11 @@ const fns: Fn[] = [
     allowRoles: ["service_role"],
     rpcSlug: "upsert_kobo_highlights",
   },
-  // Kobo reconcile RPC (2026-06-11 #527). Replaces upsert_kobo_highlights in
-  // the import flow. Service-role only — same posture as upsert_kobo_highlights.
+  // Kobo reconcile RPC (2026-06-14 #533). Replaces 3-arg form with 5-arg
+  // (adds p_cutoff timestamptz, p_complete boolean). Service-role only.
   {
     name: "reconcile_kobo_highlights",
-    args: "uuid, jsonb, jsonb",
+    args: "uuid, jsonb, jsonb, timestamptz, boolean",
     denyRoles: ["anon", "authenticated"],
     allowRoles: ["service_role"],
     rpcSlug: "reconcile_kobo_highlights",

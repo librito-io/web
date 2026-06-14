@@ -32,6 +32,8 @@ export interface ExistingHighlight {
   chapter_title: string | null;
   deleted_at: string | null;
   created_at: string;
+  /** Server clock: first observed absent from a covering full-set import, or null if never. Load-bearing for the windowed amend gate (spec §3). */
+  removed_from_device_at: string | null;
 }
 
 /** One validated incoming item, with its resolved book_id. */
@@ -54,6 +56,14 @@ export interface Amend {
   chapter_title: string | null;
 }
 
+/** One stamped absent row that word-matched a fresh item — diagnostic only. */
+export interface StampedTextMatch {
+  /** ISO removed_from_device_at of the stamped absent row. */
+  removedAt: string;
+  /** True iff stamped within W (removedAt > cutoff) — i.e. amend-eligible. */
+  withinCutoff: boolean;
+}
+
 export interface ReconcileResult {
   /** RPC p_amends payload. amends[i] pairs with matchedAbsentCreatedAt[i]. */
   amends: Amend[];
@@ -61,7 +71,26 @@ export interface ReconcileResult {
   matchedAbsentCreatedAt: string[];
   /** Instrumentation only: absent rows that matched nothing. */
   unmatchedAbsentCount: number;
+  /**
+   * Logging-only (spec §10): every STAMPED absent row (live or trashed) that
+   * word-matches any fresh item, captured PRE-exclusion so both sides of the
+   * cutoff appear. Feeds nothing into the amend decision. Unstamped amends emit
+   * no entry here (their null-gap bucket is `amended` minus the within-cutoff
+   * subset).
+   */
+  stampedTextMatches: StampedTextMatch[];
 }
+
+/**
+ * Grace window W (spec §3): an absent row stamped removed within W of now is
+ * still treated as an in-progress span adjustment → amend. Beyond W → a true
+ * delete-then-rehighlight → insert fresh. Interim 5 minutes; tuning is deferred
+ * and data-driven (the diagnostic pass below lays the pipe). The gate is correct
+ * at any W — W only optimizes the boundary, it is not load-bearing for
+ * correctness. App clock (this constant, via Date.now()) and the DB stamp clock
+ * (now()) are assumed to agree within seconds — negligible against W=5min.
+ */
+export const RE_DRAG_GRACE_MS = 5 * 60 * 1000;
 
 /** Shorter-text floor: below this many chars post-normalization, no match. */
 const MIN_OVERLAP = 20;
@@ -184,10 +213,13 @@ function bestPartner(
 export function computeReconcile(
   existing: ExistingHighlight[],
   incoming: IncomingItem[],
+  cutoff: Date,
 ): ReconcileResult {
   const amends: Amend[] = [];
   const matchedAbsentCreatedAt: string[] = [];
   let unmatchedAbsentCount = 0;
+  const stampedTextMatches: StampedTextMatch[] = [];
+  const cutoffMs = cutoff.getTime();
 
   // Group incoming by book (defines the COVERED books).
   const incomingByBook = new Map<string, IncomingItem[]>();
@@ -222,8 +254,35 @@ export function computeReconcile(
     const incomingUids = new Set(inc.map((i) => i.source_uid));
     const existingUids = new Set(ex.map((e) => e.source_uid as string));
 
-    const absent = ex.filter((e) => !incomingUids.has(e.source_uid as string));
+    // Pre-exclusion absent set (uid-not-in-incoming) — what the diagnostic scans.
+    const absentRaw = ex.filter(
+      (e) => !incomingUids.has(e.source_uid as string),
+    );
     const fresh = inc.filter((i) => !existingUids.has(i.source_uid));
+
+    // Diagnostic pass (spec §10): every STAMPED absent row that matches any
+    // fresh item under the SAME guards, recorded on both sides of the cutoff.
+    for (const a of absentRaw) {
+      if (a.removed_from_device_at === null) continue;
+      const matches = fresh.some((n) => pairOverlap(a, n) !== null);
+      if (matches) {
+        stampedTextMatches.push({
+          removedAt: a.removed_from_device_at,
+          withinCutoff: Date.parse(a.removed_from_device_at) > cutoffMs,
+        });
+      }
+    }
+
+    // Candidacy: exclude STALE-stamped rows (stamped AND removedAt <= cutoff) so
+    // a beyond-W row never participates in pairing (else it could consume a
+    // fresh item that should pair with an in-window row). Unstamped OR
+    // within-W rows remain candidates.
+    const absent = absentRaw.filter(
+      (e) =>
+        e.removed_from_device_at === null ||
+        Date.parse(e.removed_from_device_at) > cutoffMs,
+    );
+
     if (absent.length === 0 || fresh.length === 0) {
       unmatchedAbsentCount += absent.length;
       continue;
@@ -259,5 +318,10 @@ export function computeReconcile(
     unmatchedAbsentCount += absent.length - matched.size;
   }
 
-  return { amends, matchedAbsentCreatedAt, unmatchedAbsentCount };
+  return {
+    amends,
+    matchedAbsentCreatedAt,
+    unmatchedAbsentCount,
+    stampedTextMatches,
+  };
 }

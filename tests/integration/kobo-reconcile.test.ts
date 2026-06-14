@@ -56,6 +56,9 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
   const admin = getAdmin();
   let user: TestUser;
 
+  // Far future → any existing stamp counts as "within W" (amend-eligible).
+  const CUTOFF_FUTURE = "2999-01-01T00:00:00.000Z";
+
   beforeAll(async () => {
     user = await createTestUser("kobo-reconcile");
   });
@@ -99,6 +102,8 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
           chapter_title: null,
         },
       ],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
     });
     expect(error).toBeNull();
     expect((data as { amended: number }).amended).toBe(1);
@@ -165,6 +170,8 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
           chapter_title: null,
         },
       ],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
     });
     expect((data as { amended: number }).amended).toBe(0); // amend skipped
 
@@ -193,6 +200,8 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
       p_user_id: user.id,
       p_rows: [cover],
       p_amends: [],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
     });
     expect((r1.data as { stamped: number }).stamped).toBe(1);
     const [s1] = await sql<{ removed_from_device_at: Date | null }[]>`
@@ -205,6 +214,8 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
       p_user_id: user.id,
       p_rows: [cover],
       p_amends: [],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
     });
     expect((r2.data as { stamped: number }).stamped).toBe(0);
     const [s2] = await sql<{ removed_from_device_at: Date | null }[]>`
@@ -228,6 +239,8 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
         },
       ],
       p_amends: [],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
     });
     expect((r3.data as { cleared: number }).cleared).toBe(1);
     const [s3] = await sql<{ removed_from_device_at: Date | null }[]>`
@@ -236,7 +249,7 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
     expect(s3.removed_from_device_at).toBeNull();
   });
 
-  it("never stamps a trashed row", async () => {
+  it("stamps a trashed absent row (windowed gate must bind trashed rows)", async () => {
     const bookId = await seedBook(sql, user.id, "beef0004");
     await seedKobo(sql, user.id, bookId, {
       uid: "trashed-absent",
@@ -255,11 +268,13 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
         },
       ],
       p_amends: [],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
     });
     const [row] = await sql<{ removed_from_device_at: string | null }[]>`
       SELECT removed_from_device_at FROM public.highlights
       WHERE user_id = ${user.id} AND source_uid = ${"trashed-absent"}`;
-    expect(row.removed_from_device_at).toBeNull(); // trashed → never stamped
+    expect(row.removed_from_device_at).not.toBeNull(); // trashed → now stamped
   });
 
   it("amend is scoped to p_user_id — a second user's row id is untouched", async () => {
@@ -294,6 +309,8 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
             chapter_title: null,
           },
         ],
+        p_cutoff: CUTOFF_FUTURE,
+        p_complete: false,
       });
       expect(error).toBeNull();
       expect((data as { amended: number }).amended).toBe(0); // user qual blocked it
@@ -333,6 +350,8 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
           chapter_title: null,
         },
       ],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
     });
     const [afterAmend] = await sql<
       { chapter_title: string | null; updated_at: string }[]
@@ -357,6 +376,8 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
         },
       ],
       p_amends: [],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
     });
     const [afterResend] = await sql<
       { chapter_title: string | null; updated_at: string }[]
@@ -389,6 +410,8 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
         },
       ],
       p_amends: [],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
     });
     const [after] = await sql<{ updated_at: string }[]>`
       SELECT updated_at FROM public.highlights WHERE id = ${id}`;
@@ -418,6 +441,8 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
         },
       ],
       p_amends: [],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
     });
     expect((data as { cross_book_uid_hits: number }).cross_book_uid_hits).toBe(
       1,
@@ -425,14 +450,173 @@ describe.skipIf(SKIP)("reconcile_kobo_highlights RPC (#527)", () => {
   });
 
   it("grants: anon + authenticated have no EXECUTE, service_role does", async () => {
-    const [g] = await sql<
-      { anon: boolean; auth: boolean; svc: boolean }[]
-    >`SELECT
-        has_function_privilege('anon', 'public.reconcile_kobo_highlights(uuid, jsonb, jsonb)', 'EXECUTE') AS anon,
-        has_function_privilege('authenticated', 'public.reconcile_kobo_highlights(uuid, jsonb, jsonb)', 'EXECUTE') AS auth,
-        has_function_privilege('service_role', 'public.reconcile_kobo_highlights(uuid, jsonb, jsonb)', 'EXECUTE') AS svc`;
+    const sig =
+      "public.reconcile_kobo_highlights(uuid, jsonb, jsonb, timestamptz, boolean)";
+    const [g] = await sql<{ anon: boolean; auth: boolean; svc: boolean }[]>`
+      SELECT
+        has_function_privilege('anon', ${sig}, 'EXECUTE') AS anon,
+        has_function_privilege('authenticated', ${sig}, 'EXECUTE') AS auth,
+        has_function_privilege('service_role', ${sig}, 'EXECUTE') AS svc`;
     expect(g.anon).toBe(false);
     expect(g.auth).toBe(false);
     expect(g.svc).toBe(true);
+  });
+
+  it("amend precondition honors p_cutoff: within W amends, beyond W inserts fresh", async () => {
+    const bookId = await seedBook(sql, user.id, "beef0010");
+    const id = await seedKobo(sql, user.id, bookId, {
+      uid: "drag-old",
+      text: "windowed passage long enough text",
+    });
+    await sql`UPDATE public.highlights
+              SET removed_from_device_at = ${"2026-06-14T12:00:00.000Z"}
+              WHERE id = ${id}`;
+    const within = await admin.rpc("reconcile_kobo_highlights", {
+      p_user_id: user.id,
+      p_rows: [
+        {
+          book_id: bookId,
+          source_uid: "drag-new",
+          text: "windowed passage long enough text extended",
+          chapter_title: null,
+          created_at: null,
+        },
+      ],
+      p_amends: [
+        {
+          id,
+          source_uid: "drag-new",
+          text: "windowed passage long enough text extended",
+          chapter_title: null,
+        },
+      ],
+      p_cutoff: "2026-06-14T11:00:00.000Z",
+      p_complete: false,
+    });
+    expect((within.data as { amended: number }).amended).toBe(1);
+
+    const book2 = await seedBook(sql, user.id, "beef0011");
+    const id2 = await seedKobo(sql, user.id, book2, {
+      uid: "stale-old",
+      text: "stale passage long enough text here",
+    });
+    await sql`UPDATE public.highlights
+              SET removed_from_device_at = ${"2026-06-14T10:00:00.000Z"}
+              WHERE id = ${id2}`;
+    const beyond = await admin.rpc("reconcile_kobo_highlights", {
+      p_user_id: user.id,
+      p_rows: [
+        {
+          book_id: book2,
+          source_uid: "stale-new",
+          text: "stale passage long enough text here extended",
+          chapter_title: null,
+          created_at: null,
+        },
+      ],
+      p_amends: [
+        {
+          id: id2,
+          source_uid: "stale-new",
+          text: "stale passage long enough text here extended",
+          chapter_title: null,
+        },
+      ],
+      p_cutoff: "2026-06-14T11:00:00.000Z",
+      p_complete: false,
+    });
+    expect((beyond.data as { amended: number }).amended).toBe(0);
+    const rows = await sql<{ source_uid: string }[]>`
+      SELECT source_uid FROM public.highlights
+      WHERE book_id = ${book2} ORDER BY source_uid`;
+    expect(rows.map((r) => r.source_uid)).toEqual(["stale-new", "stale-old"]);
+  });
+
+  it("p_complete=true stamps an emptied book's rows AND a trashed absent row", async () => {
+    const bookId = await seedBook(sql, user.id, "beef0012");
+    await seedKobo(sql, user.id, bookId, {
+      uid: "live-gone",
+      text: "live gone passage long enough text",
+    });
+    await seedKobo(sql, user.id, bookId, {
+      uid: "trash-gone",
+      text: "trash gone passage long enough text",
+      deletedAt: "2020-01-01T00:00:00.000Z",
+    });
+    const other = await seedBook(sql, user.id, "beef0013");
+    await admin.rpc("reconcile_kobo_highlights", {
+      p_user_id: user.id,
+      p_rows: [
+        {
+          book_id: other,
+          source_uid: "elsewhere",
+          text: "elsewhere passage long enough text",
+          chapter_title: null,
+          created_at: null,
+        },
+      ],
+      p_amends: [],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: true,
+    });
+    const stamps = await sql<
+      { source_uid: string; removed_from_device_at: string | null }[]
+    >`
+      SELECT source_uid, removed_from_device_at FROM public.highlights
+      WHERE book_id = ${bookId} ORDER BY source_uid`;
+    expect(stamps.every((r) => r.removed_from_device_at !== null)).toBe(true);
+  });
+
+  it("p_complete=false leaves an UNCOVERED book's rows unstamped (covered-only)", async () => {
+    const covered = await seedBook(sql, user.id, "beef0014");
+    const uncovered = await seedBook(sql, user.id, "beef0015");
+    await seedKobo(sql, user.id, uncovered, {
+      uid: "untouched",
+      text: "untouched passage long enough text",
+    });
+    await admin.rpc("reconcile_kobo_highlights", {
+      p_user_id: user.id,
+      p_rows: [
+        {
+          book_id: covered,
+          source_uid: "cov",
+          text: "covered passage long enough text",
+          chapter_title: null,
+          created_at: null,
+        },
+      ],
+      p_amends: [],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: false,
+    });
+    const [row] = await sql<{ removed_from_device_at: string | null }[]>`
+      SELECT removed_from_device_at FROM public.highlights
+      WHERE user_id = ${user.id} AND source_uid = ${"untouched"}`;
+    expect(row.removed_from_device_at).toBeNull();
+  });
+
+  it("empty p_rows + p_complete=true → stamp-only over the user's whole kobo set", async () => {
+    const bookA = await seedBook(sql, user.id, "beef0016");
+    const bookB = await seedBook(sql, user.id, "beef0017");
+    await seedKobo(sql, user.id, bookA, {
+      uid: "wipe-a",
+      text: "wipe a passage long enough text",
+    });
+    await seedKobo(sql, user.id, bookB, {
+      uid: "wipe-b",
+      text: "wipe b passage long enough text",
+    });
+    const r = await admin.rpc("reconcile_kobo_highlights", {
+      p_user_id: user.id,
+      p_rows: [],
+      p_amends: [],
+      p_cutoff: CUTOFF_FUTURE,
+      p_complete: true,
+    });
+    expect((r.data as { stamped: number }).stamped).toBeGreaterThanOrEqual(2);
+    const stamps = await sql<{ removed_from_device_at: string | null }[]>`
+      SELECT removed_from_device_at FROM public.highlights
+      WHERE user_id = ${user.id} AND source_uid IN ('wipe-a', 'wipe-b')`;
+    expect(stamps.every((r2) => r2.removed_from_device_at !== null)).toBe(true);
   });
 });

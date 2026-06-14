@@ -784,7 +784,13 @@ export type Database = {
         Returns: boolean
       }
       reconcile_kobo_highlights: {
-        Args: { p_amends: Json; p_rows: Json; p_user_id: string }
+        Args: {
+          p_amends: Json
+          p_complete: boolean
+          p_cutoff: string
+          p_rows: Json
+          p_user_id: string
+        }
         Returns: Json
       }
       requeue_catalog_resolve: {

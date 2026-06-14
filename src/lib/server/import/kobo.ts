@@ -285,6 +285,7 @@ export async function processKoboImport(
   supabase: SupabaseClient,
   userId: string,
   items: KoboImportItem[],
+  complete: boolean = false,
 ): Promise<KoboImportResult> {
   const groups = groupByBook(items);
 
@@ -417,7 +418,13 @@ export async function processKoboImport(
   // builds an unbounded .in("source_uid", …) URL — see the RPC's STEP 0).
   const { data: counts, error: rpcErr } = await supabase.rpc(
     "reconcile_kobo_highlights",
-    { p_user_id: userId, p_rows: highlightRows, p_amends: amends },
+    {
+      p_user_id: userId,
+      p_rows: highlightRows,
+      p_amends: amends,
+      p_cutoff: cutoff.toISOString(),
+      p_complete: complete,
+    },
   );
   if (rpcErr) {
     throw new Error(`Failed to reconcile highlights: ${rpcErr.message}`);

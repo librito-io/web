@@ -504,4 +504,108 @@ describe("processKoboImport", () => {
     expect(line).toBeDefined();
     expect(line.crossBookUidHits).toBe(1);
   });
+
+  it("threads p_cutoff and p_complete to the reconcile RPC", async () => {
+    const mock = createMockSupabase();
+    mock._results.set("books.upsert", {
+      data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    mock._results.set("highlights.select", { data: [], error: null });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 0, cleared: 0, cross_book_uid_hits: 0 },
+      error: null,
+    });
+
+    await processKoboImport(mock, "user-1", [item()], true);
+
+    const rpcCall = mock._rpcCalls.find(
+      (c) => c.name === "reconcile_kobo_highlights",
+    );
+    const args = rpcCall!.args as { p_cutoff: string; p_complete: boolean };
+    expect(args.p_complete).toBe(true);
+    expect(typeof args.p_cutoff).toBe("string");
+    expect(Number.isNaN(Date.parse(args.p_cutoff))).toBe(false);
+  });
+
+  it("routes the stamped column + cutoff into the matcher (beyond-W row → no amend)", async () => {
+    // An existing kobo row, absent from incoming, stamped in the ancient past
+    // (→ beyond any cutoff), word-matches the fresh item. Without the windowed
+    // gate it would amend; with it the matcher excludes the stale row → the RPC
+    // receives an EMPTY p_amends. Proves orchestration threads existingRows
+    // (incl. removed_from_device_at) + cutoff into computeReconcile.
+    const mock = createMockSupabase();
+    mock._results.set("books.upsert", {
+      data: [{ id: "book-1", book_hash: "deadbeef" }],
+      error: null,
+    });
+    mock._results.set("highlights.select", {
+      data: [
+        {
+          id: "ex-1",
+          book_id: "book-1",
+          source: "kobo",
+          source_uid: "old-uid",
+          text: "the quick brown fox jumps over the lazy dog tonight",
+          chapter_title: null,
+          deleted_at: null,
+          created_at: "2020-01-01T00:00:00.000Z",
+          removed_from_device_at: "2020-01-01T00:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 0, cleared: 0, cross_book_uid_hits: 0 },
+      error: null,
+    });
+
+    await processKoboImport(
+      mock,
+      "user-1",
+      [
+        item({
+          source_uid: "new-uid",
+          text: "the quick brown fox jumps over the lazy dog tonight extra",
+        }),
+      ],
+      false,
+    );
+
+    const rpcCall = mock._rpcCalls.find(
+      (c) => c.name === "reconcile_kobo_highlights",
+    );
+    const args = rpcCall!.args as { p_amends: unknown[] };
+    expect(args.p_amends).toEqual([]);
+  });
+
+  it("empty items + complete:true still calls the RPC (stamp-only wipe, no early-return)", async () => {
+    const mock = createMockSupabase();
+    mock._results.set("highlights.select", { data: [], error: null });
+    mock._results.set("rpc.reconcile_kobo_highlights", {
+      data: { amended: 0, stamped: 3, cleared: 0, cross_book_uid_hits: 0 },
+      error: null,
+    });
+
+    const result = await processKoboImport(mock, "user-1", [], true);
+
+    const rpcCall = mock._rpcCalls.find(
+      (c) => c.name === "reconcile_kobo_highlights",
+    );
+    expect(rpcCall).toBeDefined();
+    const args = rpcCall!.args as { p_rows: unknown[]; p_complete: boolean };
+    expect(args.p_rows).toEqual([]);
+    expect(args.p_complete).toBe(true);
+    expect(result.imported).toBe(0);
+    expect(result.books).toBe(0);
+  });
+
+  it("empty items + complete:false short-circuits without an RPC call", async () => {
+    const mock = createMockSupabase();
+    const result = await processKoboImport(mock, "user-1", [], false);
+    expect(
+      mock._rpcCalls.find((c) => c.name === "reconcile_kobo_highlights"),
+    ).toBeUndefined();
+    expect(result.imported).toBe(0);
+  });
 });

@@ -370,7 +370,10 @@ export async function processKoboImport(
     }));
   });
 
-  if (highlightRows.length === 0) {
+  // Empty incoming is a no-op UNLESS the agent asserts completeness — then it is
+  // a total-device wipe and the RPC must still run STEP 3a stamp-only (spec
+  // §4c). Returning here on empty+complete would silently skip the wipe stamp.
+  if (highlightRows.length === 0 && !complete) {
     return { imported: 0, books: groups.length, amended: 0 };
   }
 

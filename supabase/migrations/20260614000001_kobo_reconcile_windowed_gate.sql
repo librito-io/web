@@ -24,7 +24,7 @@
 --   -- then re-apply 20260611000001 to restore the 3-arg form.
 -- ─────────────────────────────────────────────────────────────────────────────
 
-DROP FUNCTION public.reconcile_kobo_highlights(uuid, jsonb, jsonb);
+DROP FUNCTION IF EXISTS public.reconcile_kobo_highlights(uuid, jsonb, jsonb);
 
 CREATE FUNCTION public.reconcile_kobo_highlights(
   p_user_id  uuid,

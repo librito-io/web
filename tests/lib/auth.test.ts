@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { authenticateDevice } from "$lib/server/auth";
+import { authenticateDevice, authErrorResponse } from "$lib/server/auth";
 import { createMockSupabase } from "../helpers";
 
 const TEST_TOKEN = "sk_device_test_token_abc123def456";
@@ -129,5 +129,55 @@ describe("authenticateDevice", () => {
 
     const result = await authenticateDevice(makeRequest(TEST_TOKEN), supabase);
     expect(result).toEqual({ error: "token_revoked" });
+  });
+
+  // web #538: a transient DB fault must NOT be fused into invalid_token — that
+  // would make the Kobo device's credential-rejected wipe gate self-wipe a
+  // healthy paired device on a Supabase blip. Only a true row-miss (PGRST116)
+  // is a credential verdict; anything else is server_error.
+  it("returns server_error on a non-PGRST116 DB error (statement timeout)", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("devices.select", {
+      data: null,
+      error: {
+        code: "57014",
+        message: "canceling statement due to statement timeout",
+      },
+    });
+
+    const result = await authenticateDevice(
+      makeRequest("sk_device_some_token"),
+      supabase,
+    );
+    expect(result).toEqual({ error: "server_error" });
+  });
+
+  it("returns server_error on a DB error with no recognizable code (connection failure)", async () => {
+    const supabase = createMockSupabase();
+    supabase._results.set("devices.select", {
+      data: null,
+      error: { message: "fetch failed" },
+    });
+
+    const result = await authenticateDevice(
+      makeRequest("sk_device_some_token"),
+      supabase,
+    );
+    expect(result).toEqual({ error: "server_error" });
+  });
+});
+
+describe("authErrorResponse", () => {
+  it.each(["missing_token", "invalid_token", "token_revoked"] as const)(
+    "maps %s to 401",
+    (code) => {
+      expect(authErrorResponse(code).status).toBe(401);
+    },
+  );
+
+  // server_error must bypass the all-401 default — a 503 is what keeps the
+  // device's 401-only wipe gate from misfiring on a transient fault (web #538).
+  it("maps server_error to 503, not 401", () => {
+    expect(authErrorResponse("server_error").status).toBe(503);
   });
 });

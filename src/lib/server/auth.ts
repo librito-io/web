@@ -10,7 +10,11 @@ export interface AuthenticatedDevice {
   name: string;
 }
 
-export type AuthErrorCode = "missing_token" | "invalid_token" | "token_revoked";
+export type AuthErrorCode =
+  | "missing_token"
+  | "invalid_token"
+  | "token_revoked"
+  | "server_error";
 
 type AuthResult = { device: AuthenticatedDevice } | { error: AuthErrorCode };
 
@@ -18,17 +22,31 @@ const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
   missing_token: "Authorization header with Bearer token required",
   invalid_token: "Invalid device token",
   token_revoked: "Device token has been revoked. Re-pair the device.",
+  server_error: "Server error during authentication. Retry shortly.",
+};
+
+// Credential verdicts (missing/invalid/revoked) all map to 401 per RFC 7235.
+// `server_error` is NOT a verdict — it is a transient DB/lookup fault, so it
+// maps to 503 (retryable) and MUST NOT surface as 401: a 401 would make the
+// Kobo device's 401-only credential-rejected wipe gate misfire on a Supabase
+// blip and self-wipe a healthy paired device (web #538).
+const AUTH_ERROR_STATUS: Record<AuthErrorCode, number> = {
+  missing_token: 401,
+  invalid_token: 401,
+  token_revoked: 401,
+  server_error: 503,
 };
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// All auth errors map to 401 (per RFC 7235 — missing/invalid/revoked
-// credentials all mean "you are not authenticated"). Used by every
-// authenticated device endpoint. /api/device/unpair is the one
-// exception — it treats invalid/revoked as success for idempotency.
+// Maps an auth code to its HTTP response (status from AUTH_ERROR_STATUS —
+// 401 for credential verdicts, 503 for server_error). Used by every
+// authenticated device endpoint. /api/device/unpair is the one exception —
+// it treats invalid/revoked as success for idempotency (but routes
+// server_error here, so a transient fault is a retryable 503, not success).
 export function authErrorResponse(code: AuthErrorCode): Response {
-  return jsonError(401, code, AUTH_ERROR_MESSAGES[code]);
+  return jsonError(AUTH_ERROR_STATUS[code], code, AUTH_ERROR_MESSAGES[code]);
 }
 
 // Narrows `event.locals.user` to non-null inside /app/** route handlers
@@ -98,6 +116,18 @@ export async function authenticateDevice(
     .eq("api_token_hash", tokenHash)
     .single();
 
+  // Discriminate a genuine row-miss from a transient DB fault. `.single()`
+  // returns code PGRST116 when zero rows match — an unknown/deleted/rotated
+  // token, a real credential verdict → invalid_token. ANY other error
+  // (statement timeout, connection failure, PostgREST 5xx, pool exhaustion) is
+  // NOT a verdict → server_error (503), so the device's credential-rejected
+  // wipe gate never misfires on a transient blip (web #538). The real-error
+  // branch MUST come first: on a transient error `device` is also null, so
+  // `error?.code === "PGRST116" || !device` alone would swallow it into
+  // invalid_token.
+  if (error && error.code !== "PGRST116") {
+    return { error: "server_error" };
+  }
   if (error || !device) {
     return { error: "invalid_token" };
   }

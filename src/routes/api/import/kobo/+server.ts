@@ -67,6 +67,29 @@ export const POST: RequestHandler = async ({ request }) => {
       validation.items,
       validation.complete,
     );
+
+    // 6. Bump device sync timestamps (web #541) — mirrors the PaperS3 /api/sync
+    // path so /app/devices "last synced" advances for a Kobo too. Best-effort:
+    // the import has already committed, so a metadata-write blip must NOT turn a
+    // good import into a 500 (which would make the agent re-POST needlessly).
+    // This is the deliberate divergence from sync.ts, which throws because there
+    // the timestamp write is part of the in-flight sync, not a post-commit bump.
+    const nowIso = new Date().toISOString();
+    const { error: deviceUpdateError } = await supabase
+      .from("devices")
+      .update({ last_synced_at: nowIso, last_used_at: nowIso })
+      .eq("id", device.id);
+    if (deviceUpdateError) {
+      logger().warn(
+        {
+          event: "import.kobo.device_timestamp_update_failed",
+          deviceId: device.id,
+          error: deviceUpdateError.message,
+        },
+        "import.kobo.device_timestamp_update_failed",
+      );
+    }
+
     return jsonSuccess(result);
   } catch (err) {
     logger().error(

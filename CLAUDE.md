@@ -4,20 +4,21 @@ SvelteKit web app for the Librito cloud highlight sync system. Hosted at `https:
 
 ## Librito Project Structure
 
-Librito is split across two repos under the `librito-io` GitHub org:
+Librito is split across three repos under the `librito-io` GitHub org:
 
 - **`librito-io/reader`** — ESP32 firmware (PlatformIO). The e-ink book reader device.
 - **`librito-io/web`** (this repo) — SvelteKit web app + Supabase project. All web UI, API endpoints, database schema, and migrations.
+- **`librito-io/kobo-sync`** — Go on-device sync agent for stock Kobo (Nickel). Reads `KoboReader.sqlite` highlights and POSTs them to `POST /api/import/kobo`; pairs via the same device-auth flow as the PaperS3. Built + hardware-verified on the Libra Colour (fw 4.45.23697).
 
 The device never talks to Supabase directly. All device communication goes through SvelteKit API routes, which use the Supabase `service_role` key server-side.
 
 **Multi-source direction (2026-06).** Librito is reframing from "companion app for the PaperS3 firmware" to "a highlights companion for any e-reader." The PaperS3 is now one **highlight source** among several.
 
-**Kobo integration (v1).** Kobo is the first new source, ingested via an on-device WiFi sync agent (not yet built) that reads stock-Nickel highlights and POSTs them to `POST /api/import/kobo`. Track 1 backend has shipped (#496 provenance schema, #497 import endpoint). Imported highlights are char-offset based, not word-index based, so they carry `source='kobo'` + a `source_uid`, leave the word-index columns NULL, and render as plain quoted text. The import write path is **separate code from `processSync`** (`src/lib/server/import/kobo.ts`).
+**Kobo integration (v1).** Kobo is the first new source, ingested via the on-device WiFi sync agent in `librito-io/kobo-sync` (Go; built + hardware-verified, shipped through Step 4) that reads stock-Nickel highlights and POSTs them to `POST /api/import/kobo`. Track 1 backend has shipped (#496 provenance schema, #497 import endpoint); reconcile shipped (#527 / PR #532). Imported highlights are char-offset based, not word-index based, so they carry `source='kobo'` + a `source_uid`, leave the word-index columns NULL, and render as plain quoted text. The import write path is **separate code from `processSync`** (`src/lib/server/import/kobo.ts`).
 
 **Data-model invariants.** The "`notes` are web-created, device never writes notes" invariant is load-bearing (Realtime push + RLS + word-index down-path keying). Kobo annotations are deliberately out of v1 scope; reopening that requires a separate table, not overloading `notes`.
 
-**Outstanding follow-on work.** Open follow-on: #500 (converge Kobo + PaperS3 books on a shared ISBN — no `UNIQUE(user_id, isbn)` today). Remaining pivot work (on-device agent, installer/pairing, live browser updates, annotations model) is tracked as forward issues.
+**Outstanding follow-on work.** Open follow-on: #500 (converge Kobo + PaperS3 books on a shared ISBN — no `UNIQUE(user_id, isbn)` today). Remaining pivot work (installer/onboarding UX, live browser updates, annotations model) is tracked as forward issues.
 
 Design specs and implementation plans are stored locally (never committed) in the repo the work belongs to, under gitignored `docs/superpowers/specs/` and `docs/superpowers/plans/`: web + Kobo-web work in this repo, PaperS3 firmware docs in the reader repo, Kobo sync agent docs in the kobo-sync repo.
 
@@ -224,7 +225,7 @@ Hand-maintained TS types that mirror DB tables derive from `Database['public']['
 Two **separate** write paths land highlights; both use the service-role client and derive `user_id` from the device token (never from the payload), share storage/feed/search/catalog downstream, and honor server-owned soft-delete (omit `deleted_at` on conflict so a re-send never resurrects a web-trashed highlight).
 
 - **PaperS3 (`processSync`)** — `POST /api/sync` → `src/lib/server/sync.ts`. Word-index natural-key upsert `ON CONFLICT (book_id, chapter_index, start_word, end_word)`. Full-set re-send; the natural key collapses duplicates.
-- **Kobo import (`processKoboImport`)** — `POST /api/import/kobo` → `src/lib/server/import/kobo.ts`. Char-offset highlights with NULL word fields. Dedups on `(book_id, source, source_uid)` via the `upsert_kobo_highlights` RPC — the dedup index is **partial** (`WHERE source_uid IS NOT NULL`), and supabase-js `.upsert()` can't thread the partial predicate, so the RPC carries the explicit `ON CONFLICT ... WHERE`. The RPC pins `user_id` from a `p_user_id` param (not the JSONB rows) and sets `created_at` INSERT-only (untouched on conflict, like `deleted_at`). Book resolve is ISBN-first (reuse existing per-user row → shared catalog enrichment) else synthesize an 8-hex `book_hash` via FNV-1a of the Kobo `content_id`; title+author are always populated because for a null-ISBN sideload they are the only catalog cover signal (the cover walker never reads `book_hash`). `importKoboLimiter` (per-device, fail-OPEN) guards the route. v1 imports highlight text only — annotations are out of scope (would break the web-only-`notes` invariant).
+- **Kobo import (`processKoboImport`)** — `POST /api/import/kobo` → `src/lib/server/import/kobo.ts`. Char-offset highlights with NULL word fields. Dedups on `(book_id, source, source_uid)` via the `reconcile_kobo_highlights` RPC (`kobo.ts:423`; runs amends→upsert→stamps as separate statements — the dedup upsert is STEP 2; replaced the older `upsert_kobo_highlights` in #527/#532/#533) — the dedup index is **partial** (`WHERE source_uid IS NOT NULL`), and supabase-js `.upsert()` can't thread the partial predicate, so the RPC carries the explicit `ON CONFLICT ... WHERE`. The RPC pins `user_id` from a `p_user_id` param (not the JSONB rows) and sets `created_at` INSERT-only (untouched on conflict, like `deleted_at`). Book resolve is ISBN-first (reuse existing per-user row → shared catalog enrichment) else synthesize an 8-hex `book_hash` via FNV-1a of the Kobo `content_id`; title+author are always populated because for a null-ISBN sideload they are the only catalog cover signal (the cover walker never reads `book_hash`). `importKoboLimiter` (per-device, fail-OPEN) guards the route. v1 imports highlight text only — annotations are out of scope (would break the web-only-`notes` invariant).
 
 ### Function EXECUTE grants (REVOKE pattern)
 

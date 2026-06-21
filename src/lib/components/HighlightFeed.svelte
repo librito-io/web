@@ -230,7 +230,6 @@
     const target = items.length; // re-cover the depth that was loaded
     const acc: FeedItem[] = [];
     let pageCursor: string | null = null;
-    let lastCursor: string | null = null;
     do {
       const res = await fetch(fetchUrl({ sort, cursor: pageCursor }));
       if (!res.ok) return; // best-effort; leave items as-is
@@ -239,13 +238,12 @@
         nextCursor: string | null;
       };
       acc.push(...payload.items);
-      lastCursor = payload.nextCursor;
       pageCursor = payload.nextCursor;
       if (payload.items.length === 0) break;
     } while (acc.length < target && pageCursor !== null);
     items = dedupeById(acc);
-    cursor = lastCursor;
-    done = lastCursor === null;
+    cursor = pageCursor;
+    done = pageCursor === null;
   }
 
   const insertCoalescer = createCoalescer({
@@ -307,6 +305,7 @@
             // replay. Skip the first SUBSCRIBED (initial join; SSR already
             // loaded the feed).
             if (hadSubscribed) {
+              insertCoalescer.cancel(); // a pending head refetch is now redundant
               void refetchLoadedRange();
             } else {
               hadSubscribed = true;

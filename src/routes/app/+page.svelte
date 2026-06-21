@@ -56,6 +56,7 @@
       emptyMessage={$_("noHighlights")}
       supabase={data.supabase}
       userId={data.user?.id ?? ""}
+      liveUpdates
     />
   </div>
   {#if activeSection === "readingList"}

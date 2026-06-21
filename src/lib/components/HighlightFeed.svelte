@@ -11,6 +11,9 @@
   import { installHighlightContextMenuListener } from "$lib/contextMenu/highlightDocListener";
   import { writeSortCookie, type SortOption } from "$lib/feed/sort";
   import type { FeedItem, Sort } from "$lib/feed/types";
+  import type { RealtimeChannel } from "@supabase/supabase-js";
+  import { mergeHead, dedupeById } from "$lib/feed/merge";
+  import { createCoalescer } from "$lib/feed/coalescer";
   import { copyText } from "$lib/clipboard";
 
   type CardFlags = {
@@ -29,6 +32,7 @@
     userId,
     cardProps = {},
     controlledSort = undefined,
+    liveUpdates = false,
   } = $props<{
     initialItems: FeedItem[];
     initialSort: Sort;
@@ -43,6 +47,9 @@
     // the control) and changing it refetches. When omitted, this component
     // self-manages sort and renders its own <SortPillRow> (book detail).
     controlledSort?: Sort;
+    // Opt-in: home feed passes this to subscribe to the per-user realtime
+    // topic. Book page omits it → no subscription (spec non-goal).
+    liveUpdates?: boolean;
   }>();
 
   let internalSort = $state<Sort>(untrack(() => initialSort));
@@ -198,6 +205,127 @@
       if (abortController === ac) abortController = null;
     }
   }
+
+  // ── Live updates (opt-in via `liveUpdates`) ──────────────────────────────
+  // Head refetch: a new row sorts to the head by created_at DESC ('recent'),
+  // so refetching the head page and merging surfaces it. Cursor/done untouched
+  // — the loaded tail is unchanged. Best-effort: a failed fetch is reconciled
+  // by the next event, the reconnect catch-up, or a navigation.
+  async function refetchHead(): Promise<void> {
+    const res = await fetch(fetchUrl({ sort, cursor: null }));
+    if (!res.ok) return;
+    const payload = (await res.json()) as {
+      items: FeedItem[];
+      nextCursor: string | null;
+    };
+    items = mergeHead(payload.items, items);
+  }
+
+  // Full-loaded-range refetch (spec §4 Option B). Used for RESTORE (a restored
+  // row's created_at may sort far below the head, so a head-only refetch would
+  // never reintroduce it) and RECONNECT (Broadcast has no backlog — heals
+  // inserts AND restores missed while the socket was down). Re-pages from the
+  // top until it has re-covered the prior loaded depth, then replaces.
+  async function refetchLoadedRange(): Promise<void> {
+    const target = items.length; // re-cover the depth that was loaded
+    const acc: FeedItem[] = [];
+    let pageCursor: string | null = null;
+    let lastCursor: string | null = null;
+    do {
+      const res = await fetch(fetchUrl({ sort, cursor: pageCursor }));
+      if (!res.ok) return; // best-effort; leave items as-is
+      const payload = (await res.json()) as {
+        items: FeedItem[];
+        nextCursor: string | null;
+      };
+      acc.push(...payload.items);
+      lastCursor = payload.nextCursor;
+      pageCursor = payload.nextCursor;
+      if (payload.items.length === 0) break;
+    } while (acc.length < target && pageCursor !== null);
+    items = dedupeById(acc);
+    cursor = lastCursor;
+    done = lastCursor === null;
+  }
+
+  const insertCoalescer = createCoalescer({
+    delayMs: 500,
+    maxWaitMs: 2000,
+    fire: () => {
+      void refetchHead();
+    },
+  });
+
+  function handleHighlightChange(msg: {
+    payload?: Record<string, unknown>;
+  }): void {
+    // The envelope is { type, event, payload }; the trigger body is at payload.
+    const payload = msg.payload ?? {};
+    if (payload.op === "insert") {
+      insertCoalescer.schedule(); // debounced head refetch
+      return;
+    }
+    if (payload.op === "update") {
+      if (payload.deleted_at != null) {
+        // Trash: surgical splice. Correct even if the row is below the loaded
+        // window. Idempotent (#530 may add optimistic removal later).
+        const id = payload.id as string;
+        items = items.filter((it) => it.highlight_id !== id);
+      } else {
+        // Restore: full-loaded-range refetch (NOT head-only — see above).
+        insertCoalescer.cancel(); // a pending head refetch is now redundant
+        void refetchLoadedRange();
+      }
+    }
+  }
+
+  $effect(() => {
+    if (!liveUpdates || !userId) return;
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    let hadSubscribed = false;
+
+    void (async () => {
+      // Private channel join needs the current session token on the realtime
+      // socket before subscribe (spec risk #2).
+      await supabase.realtime.setAuth();
+      if (cancelled) return;
+      channel = supabase
+        .channel("user:" + userId, {
+          config: { private: true, broadcast: { self: true } },
+        })
+        .on(
+          "broadcast",
+          { event: "highlight_change" },
+          (msg: { payload?: Record<string, unknown> }) =>
+            handleHighlightChange(msg),
+        )
+        .subscribe((status: string) => {
+          if (status === "SUBSCRIBED") {
+            // A SUBSCRIBED that FOLLOWS a prior drop (socket sleep/wake,
+            // network blip, node cycle) must catch up — Broadcast has no
+            // replay. Skip the first SUBSCRIBED (initial join; SSR already
+            // loaded the feed).
+            if (hadSubscribed) {
+              void refetchLoadedRange();
+            } else {
+              hadSubscribed = true;
+              // Test/observability hook (mirrors the layout's data-hydrated).
+              document.documentElement.dataset.liveFeed = "subscribed";
+            }
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.warn("[live-feed] channel status:", status);
+          }
+        });
+    })();
+
+    return () => {
+      cancelled = true;
+      insertCoalescer.cancel();
+      if (channel) supabase.removeChannel(channel);
+      delete document.documentElement.dataset.liveFeed;
+    };
+  });
 </script>
 
 {#if controlledSort === undefined}

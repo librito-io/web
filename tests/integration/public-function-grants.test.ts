@@ -147,6 +147,22 @@ const fns: Fn[] = [
     allowRoles: ["service_role"],
     rpcSlug: "reconcile_kobo_highlights",
   },
+  // Live feed broadcast trigger functions (2026-06-21). Trigger-only; no
+  // PostgREST caller. Two-REVOKE template per CLAUDE.md.
+  {
+    name: "broadcast_highlight_insert",
+    args: "",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: null,
+  },
+  {
+    name: "broadcast_highlight_update",
+    args: "",
+    denyRoles: ["anon", "authenticated"],
+    allowRoles: ["service_role"],
+    rpcSlug: null,
+  },
 ];
 
 describe.skipIf(SKIP)("public function grants (issue #327)", () => {

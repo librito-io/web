@@ -211,14 +211,30 @@
   // so refetching the head page and merging surfaces it. Cursor/done untouched
   // — the loaded tail is unchanged. Best-effort: a failed fetch is reconciled
   // by the next event, the reconnect catch-up, or a navigation.
+  //
+  // liveAbort is created at subscription-effect setup and aborted on teardown,
+  // so an in-flight live refetch resolving after the component is torn down
+  // (navigate-away) is dropped instead of writing torn-down state — parity with
+  // loadMore's AbortController. Scoped to the effect lifecycle, NOT per refetch:
+  // concurrent live refetches deliberately do not cross-abort (an insert head
+  // refetch must never abort an in-flight restore full-range refetch).
+  let liveAbort: AbortController | null = null;
+
   async function refetchHead(): Promise<void> {
-    const res = await fetch(fetchUrl({ sort, cursor: null }));
-    if (!res.ok) return;
-    const payload = (await res.json()) as {
-      items: FeedItem[];
-      nextCursor: string | null;
-    };
-    items = mergeHead(payload.items, items);
+    const signal = liveAbort?.signal;
+    try {
+      const res = await fetch(fetchUrl({ sort, cursor: null }), { signal });
+      if (signal?.aborted || !res.ok) return;
+      const payload = (await res.json()) as {
+        items: FeedItem[];
+        nextCursor: string | null;
+      };
+      if (signal?.aborted) return;
+      items = mergeHead(payload.items, items);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      throw err;
+    }
   }
 
   // Full-loaded-range refetch (spec §4 Option B). Used for RESTORE (a restored
@@ -227,23 +243,32 @@
   // inserts AND restores missed while the socket was down). Re-pages from the
   // top until it has re-covered the prior loaded depth, then replaces.
   async function refetchLoadedRange(): Promise<void> {
+    const signal = liveAbort?.signal;
     const target = items.length; // re-cover the depth that was loaded
     const acc: FeedItem[] = [];
     let pageCursor: string | null = null;
-    do {
-      const res = await fetch(fetchUrl({ sort, cursor: pageCursor }));
-      if (!res.ok) return; // best-effort; leave items as-is
-      const payload = (await res.json()) as {
-        items: FeedItem[];
-        nextCursor: string | null;
-      };
-      acc.push(...payload.items);
-      pageCursor = payload.nextCursor;
-      if (payload.items.length === 0) break;
-    } while (acc.length < target && pageCursor !== null);
-    items = dedupeById(acc);
-    cursor = pageCursor;
-    done = pageCursor === null;
+    try {
+      do {
+        const res = await fetch(fetchUrl({ sort, cursor: pageCursor }), {
+          signal,
+        });
+        if (signal?.aborted || !res.ok) return; // best-effort; leave items as-is
+        const payload = (await res.json()) as {
+          items: FeedItem[];
+          nextCursor: string | null;
+        };
+        acc.push(...payload.items);
+        pageCursor = payload.nextCursor;
+        if (payload.items.length === 0) break;
+      } while (acc.length < target && pageCursor !== null);
+      if (signal?.aborted) return;
+      items = dedupeById(acc);
+      cursor = pageCursor;
+      done = pageCursor === null;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      throw err;
+    }
   }
 
   const insertCoalescer = createCoalescer({
@@ -282,6 +307,7 @@
     let channel: RealtimeChannel | null = null;
     let cancelled = false;
     let hadSubscribed = false;
+    liveAbort = new AbortController();
 
     void (async () => {
       // Private channel join needs the current session token on the realtime
@@ -321,6 +347,8 @@
     return () => {
       cancelled = true;
       insertCoalescer.cancel();
+      liveAbort?.abort();
+      liveAbort = null;
       if (channel) supabase.removeChannel(channel);
       delete document.documentElement.dataset.liveFeed;
     };

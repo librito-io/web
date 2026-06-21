@@ -6,9 +6,18 @@ import { parseFeedRows } from "$lib/feed/types";
 import { enrichFeedRowsWithCovers } from "$lib/server/catalog/feed-enrichment";
 import { logger } from "$lib/server/log";
 import { requireUser } from "$lib/server/auth";
+import { feedReadLimiter, enforceRateLimit } from "$lib/server/ratelimit";
 
 export const GET: RequestHandler = async (event) => {
   const user = requireUser(event);
+
+  const limited = await enforceRateLimit(
+    feedReadLimiter,
+    user.id,
+    "Too many feed requests. Please slow down.",
+  );
+  if (limited) return limited;
+
   const { url } = event;
   const { supabase } = event.locals;
 

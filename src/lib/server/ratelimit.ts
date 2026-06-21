@@ -496,3 +496,18 @@ export const catalogITunesLimiter = createLimiter({
   prefix: "rl:catalog-itunes",
   failMode: "open",
 });
+
+// GET /app/feed — per-user read budget (spec H6). Client-side loadMore
+// (infinite scroll) plus the live insert/restore/reconnect refetches all hit
+// this route; a resident import source (Kobo daemon) can drive one refetch per
+// import per open tab. The client debounce + max-wait ceiling bounds per-tab
+// frequency; this caps per-user fan-out across tabs. Fail-OPEN: feed read is
+// core UX — an Upstash outage must degrade to unthrottled reads, never
+// "can't read your highlights". The SSR initial paint uses +page.server.ts
+// (not this route), so first paint is never rate-limited. Downstream RLS and
+// the catalog per-user fail-CLOSED limiter still gate the cover-resolve fan-out.
+export const feedReadLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(120, "1m"),
+  prefix: "rl:feed:read",
+  failMode: "open",
+});

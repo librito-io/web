@@ -2,8 +2,9 @@
   import { _ } from "$lib/i18n";
   import LanguageDropdown from "./LanguageDropdown.svelte";
 
-  let { menuOpen = $bindable<boolean>(false) } = $props<{
+  let { menuOpen = $bindable<boolean>(false), loggedIn = false } = $props<{
     menuOpen: boolean;
+    loggedIn?: boolean;
   }>();
 </script>
 
@@ -12,23 +13,32 @@
     <h1>Librito</h1>
     <div class="header-actions">
       <LanguageDropdown />
-      <div class="menu-wrap">
-        <button
-          class="menu-btn"
-          class:open={menuOpen}
-          aria-label={$_("menuLabel")}
-          onclick={(e) => {
-            e.stopPropagation();
-            menuOpen = !menuOpen;
-          }}
-        >
-          <div class="menu-icon">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-        </button>
-      </div>
+      <!-- App chrome is gated on auth (issue #553): logged-out visitors must
+           not see the overlay menu, which leaks the product's structure
+           pre-launch. The hamburger is replaced by a Log-in link in the same
+           right-slot so existing users still have a way in; the MenuOverlay is
+           not rendered at all (see +layout.svelte). -->
+      {#if loggedIn}
+        <div class="menu-wrap">
+          <button
+            class="menu-btn"
+            class:open={menuOpen}
+            aria-label={$_("menuLabel")}
+            onclick={(e) => {
+              e.stopPropagation();
+              menuOpen = !menuOpen;
+            }}
+          >
+            <div class="menu-icon">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </button>
+        </div>
+      {:else}
+        <a class="login-link" href="/auth/login">{$_("navLogIn")}</a>
+      {/if}
     </div>
   </div>
 </header>

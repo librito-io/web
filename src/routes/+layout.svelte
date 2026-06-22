@@ -153,7 +153,12 @@
   {/each}
 </svelte:head>
 
-<Header bind:menuOpen />
-<MenuOverlay bind:open={menuOpen} onLogout={logout} />
+<Header bind:menuOpen loggedIn={!!data.user} />
+<!-- Overlay menu is app chrome — render it only for authenticated users so
+     logged-out visitors never see app nav / "Log out" (issue #553). Header
+     swaps the hamburger for a Log-in link in the same case. -->
+{#if data.user}
+  <MenuOverlay bind:open={menuOpen} onLogout={logout} />
+{/if}
 
 {@render children()}

@@ -364,6 +364,27 @@ h2 {
 .menu-btn:hover {
   border-color: #47494b;
 }
+/* Logged-out stand-in for the hamburger (issue #553). Pill matched to
+   .lang-btn so the header right-slot reads as one control family. */
+.login-link {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  border: 1.5px solid #232629;
+  border-radius: 20px;
+  background: transparent;
+  color: #dedede;
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  flex-shrink: 0;
+  margin-top: 2px;
+  transition: border-color 0.15s ease;
+}
+.login-link:hover {
+  border-color: #47494b;
+}
 .menu-icon {
   width: 18px;
   height: 14px;
@@ -874,6 +895,12 @@ h2 {
   }
   .lang-btn span:last-child {
     font-size: 11px;
+  }
+  .login-link {
+    height: 36px;
+    border-radius: 18px;
+    padding: 0 14px;
+    font-size: 12px;
   }
   .book-header {
     flex-wrap: nowrap;

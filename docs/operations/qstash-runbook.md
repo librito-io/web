@@ -13,7 +13,7 @@ Durable runbook for cutting `librito.io` over to QStash for catalog cold-miss re
 
 - [ ] PR1, PR2, PR3, PR4 all merged to `main` and deployed via the production-deploy workflow.
 - [ ] Sentry shows no `catalog.queue.publish_failed` events from the inline path (would indicate the code is already trying QStash with empty env — should never happen, but worth a glance).
-- [ ] Confirm `/api/queue/catalog-resolve` exists on production: `curl -i https://web-ten-mocha-59.vercel.app/api/queue/catalog-resolve -X POST` should return `500 server_misconfigured` (signing keys unset) — proves the route is live, just not configured.
+- [ ] Confirm `/api/queue/catalog-resolve` exists on production: `curl -i https://librito.io/api/queue/catalog-resolve -X POST` should return `500 server_misconfigured` (signing keys unset) — proves the route is live, just not configured.
 
 ## One-time cutover
 
@@ -35,7 +35,7 @@ For each variable below: `vercel env add <NAME> production` (or via the Vercel d
 
 - `QSTASH_TOKEN` — from QStash dashboard. Mark **Sensitive**.
 - `QSTASH_URL` — region endpoint (e.g. `https://qstash-eu-central-1.upstash.io` for EU tenants). The SDK default is `https://qstash.upstash.io` (global); a region-tenant token routed to global returns 401 "invalid token". Producer + DLQ-drain pass this as `baseUrl` to `QStashClient`. Required for both code-paths to publish. Mark **Encrypted** — public Upstash endpoint, not a secret; Encrypted lets `vercel env pull` read it back for drift checks (the value that just bit us would have been visible).
-- `QSTASH_CONSUMER_URL` — `https://web-ten-mocha-59.vercel.app/api/queue/catalog-resolve` (pre-launch) or `https://librito.io/api/queue/catalog-resolve` (post-DNS-flip). Consumer-side also reads this var to bind the QStash signature verification to the publisher-signed URL — set on BOTH the producer-runtime AND the consumer-runtime (same Vercel project, same env). Mark **Sensitive**.
+- `QSTASH_CONSUMER_URL` — `https://librito.io/api/queue/catalog-resolve`. (librito.io went live as the prod apex on 2026-06-22; the `web-ten-mocha-59.vercel.app` alias still serves this route and remains a valid fallback. Whichever host is set, QStash binds signature verification to it, so producer + consumer must agree — they share this one var in the same Vercel project.) Consumer-side reads this var to bind the QStash signature verification to the publisher-signed URL — set on BOTH the producer-runtime AND the consumer-runtime. Mark **Sensitive**.
 - `QSTASH_CURRENT_SIGNING_KEY` — from QStash dashboard. Mark **Sensitive**.
 - `QSTASH_NEXT_SIGNING_KEY` — from QStash dashboard. Mark **Sensitive**.
 

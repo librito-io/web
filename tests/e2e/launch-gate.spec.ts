@@ -26,8 +26,16 @@ test.describe("pre-launch launch gate (PUBLIC_LAUNCHED unset)", () => {
     await expect(page.locator('input[type="email"]')).toHaveCount(0);
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
 
-    // existing users can still reach login regardless of the gate.
-    await expect(page.getByRole("link", { name: /log in/i })).toBeVisible();
+    // existing users can still reach login regardless of the gate. Scope to
+    // the page-body link ("Already have an account? Log in") — the header now
+    // also carries a "Log in" link for logged-out visitors (issue #553), so an
+    // unscoped getByRole would trip a strict-mode ambiguity on two matches.
+    await expect(
+      page
+        .locator("p")
+        .filter({ hasText: /already have an account/i })
+        .getByRole("link", { name: /log in/i }),
+    ).toBeVisible();
 
     // noindex gate: the robots meta is present pre-launch.
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute(

@@ -5,9 +5,10 @@ import { awaitHydration } from "./helpers/hydrate";
 // resolves cookie → Accept-Language → "en", rewrites the <html> open
 // tag, and the root layout load inits svelte-i18n with the same locale
 // so SSR text matches. The request-fixture tests assert on raw response
-// HTML — the contract must hold before any JS runs. menuLabel is the
-// only translated string SSR'd on `/` (Header aria-label), so it serves
-// as the rendered-strings probe.
+// HTML — the contract must hold before any JS runs. Issue #553 gated the
+// hamburger (and its menuLabel aria-label) behind auth, so the header's
+// Log-in link text (navLogIn) is now the translated string SSR'd on the
+// logged-out `/`, and serves as the rendered-strings probe.
 test.describe("SSR locale resolution", () => {
   test("locale cookie drives SSR lang and strings", async ({ request }) => {
     const res = await request.get("/", {
@@ -15,7 +16,7 @@ test.describe("SSR locale resolution", () => {
     });
     const html = await res.text();
     expect(html).toContain('<html lang="ja" dir="ltr">');
-    expect(html).toContain('aria-label="メニュー"');
+    expect(html).toContain("ログイン");
   });
 
   test("Arabic cookie flips dir to rtl at SSR", async ({ request }) => {
@@ -31,7 +32,7 @@ test.describe("SSR locale resolution", () => {
     });
     const html = await res.text();
     expect(html).toContain('<html lang="de" dir="ltr">');
-    expect(html).toContain('aria-label="Menü"');
+    expect(html).toContain("Anmelden");
   });
 
   test("unsupported cookie falls back to Accept-Language", async ({
@@ -51,7 +52,7 @@ test.describe("SSR locale resolution", () => {
     });
     const html = await res.text();
     expect(html).toContain('<html lang="en" dir="ltr">');
-    expect(html).toContain('aria-label="Menu"');
+    expect(html).toContain("Log in");
   });
 });
 
@@ -72,7 +73,7 @@ test.describe("locale cookie lifecycle", () => {
     await page.reload();
     await awaitHydration(page);
     await expect(page.locator("html")).toHaveAttribute("lang", "ja");
-    await expect(page.getByRole("button", { name: "メニュー" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "ログイン" })).toBeVisible();
   });
 
   test("legacy localStorage-only locale migrates to a cookie", async ({

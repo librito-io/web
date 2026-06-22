@@ -7,9 +7,16 @@
   import Header from "$lib/components/Header.svelte";
   import MenuOverlay from "$lib/components/MenuOverlay.svelte";
   import { PRELOAD_FONTS, notoPreloadForLocale } from "$lib/fonts";
+  import { env } from "$env/dynamic/public";
 
   let { data, children } = $props();
   let menuOpen = $state(false);
+
+  // Pre-launch stealth: emit <meta name="robots" content="noindex"> on every
+  // page until PUBLIC_LAUNCHED === "true". Pairs with /robots.txt (Disallow).
+  // Discovery lever only — account creation is gated by Supabase enable_signup.
+  // $env/dynamic/public so an unset value is "" (pre-launch default).
+  const launched = env.PUBLIC_LAUNCHED === "true";
 
   // Locale-gated Noto subset preloads (issue #416). Empty for every
   // locale except ar/hi — emitted alongside the universal Inter/Literata
@@ -123,6 +130,9 @@
 </script>
 
 <svelte:head>
+  {#if !launched}
+    <meta name="robots" content="noindex, nofollow" />
+  {/if}
   {#each PRELOAD_FONTS as href (href)}
     <link
       rel="preload"

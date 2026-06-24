@@ -87,6 +87,9 @@
     font-size: 1rem;
   }
   .auth-card :global(.primary) {
+    /* Extra breathing room before the CTA: 18px + the form's 14px flex gap
+       = 32px between the last field and the submit button. */
+    margin-top: 18px;
     padding: 10px 24px;
     background: #dedede;
     color: #15171a;

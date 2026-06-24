@@ -36,30 +36,33 @@
     <p class="oauth-error" role="alert">{error}</p>
   {/if}
 
-  <!-- ToS-mandated styling. Wording + colors are fixed by Google/Apple brand
-       guidelines. Paste the OFFICIAL logo SVGs in the marked slots from:
-       Google:  https://developers.google.com/identity/branding-guidelines
-       Apple:   https://developer.apple.com/design/human-interface-guidelines/sign-in-with-apple
-       Do not recolor or resize the logos. -->
-  <button
-    type="button"
-    class="oauth-btn oauth-google"
-    disabled={pending !== null}
-    onclick={() => signIn("google")}
-  >
-    <!-- OFFICIAL GOOGLE "G" SVG HERE -->
-    <span>{pending === "google" ? "Connecting…" : "Continue with Google"}</span>
-  </button>
+  <!-- Compact side-by-side provider buttons (Cloudflare-style). Short labels
+       fit the half-width layout; the OFFICIAL logos + brand-compliant final
+       wording are finalized in the #559 brand pass. Paste official logo SVGs
+       in the marked slots:
+       Google: https://developers.google.com/identity/branding-guidelines
+       Apple:  https://developer.apple.com/design/human-interface-guidelines/sign-in-with-apple -->
+  <div class="oauth-row">
+    <button
+      type="button"
+      class="oauth-btn oauth-google"
+      disabled={pending !== null}
+      onclick={() => signIn("google")}
+    >
+      <!-- OFFICIAL GOOGLE "G" SVG HERE -->
+      <span>{pending === "google" ? "Connecting…" : "Google"}</span>
+    </button>
 
-  <button
-    type="button"
-    class="oauth-btn oauth-apple"
-    disabled={pending !== null}
-    onclick={() => signIn("apple")}
-  >
-    <!-- OFFICIAL APPLE LOGO SVG HERE -->
-    <span>{pending === "apple" ? "Connecting…" : "Continue with Apple"}</span>
-  </button>
+    <button
+      type="button"
+      class="oauth-btn oauth-apple"
+      disabled={pending !== null}
+      onclick={() => signIn("apple")}
+    >
+      <!-- OFFICIAL APPLE LOGO SVG HERE -->
+      <span>{pending === "apple" ? "Connecting…" : "Apple"}</span>
+    </button>
+  </div>
 </div>
 
 <style>
@@ -68,12 +71,17 @@
     flex-direction: column;
     gap: 12px;
   }
+  .oauth-row {
+    display: flex;
+    gap: 12px;
+  }
   .oauth-btn {
+    flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 10px;
-    width: 100%;
     min-height: 48px; /* matches the email input + Log in button (≥ HIG 44px) */
     border-radius: 8px;
     font-size: 0.95rem;
@@ -84,13 +92,11 @@
     opacity: 0.6;
     cursor: default;
   }
-  /* Google: white bg, #3c4043 text, #dadce0 border (brand spec). */
   .oauth-google {
     background: #16181b;
     color: #dedede;
     border: 1px solid #16181b;
   }
-  /* Apple: black bg, white text (brand spec). */
   .oauth-apple {
     background: #16181b;
     color: #dedede;

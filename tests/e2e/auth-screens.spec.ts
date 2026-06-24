@@ -7,12 +7,8 @@ test.describe("auth screens", () => {
   }) => {
     await page.goto("/auth/login");
     await awaitHydration(page);
-    await expect(
-      page.getByRole("button", { name: "Continue with Google" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Continue with Apple" }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Google" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Apple" })).toBeVisible();
     await expect(page.getByLabel("Email")).toBeVisible();
     await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
   });

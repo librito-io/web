@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from "$app/stores";
   import { enhance } from "$app/forms";
+  import { _ } from "$lib/i18n";
   import AuthCard from "$lib/components/AuthCard.svelte";
 
   let { data, form } = $props();
@@ -43,15 +44,19 @@
 </script>
 
 <AuthCard>
-  <h1>Check your email</h1>
+  <h1>{$_("authVerifyHeading")}</h1>
 
   {#if email}
+    <!-- prefix/suffix split keeps the email <strong>-emphasized without piping
+         attacker-controlled (?email=) input through {@html}. Translators carry
+         verb-final word order (de/ja/ko) in the suffix. -->
     <p class="auth-msg">
-      We sent a 6-digit code to <strong>{email}</strong>. Enter it below to
-      activate your account.
+      {$_("authVerifySentToPrefix")}<strong>{email}</strong>{$_(
+        "authVerifySentToSuffix",
+      )}
     </p>
   {:else}
-    <p class="auth-msg">We sent a 6-digit code to your email address.</p>
+    <p class="auth-msg">{$_("authVerifySentNoEmail")}</p>
   {/if}
 
   {#if form?.message}
@@ -61,7 +66,7 @@
   <form method="POST" use:enhance>
     <input type="hidden" name="email" value={email} />
     <label>
-      6-digit code
+      {$_("authVerifyCodeLabel")}
       <input
         name="token"
         bind:value={code}
@@ -73,12 +78,12 @@
       />
     </label>
     <button type="submit" class="primary" disabled={code.length !== 6}>
-      Verify
+      {$_("authVerifySubmit")}
     </button>
   </form>
 
   {#if resent}
-    <p class="hint">Code resent.</p>
+    <p class="hint">{$_("authVerifyResent")}</p>
   {/if}
   {#if resendError}
     <p class="auth-error" role="alert">{resendError}</p>
@@ -86,11 +91,11 @@
 
   {#if email}
     <button class="secondary" onclick={handleResend} disabled={cooldown}>
-      {cooldown ? "Resend (wait 60s)" : "Resend code"}
+      {cooldown ? $_("authVerifyResendCooldown") : $_("authVerifyResend")}
     </button>
   {/if}
 
-  <p class="footer"><a href="/auth/login">Back to login</a></p>
+  <p class="footer"><a href="/auth/login">{$_("authVerifyBackToLogin")}</a></p>
 </AuthCard>
 
 <style>

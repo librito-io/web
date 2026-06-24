@@ -75,7 +75,8 @@
     color: #dedede;
     font-size: 0.9rem;
     font-weight: 500;
-    text-align: left;
+    /* `start` (not `left`) so labels hug the inline-start edge in RTL (ar). */
+    text-align: start;
   }
   .auth-card :global(input) {
     height: 48px;

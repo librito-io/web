@@ -86,7 +86,7 @@
   }
   /* Google: white bg, #3c4043 text, #dadce0 border (brand spec). */
   .oauth-google {
-    background: #ffffff;
+    background: #f8f8f8;
     color: #3c4043;
     border: 1px solid #dadce0;
   }

@@ -89,6 +89,12 @@
     /* Keep typed text at the normal weight; the label above is 500. */
     font-weight: 400;
   }
+  /* Replace the UA blue focus ring with an on-brand indicator (brighter
+     border) — keeps a visible focus state for keyboard a11y, no layout shift. */
+  .auth-card :global(input:focus) {
+    outline: none;
+    border-color: #dedede;
+  }
   .auth-card :global(.primary) {
     /* Extra breathing room before the CTA: 18px + the form's 14px flex gap
        = 32px between the last field and the submit button. */

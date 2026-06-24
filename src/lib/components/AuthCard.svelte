@@ -18,9 +18,9 @@
 
 <style>
   .auth-card {
-    max-width: 400px;
+    max-width: 448px;
     margin: 80px auto;
-    padding: 40px 32px;
+    padding: 40px 48px;
     background: #0f1114;
     border: 1px solid #242629;
     border-radius: 8px;

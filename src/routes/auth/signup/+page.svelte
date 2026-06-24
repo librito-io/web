@@ -1,6 +1,8 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { env } from "$env/dynamic/public";
+  import OAuthButtons from "$lib/components/OAuthButtons.svelte";
+  import AuthCard from "$lib/components/AuthCard.svelte";
 
   let { data } = $props();
   let email = $state("");
@@ -8,25 +10,22 @@
   let error = $state("");
   let loading = $state(false);
 
-  // Cosmetic pre-launch gate. The real enforcement is Supabase's
-  // enable_signup flag — GoTrue rejects signUp() with "Signups not allowed
-  // for this instance" regardless of this value. PUBLIC_LAUNCHED only swaps
-  // the form for a friendly notice so a visitor never hits that raw error.
-  // Flip to "true" at launch (see .env.example). $env/dynamic/public so an
-  // unset value reads "" (pre-launch) instead of a build error.
+  // Cosmetic pre-launch gate; GoTrue enable_signup is the real enforcement.
   const launched = env.PUBLIC_LAUNCHED === "true";
 
-  async function handleSignup(e: SubmitEvent) {
+  // New signups always land in /app post-onboarding; no deep-link return_to on
+  // the signup path (a brand-new user has nowhere to deep-link back to).
+  const returnTo = "/app";
+
+  async function handleSignup(e: SubmitEvent): Promise<void> {
     e.preventDefault();
     loading = true;
     error = "";
-
     const { error: err } = await data.supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
     });
-
     if (err) {
       error = err.message;
       loading = false;
@@ -36,31 +35,57 @@
   }
 </script>
 
-<h1>Sign up</h1>
+<AuthCard heading={null}>
+  <h2>Sign up to Librito</h2>
 
-{#if launched}
-  {#if error}
-    <p style="color: red;">{error}</p>
+  {#if launched}
+    <OAuthButtons supabase={data.supabase} {returnTo} />
+
+    <div class="divider"><span>or</span></div>
+
+    {#if error}
+      <p class="auth-error" role="alert">{error}</p>
+    {/if}
+
+    <form onsubmit={handleSignup}>
+      <label>
+        Email
+        <input type="email" bind:value={email} required />
+      </label>
+      <label>
+        Password
+        <input type="password" bind:value={password} minlength="6" required />
+      </label>
+      <button type="submit" class="primary" disabled={loading}>
+        {loading ? "Signing up..." : "Sign up"}
+      </button>
+    </form>
+  {:else}
+    <p class="auth-msg">
+      Librito isn't open for sign-ups yet — we're putting on the finishing
+      touches.
+    </p>
   {/if}
 
-  <form onsubmit={handleSignup}>
-    <label>
-      Email
-      <input type="email" bind:value={email} required />
-    </label>
-    <label>
-      Password
-      <input type="password" bind:value={password} minlength="6" required />
-    </label>
-    <button type="submit" disabled={loading}>
-      {loading ? "Signing up..." : "Sign up"}
-    </button>
-  </form>
-{:else}
-  <p>
-    Librito isn't open for sign-ups yet — we're putting on the finishing
-    touches.
+  <p class="footer">
+    Already have an account? <a href="/auth/login">Log in</a>
   </p>
-{/if}
+</AuthCard>
 
-<p>Already have an account? <a href="/auth/login">Log in</a></p>
+<!-- Card/form/divider/button styling lives in AuthCard.svelte. Only the
+     page heading is page-scoped here (matches login), per the app.css
+     per-file heading convention. -->
+<style>
+  /* Auth-modal heading — <h2> because the site header owns the page <h1>.
+     Matches login + the webapp hero recipe (.book-detail-title): 24px @700,
+     1.2 leading; family/opsz/tracking from the global h1,h2 rule. */
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    color: #dedede;
+    /* 12px + the card's 20px flex gap = 32px below the heading. */
+    margin-bottom: 12px;
+  }
+</style>

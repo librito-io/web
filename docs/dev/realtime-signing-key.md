@@ -68,6 +68,22 @@ One-time bootstrap on each dev machine:
    git update-index --skip-worktree supabase/config.toml
    ```
 
+   **The skip-worktree bit masks _every_ edit to `config.toml`, not just the
+   signing-key line.** While it is set, `git add supabase/config.toml` silently
+   does nothing, so a _shared_ config change you intend to commit (a new OAuth
+   provider block, an `enable_signup` flip, a seed-path tweak) is dropped from
+   the commit with no error — this is exactly how a feature commit once shipped
+   missing its `config.toml` hunk and broke CI. To land a shared edit, un-skip,
+   commit **only** the shared lines (keep your local-only `signing_keys_path` /
+   `seed.local.sql` edits out of the commit), then re-skip:
+
+   ```bash
+   git update-index --no-skip-worktree supabase/config.toml
+   # stage + commit ONLY the shared change; do NOT include the uncommented
+   # signing_keys_path line or the seed.local.sql sql_paths entry
+   git update-index --skip-worktree supabase/config.toml
+   ```
+
 4. Set `LIBRITO_JWT_PRIVATE_KEY_JWK` in your `.env` to the **standby** key's full JWK as a single-line JSON string (include the `d` field — the minter signs with it).
 
 5. Restart Supabase: `supabase stop && supabase start`.

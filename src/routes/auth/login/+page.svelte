@@ -2,6 +2,8 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolveReturnTo } from "$lib/auth/return-to";
+  import OAuthButtons from "$lib/components/OAuthButtons.svelte";
+  import AuthCard from "$lib/components/AuthCard.svelte";
 
   let { data } = $props();
   let email = $state("");
@@ -9,11 +11,19 @@
   let error = $state("");
   let loading = $state(false);
 
+  // Validated /app-only destination, threaded into both the email login and
+  // the OAuth round-trip. resolveReturnTo falls back to "/app".
+  const returnTo = $derived(
+    resolveReturnTo(page.url.searchParams.get("return_to")),
+  );
+
+  // Surface provider-error redirects from /auth/callback (?error=...).
+  const callbackError = $derived(page.url.searchParams.get("error"));
+
   async function handleLogin(e: SubmitEvent): Promise<void> {
     e.preventDefault();
     loading = true;
     error = "";
-
     const { error: err } = await data.supabase.auth.signInWithPassword({
       email,
       password,
@@ -22,35 +32,64 @@
       error = err.message;
       loading = false;
     } else {
-      // appAuthGuard hook (hooks.server.ts) encodes the intended URL
-      // into ?return_to= when redirecting unauthenticated GETs to
-      // /auth/login. Validate against an allow-list (same-origin /app/*
-      // paths only) so a forged ?return_to=//evil.com or
-      // ?return_to=https://attacker.com cannot turn login into an
-      // open-redirect oracle. Issue #349.
-      goto(resolveReturnTo(page.url.searchParams.get("return_to")));
+      goto(returnTo);
     }
   }
 </script>
 
-<h1>Log in</h1>
+<AuthCard heading={null}>
+  <h2>Log in to Librito</h2>
 
-{#if error}
-  <p style="color: red;">{error}</p>
-{/if}
+  {#if callbackError === "signup_disabled"}
+    <p class="auth-msg">Librito isn't open for sign-ups yet.</p>
+  {:else if callbackError}
+    <p class="auth-error" role="alert">
+      Sign-in was cancelled or failed. Try again.
+    </p>
+  {/if}
 
-<form onsubmit={handleLogin}>
-  <label>
-    Email
-    <input type="email" bind:value={email} required />
-  </label>
-  <label>
-    Password
-    <input type="password" bind:value={password} required />
-  </label>
-  <button type="submit" disabled={loading}>
-    {loading ? "Logging in..." : "Log in"}
-  </button>
-</form>
+  <OAuthButtons supabase={data.supabase} {returnTo} />
 
-<p>Don't have an account? <a href="/auth/signup">Sign up</a></p>
+  <div class="divider"><span>or</span></div>
+
+  {#if error}
+    <p class="auth-error" role="alert">{error}</p>
+  {/if}
+
+  <form onsubmit={handleLogin}>
+    <label>
+      Email
+      <input type="email" bind:value={email} required />
+    </label>
+    <label>
+      Password
+      <input type="password" bind:value={password} required />
+    </label>
+    <button type="submit" class="primary" disabled={loading}>
+      {loading ? "Logging in..." : "Log in"}
+    </button>
+  </form>
+
+  <p class="footer">
+    Don't have an account? <a href="/auth/signup">Sign up</a>
+  </p>
+</AuthCard>
+
+<!-- Card/form/divider/button styling lives in AuthCard.svelte. Only the
+     page heading is page-scoped here, per the app.css per-file heading
+     convention. -->
+<style>
+  /* Auth-modal heading. The site header owns the page <h1> (Header.svelte),
+     so this is an <h2>. Matches the webapp hero-heading recipe
+     (cf. .book-detail-title in app.css): 24px @700, tight 1.2 leading;
+     family + opsz + letter-spacing come from the global h1,h2 rule. */
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    color: #dedede;
+    /* 12px + the card's 20px flex gap = 32px below the heading. */
+    margin-bottom: 12px;
+  }
+</style>

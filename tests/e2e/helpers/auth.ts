@@ -69,12 +69,15 @@ export async function login(page: Page, user: E2EUser): Promise<void> {
   await page.getByLabel("Password").fill(user.password);
   await page.getByRole("button", { name: /log in/i }).click();
 
-  // Race URL transition against inline form error. On a real auth failure
-  // (wrong password, locked account) the page renders `<p style="color:
-  // red;">{error}</p>` and never navigates — without this race the helper
-  // hangs to `waitForURL`'s 30s default and fails with a generic timeout,
-  // hiding the actual auth-error text. Issue #363.
-  const errorLocator = page.locator('p[style*="color: red"]').first();
+  // Race URL transition against the inline form error. On a real auth failure
+  // (wrong password, locked account) the redesigned login page renders
+  // `<p class="auth-error" role="alert">{error}</p>` and never navigates —
+  // without this race the helper hangs to `waitForURL`'s 30s default and fails
+  // with a generic timeout, hiding the actual auth-error text. Issue #363.
+  // (Pre-redesign this matched `p[style*="color: red"]`; the login OAuth/card
+  // redesign moved errors to `.auth-error` — keep this locator in sync with
+  // login/+page.svelte's error markup.)
+  const errorLocator = page.locator("p.auth-error").first();
   const navigation = page
     .waitForURL((url) => url.pathname.startsWith("/app"))
     .then(() => "navigated" as const);

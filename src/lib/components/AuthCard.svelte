@@ -74,6 +74,7 @@
     gap: 4px;
     color: #dedede;
     font-size: 0.9rem;
+    font-weight: 500;
     text-align: left;
   }
   .auth-card :global(input) {
@@ -85,6 +86,8 @@
     color: #dedede;
     font-family: inherit;
     font-size: 1rem;
+    /* Keep typed text at the normal weight; the label above is 500. */
+    font-weight: 400;
   }
   .auth-card :global(.primary) {
     /* Extra breathing room before the CTA: 18px + the form's 14px flex gap

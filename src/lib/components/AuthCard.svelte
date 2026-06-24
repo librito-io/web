@@ -71,7 +71,7 @@
   .auth-card :global(label) {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
     color: #dedede;
     font-size: 0.9rem;
     font-weight: 500;

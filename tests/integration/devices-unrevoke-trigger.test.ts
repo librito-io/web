@@ -41,8 +41,8 @@ describe.skipIf(SKIP)(
       user = await createTestUser("devices-unrevoke-trigger");
 
       const [device] = await sql<{ id: string }[]>`
-      INSERT INTO public.devices (user_id, hardware_id, api_token_hash, revoked_at)
-      VALUES (${user.id}, ${hardwareId}, ${"hash-initial"}, ${new Date().toISOString()})
+      INSERT INTO public.devices (user_id, hardware_id, api_token_hash, name, revoked_at)
+      VALUES (${user.id}, ${hardwareId}, ${"hash-initial"}, ${"Test Device"}, ${new Date().toISOString()})
       RETURNING id
     `;
       deviceId = device.id;

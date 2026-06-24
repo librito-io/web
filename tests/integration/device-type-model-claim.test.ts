@@ -105,6 +105,8 @@ describe.skipIf(SKIP)("device type/model via claim_pairing_atomic", () => {
     const device = await readDevice(result.device_id);
     expect(device.type).toBe("kobo");
     expect(device.model).toBe("Kobo Libra Colour");
+    expect(device.name).toBe("Kobo Libra Colour"); // name seeded from model
+    expect(result.device_name).toBe("Kobo Libra Colour"); // RETURNING echoes it
   });
 
   it("defaults type='papers3', model=NULL when the row omits them", async () => {
@@ -117,6 +119,23 @@ describe.skipIf(SKIP)("device type/model via claim_pairing_atomic", () => {
     const device = await readDevice(result.device_id);
     expect(device.type).toBe("papers3");
     expect(device.model).toBeNull();
+    expect(device.name).toBe("PaperS3"); // NULL model → type-label fallback
+  });
+
+  it("falls back to the type label when a kobo reports no model", async () => {
+    const hardwareId = `hw-${Math.random().toString(36).slice(2, 10)}`;
+    const pairingId = await mintCode({
+      hardwareId,
+      code: "K00002",
+      deviceType: "kobo",
+      deviceModel: null,
+    });
+
+    const result = await claim(pairingId, "tok-kobo-nomodel");
+    expect(result.won).toBe(true);
+
+    const device = await readDevice(result.device_id);
+    expect(device.name).toBe("Kobo");
   });
 
   it("refreshes type/model on re-pair but preserves the user-chosen name", async () => {

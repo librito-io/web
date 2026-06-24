@@ -1,10 +1,13 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  let { children }: { children: Snippet } = $props();
+  let {
+    children,
+    heading = "Librito",
+  }: { children: Snippet; heading?: string } = $props();
 </script>
 
 <div class="auth-card">
-  <span class="wordmark">Librito</span>
+  <span class="wordmark">{heading}</span>
   {@render children()}
 </div>
 
@@ -13,7 +16,7 @@
     max-width: 400px;
     margin: 80px auto;
     padding: 40px 32px;
-    background: #222;
+    background: #0f1013;
     border: 1px solid #2a2a2a;
     border-radius: 12px;
     display: flex;
@@ -38,7 +41,7 @@
   .auth-card :global(.divider) {
     display: flex;
     align-items: center;
-    color: #888;
+    color: #888a90;
     font-size: 0.85rem;
   }
   .auth-card :global(.divider)::before,
@@ -60,23 +63,27 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    color: #ccc;
+    color: #f8f8f8;
     font-size: 0.9rem;
     text-align: left;
   }
   .auth-card :global(input) {
+    height: 48px;
     padding: 10px 12px;
-    background: #1a1a1a;
+    background: #15171a;
     border: 1px solid #3a3a3a;
     border-radius: 8px;
     color: #e8e8e8;
+    font-family: inherit;
+    font-size: 1rem;
   }
   .auth-card :global(.primary) {
     padding: 10px 24px;
-    background: #2a2a2a;
-    color: #e8e8e8;
-    border: 1px solid #3a3a3a;
+    background: #f8f8f8;
+    color: #15171a;
+    border: 1px solid #f8f8f8;
     border-radius: 999px;
+    font-family: inherit;
     font-size: 0.95rem;
     cursor: pointer;
   }
@@ -89,6 +96,7 @@
     border: 1px solid #3a3a3a;
     border-radius: 999px;
     padding: 10px 24px;
+    font-family: inherit;
     font-size: 0.95rem;
     cursor: pointer;
   }
@@ -112,7 +120,7 @@
     margin: 0;
   }
   .auth-card :global(.footer) {
-    color: #888;
+    color: #888a90;
     font-size: 0.9rem;
     text-align: center;
   }

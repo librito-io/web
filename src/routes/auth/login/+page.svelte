@@ -37,7 +37,7 @@
   }
 </script>
 
-<AuthCard>
+<AuthCard heading="Log in to Librito">
   {#if callbackError === "signup_disabled"}
     <p class="auth-msg">Librito isn't open for sign-ups yet.</p>
   {:else if callbackError}

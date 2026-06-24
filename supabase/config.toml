@@ -314,10 +314,19 @@ max_frequency = "5s"
 # Use an external OAuth provider. The full list of providers are: `apple`, `azure`, `bitbucket`,
 # `discord`, `facebook`, `github`, `gitlab`, `google`, `keycloak`, `linkedin_oidc`, `notion`, `twitch`,
 # `twitter`, `x`, `slack`, `spotify`, `workos`, `zoom`.
+[auth.external.google]
+enabled = false
+# client_id/secret resolve from env at runtime — production values live in the
+# Supabase Dashboard, never git. Local OAuth dev: set these in your shell env.
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+# skip_nonce_check is required for local Google sign-in (see plan Task 10 / Testing).
+skip_nonce_check = false
+
 [auth.external.apple]
 enabled = false
-client_id = ""
 # DO NOT commit your OAuth provider secret to git. Use environment variable substitution instead:
+client_id = "env(SUPABASE_AUTH_EXTERNAL_APPLE_CLIENT_ID)"
 secret = "env(SUPABASE_AUTH_EXTERNAL_APPLE_SECRET)"
 # Overrides the default auth redirectUrl.
 redirect_uri = ""

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
+  import { _ } from "$lib/i18n";
   import { resolveReturnTo } from "$lib/auth/return-to";
   import OAuthButtons from "$lib/components/OAuthButtons.svelte";
   import AuthCard from "$lib/components/AuthCard.svelte";
@@ -38,19 +39,19 @@
 </script>
 
 <AuthCard heading={null}>
-  <h2>Log in to Librito</h2>
+  <h2>{$_("authLoginHeading")}</h2>
 
   {#if callbackError === "signup_disabled"}
-    <p class="auth-msg">Librito isn't open for sign-ups yet.</p>
+    <p class="auth-msg">{$_("authSignupDisabled")}</p>
   {:else if callbackError}
     <p class="auth-error" role="alert">
-      Sign-in was cancelled or failed. Try again.
+      {$_("authOAuthCancelled")}
     </p>
   {/if}
 
   <OAuthButtons supabase={data.supabase} {returnTo} />
 
-  <div class="divider"><span>or</span></div>
+  <div class="divider"><span>{$_("authOr")}</span></div>
 
   {#if error}
     <p class="auth-error" role="alert">{error}</p>
@@ -58,20 +59,21 @@
 
   <form onsubmit={handleLogin}>
     <label>
-      Email
+      {$_("authEmail")}
       <input type="email" bind:value={email} required />
     </label>
     <label>
-      Password
+      {$_("authPassword")}
       <input type="password" bind:value={password} required />
     </label>
     <button type="submit" class="primary" disabled={loading}>
-      {loading ? "Logging in..." : "Log in"}
+      {loading ? $_("authLoginSubmitLoading") : $_("authLoginSubmit")}
     </button>
   </form>
 
   <p class="footer">
-    Don't have an account? <a href="/auth/signup">Sign up</a>
+    {$_("authLoginFooterPrompt")}
+    <a href="/auth/signup">{$_("authSignupLink")}</a>
   </p>
 </AuthCard>
 

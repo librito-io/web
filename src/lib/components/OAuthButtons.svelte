@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { SupabaseClient } from "@supabase/supabase-js";
+  import { get } from "svelte/store";
+  import { _ } from "$lib/i18n";
   import { buildOAuthRedirectTo } from "$lib/auth/oauth";
 
   let { supabase, returnTo }: { supabase: SupabaseClient; returnTo: string } =
@@ -25,7 +27,9 @@
         pending = null;
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : "Sign-in failed. Try again.";
+      // Click handler only fires client-side, so the i18n store is loaded;
+      // get(_) is the script-context equivalent of {$_(...)} in markup.
+      error = e instanceof Error ? e.message : get(_)("authOAuthFailed");
       pending = null;
     }
   }
@@ -50,7 +54,7 @@
       onclick={() => signIn("google")}
     >
       <!-- OFFICIAL GOOGLE "G" SVG HERE -->
-      <span>{pending === "google" ? "Connecting…" : "Google"}</span>
+      <span>{pending === "google" ? $_("authConnecting") : "Google"}</span>
     </button>
 
     <button
@@ -60,7 +64,7 @@
       onclick={() => signIn("apple")}
     >
       <!-- OFFICIAL APPLE LOGO SVG HERE -->
-      <span>{pending === "apple" ? "Connecting…" : "Apple"}</span>
+      <span>{pending === "apple" ? $_("authConnecting") : "Apple"}</span>
     </button>
   </div>
 </div>

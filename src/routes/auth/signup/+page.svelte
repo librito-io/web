@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { env } from "$env/dynamic/public";
+  import { _ } from "$lib/i18n";
   import OAuthButtons from "$lib/components/OAuthButtons.svelte";
   import AuthCard from "$lib/components/AuthCard.svelte";
 
@@ -36,12 +37,12 @@
 </script>
 
 <AuthCard heading={null}>
-  <h2>Sign up to Librito</h2>
+  <h2>{$_("authSignupHeading")}</h2>
 
   {#if launched}
     <OAuthButtons supabase={data.supabase} {returnTo} />
 
-    <div class="divider"><span>or</span></div>
+    <div class="divider"><span>{$_("authOr")}</span></div>
 
     {#if error}
       <p class="auth-error" role="alert">{error}</p>
@@ -49,26 +50,24 @@
 
     <form onsubmit={handleSignup}>
       <label>
-        Email
+        {$_("authEmail")}
         <input type="email" bind:value={email} required />
       </label>
       <label>
-        Password
+        {$_("authPassword")}
         <input type="password" bind:value={password} minlength="6" required />
       </label>
       <button type="submit" class="primary" disabled={loading}>
-        {loading ? "Signing up..." : "Sign up"}
+        {loading ? $_("authSignupSubmitLoading") : $_("authSignupSubmit")}
       </button>
     </form>
   {:else}
-    <p class="auth-msg">
-      Librito isn't open for sign-ups yet — we're putting on the finishing
-      touches.
-    </p>
+    <p class="auth-msg">{$_("authSignupNotLaunched")}</p>
   {/if}
 
   <p class="footer">
-    Already have an account? <a href="/auth/login">Log in</a>
+    {$_("authSignupFooterPrompt")}
+    <a href="/auth/login">{$_("authLoginLink")}</a>
   </p>
 </AuthCard>
 

@@ -469,7 +469,7 @@ export type Database = {
           last_synced_at?: string | null
           last_used_at?: string | null
           model?: string | null
-          name?: string
+          name: string
           paired_at?: string
           revoked_at?: string | null
           type?: string
@@ -684,6 +684,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      _device_type_label: { Args: { p_type: string }; Returns: string }
       _field_replay_due: {
         Args: { p_attempted_at: string; p_fail_reason: string }
         Returns: boolean

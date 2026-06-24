@@ -16,7 +16,7 @@
     max-width: 400px;
     margin: 80px auto;
     padding: 40px 32px;
-    background: #0f1013;
+    background: #0f1114;
     border: 1px solid #2a2a2a;
     border-radius: 12px;
     display: flex;
@@ -27,13 +27,13 @@
     text-align: center;
     font-size: 1.5rem;
     font-weight: 700;
-    color: #e8e8e8;
+    color: #dedede;
     letter-spacing: 0.02em;
   }
   /* Shared child styles. :global so slotted page markup is styled, scoped
      under .auth-card so nothing leaks app-wide. Pages use these class names. */
   .auth-card :global(h1) {
-    color: #e8e8e8;
+    color: #dedede;
     font-size: 1.25rem;
     margin: 0;
     text-align: center;
@@ -41,7 +41,7 @@
   .auth-card :global(.divider) {
     display: flex;
     align-items: center;
-    color: #888a90;
+    color: #8b8f95;
     font-size: 0.85rem;
   }
   .auth-card :global(.divider)::before,
@@ -63,28 +63,29 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    color: #f8f8f8;
+    color: #dedede;
     font-size: 0.9rem;
     text-align: left;
   }
   .auth-card :global(input) {
     height: 48px;
     padding: 10px 12px;
-    background: #15171a;
+    background: #16181b;
     border: 1px solid #3a3a3a;
     border-radius: 8px;
-    color: #e8e8e8;
+    color: #dedede;
     font-family: inherit;
     font-size: 1rem;
   }
   .auth-card :global(.primary) {
     padding: 10px 24px;
-    background: #f8f8f8;
+    background: #dedede;
     color: #15171a;
-    border: 1px solid #f8f8f8;
+    border: 1px solid #dedede;
     border-radius: 999px;
     font-family: inherit;
     font-size: 0.95rem;
+    font-weight: 500;
     cursor: pointer;
   }
   .auth-card :global(.primary:disabled) {
@@ -92,7 +93,7 @@
   }
   .auth-card :global(.secondary) {
     background: #2a2a2a;
-    color: #e8e8e8;
+    color: #dedede;
     border: 1px solid #3a3a3a;
     border-radius: 999px;
     padding: 10px 24px;
@@ -120,12 +121,13 @@
     margin: 0;
   }
   .auth-card :global(.footer) {
-    color: #888a90;
+    color: #8b8f95;
     font-size: 0.9rem;
     text-align: center;
   }
   .auth-card :global(.footer a) {
-    color: #e8e8e8;
-    text-decoration: underline;
+    color: #dedede;
+    text-decoration: none;
+    font-weight: 500;
   }
 </style>

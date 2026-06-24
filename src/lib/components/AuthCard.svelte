@@ -22,11 +22,15 @@
     margin: 80px auto;
     padding: 40px 32px;
     background: #0f1114;
-    border: 1px solid #2a2a2a;
-    border-radius: 12px;
+    border: 1px solid #242629;
+    border-radius: 8px;
     display: flex;
     flex-direction: column;
     gap: 20px;
+    transition: border-color var(--dur-2) var(--ease-hover);
+  }
+  .auth-card:hover {
+    border-color: #47494b;
   }
   .wordmark {
     text-align: center;

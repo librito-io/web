@@ -35,7 +35,9 @@
   }
 </script>
 
-<AuthCard>
+<AuthCard heading={null}>
+  <h2>Sign up to Librito</h2>
+
   {#if launched}
     <OAuthButtons supabase={data.supabase} {returnTo} />
 
@@ -70,5 +72,18 @@
   </p>
 </AuthCard>
 
-<!-- All card/form/divider/button styling lives in AuthCard.svelte (Task 2).
-     This page carries no <style> block. -->
+<!-- Card/form/divider/button styling lives in AuthCard.svelte. Only the
+     page heading is page-scoped here (matches login), per the app.css
+     per-file heading convention. -->
+<style>
+  /* Auth-modal heading — <h2> because the site header owns the page <h1>.
+     Matches login + the webapp hero recipe (.book-detail-title): 24px @700,
+     1.2 leading; family/opsz/tracking from the global h1,h2 rule. */
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    color: #dedede;
+  }
+</style>

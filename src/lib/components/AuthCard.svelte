@@ -95,6 +95,17 @@
     outline: none;
     border-color: #dedede;
   }
+  /* Browsers paint a pale-yellow background on autofilled fields and ignore
+     background-color. Mask it with an inset box-shadow in the field colour and
+     pin the text fill so an autofilled field looks identical to an empty one. */
+  .auth-card :global(input:-webkit-autofill),
+  .auth-card :global(input:-webkit-autofill:hover),
+  .auth-card :global(input:-webkit-autofill:focus) {
+    -webkit-box-shadow: 0 0 0 1000px #16181b inset;
+    box-shadow: 0 0 0 1000px #16181b inset;
+    -webkit-text-fill-color: #dedede;
+    caret-color: #dedede;
+  }
   .auth-card :global(.primary) {
     /* Extra breathing room before the CTA: 18px + the form's 14px flex gap
        = 32px between the last field and the submit button. */

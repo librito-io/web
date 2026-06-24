@@ -74,7 +74,7 @@
     justify-content: center;
     gap: 10px;
     width: 100%;
-    min-height: 44px; /* Apple HIG minimum touch target */
+    min-height: 48px; /* matches the email input + Log in button (≥ HIG 44px) */
     border-radius: 8px;
     font-size: 0.95rem;
     font-weight: 500;

@@ -3,11 +3,16 @@
   let {
     children,
     heading = "Librito",
-  }: { children: Snippet; heading?: string } = $props();
+  }: { children: Snippet; heading?: string | null } = $props();
 </script>
 
 <div class="auth-card">
-  <span class="wordmark">{heading}</span>
+  <!-- Brand wordmark (span, not a heading). Pages whose primary heading IS
+       the card title pass heading={null} and render their own <h2> instead
+       (the site header already owns the page <h1>). -->
+  {#if heading}
+    <span class="wordmark">{heading}</span>
+  {/if}
   {@render children()}
 </div>
 

@@ -37,7 +37,9 @@
   }
 </script>
 
-<AuthCard heading="Log in to Librito">
+<AuthCard heading={null}>
+  <h2>Log in to Librito</h2>
+
   {#if callbackError === "signup_disabled"}
     <p class="auth-msg">Librito isn't open for sign-ups yet.</p>
   {:else if callbackError}
@@ -73,5 +75,19 @@
   </p>
 </AuthCard>
 
-<!-- All card/form/divider/button styling lives in AuthCard.svelte (Task 2).
-     This page carries no <style> block — it has no page-specific styles. -->
+<!-- Card/form/divider/button styling lives in AuthCard.svelte. Only the
+     page heading is page-scoped here, per the app.css per-file heading
+     convention. -->
+<style>
+  /* Auth-modal heading. The site header owns the page <h1> (Header.svelte),
+     so this is an <h2>. Matches the webapp hero-heading recipe
+     (cf. .book-detail-title in app.css): 24px @700, tight 1.2 leading;
+     family + opsz + letter-spacing come from the global h1,h2 rule. */
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    color: #dedede;
+  }
+</style>

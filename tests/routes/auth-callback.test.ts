@@ -113,4 +113,32 @@ describe("/auth/callback", () => {
       "https://librito.io",
     );
   });
+
+  it("maps unknown provider errors to oauth_failed", async () => {
+    await expect(
+      GET(
+        makeEvent(
+          "/auth/callback?error=temporarily_unavailable&error_description=Service+is+down",
+          {},
+        ),
+      ),
+    ).rejects.toMatchObject({
+      status: 303,
+      location: "/auth/login?error=oauth_failed",
+    });
+  });
+
+  it("does not map bare 'signup' word in description to signup_disabled", async () => {
+    await expect(
+      GET(
+        makeEvent(
+          "/auth/callback?error=server_error&error_description=Unexpected+failure+during+signup+step",
+          {},
+        ),
+      ),
+    ).rejects.toMatchObject({
+      status: 303,
+      location: "/auth/login?error=oauth_failed",
+    });
+  });
 });

@@ -13,7 +13,7 @@ const SITE_URL = env.PUBLIC_SITE_URL || "https://librito.io";
 function friendlyError(error: string, description: string | null): string {
   if (error === "access_denied") return "cancelled";
   if (
-    /signup|sign-?ups?\s+not\s+allowed/i.test(description ?? "") ||
+    /sign-?ups?\s+not\s+allowed/i.test(description ?? "") ||
     error === "signup_disabled"
   ) {
     return "signup_disabled";

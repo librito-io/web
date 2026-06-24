@@ -89,5 +89,7 @@
     line-height: 1.2;
     text-align: center;
     color: #dedede;
+    /* 12px + the card's 20px flex gap = 32px below the heading. */
+    margin-bottom: 12px;
   }
 </style>

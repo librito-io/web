@@ -1,10 +1,13 @@
 <script lang="ts">
   import { page } from "$app/stores";
+  import { enhance } from "$app/forms";
+  import AuthCard from "$lib/components/AuthCard.svelte";
 
-  let { data } = $props();
+  let { data, form } = $props();
 
   const email = $derived($page.url.searchParams.get("email") ?? "");
 
+  let code = $state("");
   let resent = $state(false);
   let resendError = $state("");
   let cooldown = $state(false);
@@ -16,19 +19,17 @@
     };
   });
 
-  async function handleResend() {
+  async function handleResend(): Promise<void> {
     if (cooldown || !email) return;
     resent = false;
     resendError = "";
-
+    // resend reuses the confirmation.html template, which now renders the OTP
+    // code (Task 6) — no template switch needed.
     const { error } = await data.supabase.auth.resend({
       type: "signup",
       email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
     });
-
     if (error) {
       resendError = error.message;
     } else {
@@ -41,58 +42,69 @@
   }
 </script>
 
-<div
-  class="content"
-  style="max-width: 480px; margin: 80px auto; text-align: center;"
->
-  <h1 style="color: #e8e8e8; font-size: 1.5rem; margin-bottom: 16px;">
-    Check your email
-  </h1>
+<AuthCard>
+  <h1>Check your email</h1>
 
   {#if email}
-    <p
-      style="color: #ccc; font-size: 1rem; line-height: 1.6; margin-bottom: 32px;"
-    >
-      We sent a confirmation link to <strong style="color: #e8e8e8;"
-        >{email}</strong
-      >. Click the link to activate your account.
-    </p>
-  {:else}
-    <p
-      style="color: #ccc; font-size: 1rem; line-height: 1.6; margin-bottom: 32px;"
-    >
-      We sent a confirmation link to your email address. Click the link to
+    <p class="auth-msg">
+      We sent a 6-digit code to <strong>{email}</strong>. Enter it below to
       activate your account.
     </p>
+  {:else}
+    <p class="auth-msg">We sent a 6-digit code to your email address.</p>
   {/if}
+
+  {#if form?.message}
+    <p class="auth-error" role="alert">{form.message}</p>
+  {/if}
+
+  <form method="POST" use:enhance>
+    <input type="hidden" name="email" value={email} />
+    <label>
+      6-digit code
+      <input
+        name="token"
+        bind:value={code}
+        inputmode="numeric"
+        autocomplete="one-time-code"
+        pattern="[0-9]*"
+        maxlength="6"
+        required
+      />
+    </label>
+    <button type="submit" class="primary" disabled={code.length !== 6}>
+      Verify
+    </button>
+  </form>
 
   {#if resent}
-    <p style="color: #888; font-size: 0.9rem; margin-bottom: 16px;">
-      Confirmation resent.
-    </p>
+    <p class="hint">Code resent.</p>
   {/if}
-
   {#if resendError}
-    <p style="color: #c44; font-size: 0.9rem; margin-bottom: 16px;">
-      {resendError}
-    </p>
+    <p class="auth-error" role="alert">{resendError}</p>
   {/if}
 
   {#if email}
-    <button
-      onclick={handleResend}
-      disabled={cooldown}
-      style="background: #2a2a2a; color: #e8e8e8; border: 1px solid #3a3a3a; border-radius: 999px; padding: 10px 24px; font-size: 0.95rem; cursor: pointer; margin-bottom: 24px; opacity: {cooldown
-        ? '0.5'
-        : '1'};"
-    >
-      {cooldown ? "Resend (wait 60s)" : "Resend confirmation"}
+    <button class="secondary" onclick={handleResend} disabled={cooldown}>
+      {cooldown ? "Resend (wait 60s)" : "Resend code"}
     </button>
   {/if}
 
-  <p style="color: #888; font-size: 0.9rem;">
-    <a href="/auth/login" style="color: #888; text-decoration: underline;"
-      >Back to login</a
-    >
-  </p>
-</div>
+  <p class="footer"><a href="/auth/login">Back to login</a></p>
+</AuthCard>
+
+<style>
+  /* Page-specific only: the OTP code input (centered, spaced) and the
+     emphasized email in the message. All shared card/form/button/error/footer
+     styling comes from AuthCard.svelte (Task 2). The class names used above
+     (.auth-msg, .auth-error, .hint, .footer, .primary, .secondary, h1) are
+     defined globally-scoped under .auth-card in AuthCard. */
+  input[name="token"] {
+    font-size: 1.25rem;
+    letter-spacing: 0.3em;
+    text-align: center;
+  }
+  .auth-msg strong {
+    color: #e8e8e8;
+  }
+</style>

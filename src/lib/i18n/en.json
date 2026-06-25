@@ -61,6 +61,8 @@
   "authSignupHeading": "Sign up to Librito",
   "authEmail": "Email",
   "authPassword": "Password",
+  "authPasswordShow": "Show password",
+  "authPasswordHide": "Hide password",
   "authOr": "or",
   "authLoginSubmit": "Log in",
   "authLoginSubmitLoading": "Logging in…",

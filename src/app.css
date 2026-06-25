@@ -235,6 +235,11 @@ html {
   /* Kill double-tap-zoom delay; pinch-zoom blocked separately (viewport meta
      for Android, gesture/touchmove handlers for iOS Safari ≥10). */
   touch-action: manipulation;
+  /* Pin text inflation off. iOS Safari auto-boosts the longest text run in a
+     narrow column — without this the password field's long masked value
+     rendered oversized bullets on mobile while short labels stayed normal. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 * {
   margin: 0;

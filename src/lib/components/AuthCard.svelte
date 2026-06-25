@@ -32,6 +32,21 @@
   .auth-card:hover {
     border-color: #47494b;
   }
+  /* Mobile: drop the modal chrome. A bordered card cramps a phone viewport,
+     so the auth elements sit directly on the page background (the inputs +
+     OAuth buttons keep their own #16181b fill for contrast). */
+  @media (max-width: 480px) {
+    .auth-card {
+      margin: 72px auto 48px;
+      padding: 8px 20px 24px;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+    }
+    .auth-card:hover {
+      border-color: transparent;
+    }
+  }
   .wordmark {
     text-align: center;
     font-size: 1.5rem;
@@ -80,7 +95,7 @@
   }
   .auth-card :global(input) {
     height: 48px;
-    padding: 10px 12px;
+    padding: 10px 16px;
     background: #16181b;
     border: 1px solid #3a3a3a;
     border-radius: 8px;
@@ -118,8 +133,8 @@
     border: 1px solid #dedede;
     border-radius: 999px;
     font-family: inherit;
-    font-size: 0.95rem;
-    font-weight: 500;
+    font-size: 1.1rem;
+    font-weight: 600;
     cursor: pointer;
   }
   .auth-card :global(.primary:disabled) {

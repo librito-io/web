@@ -5,6 +5,7 @@
   import { resolveReturnTo } from "$lib/auth/return-to";
   import OAuthButtons from "$lib/components/OAuthButtons.svelte";
   import AuthCard from "$lib/components/AuthCard.svelte";
+  import PasswordInput from "$lib/components/PasswordInput.svelte";
 
   let { data } = $props();
   let email = $state("");
@@ -62,10 +63,12 @@
       {$_("authEmail")}
       <input type="email" bind:value={email} required />
     </label>
-    <label>
-      {$_("authPassword")}
-      <input type="password" bind:value={password} required />
-    </label>
+    <PasswordInput
+      label={$_("authPassword")}
+      bind:value={password}
+      autocomplete="current-password"
+      required
+    />
     <button type="submit" class="primary" disabled={loading}>
       {loading ? $_("authLoginSubmitLoading") : $_("authLoginSubmit")}
     </button>

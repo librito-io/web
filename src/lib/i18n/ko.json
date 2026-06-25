@@ -38,6 +38,8 @@
   "authSignupHeading": "Librito에 가입",
   "authEmail": "이메일",
   "authPassword": "비밀번호",
+  "authPasswordShow": "비밀번호 표시",
+  "authPasswordHide": "비밀번호 숨기기",
   "authOr": "또는",
   "authLoginSubmit": "로그인",
   "authLoginSubmitLoading": "로그인 중…",

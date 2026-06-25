@@ -38,6 +38,8 @@
   "authSignupHeading": "注册 Librito",
   "authEmail": "电子邮箱",
   "authPassword": "密码",
+  "authPasswordShow": "显示密码",
+  "authPasswordHide": "隐藏密码",
   "authOr": "或",
   "authLoginSubmit": "登录",
   "authLoginSubmitLoading": "正在登录…",

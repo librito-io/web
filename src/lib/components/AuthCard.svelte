@@ -100,8 +100,9 @@
     padding: 12px 16px;
     background: #16181b;
     /* No resting outline — the field is defined by its fill; the border only
-       appears on hover (#47494b) and focus (#dedede). 1px transparent keeps
-       the box size stable so those states add no layout shift. */
+       appears on focus (#dedede). 1px transparent keeps the box size stable so
+       focus adds no layout shift. (A hover border was tried and dropped —
+       focus is the only input affordance, by choice.) */
     border: 1px solid transparent;
     border-radius: 8px;
     color: #dedede;

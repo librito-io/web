@@ -80,7 +80,7 @@
   }
   .auth-card :global(input) {
     height: 48px;
-    padding: 10px 12px;
+    padding: 10px 16px;
     background: #16181b;
     border: 1px solid #3a3a3a;
     border-radius: 8px;

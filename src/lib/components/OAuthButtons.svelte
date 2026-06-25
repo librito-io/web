@@ -85,10 +85,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 12px;
     min-height: 48px; /* matches the email input + Log in button (≥ HIG 44px) */
     border-radius: 8px;
-    font-size: 0.95rem;
+    font-size: 1rem;
     font-weight: 500;
     cursor: pointer;
   }
@@ -108,7 +108,7 @@
   }
   .oauth-error {
     color: #c44;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     margin: 0 0 4px;
   }
 </style>

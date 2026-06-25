@@ -19,14 +19,14 @@
 <style>
   .auth-card {
     max-width: 448px;
-    margin: 148px auto 80px;
+    margin: 168px auto 80px;
     padding: 48px;
     background: #0f1114;
-    border: 1px solid #242629;
+    border: 1px solid #232629;
     border-radius: 8px;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 24px;
     transition: border-color var(--dur-2) var(--ease-hover);
   }
   .auth-card:hover {
@@ -66,14 +66,16 @@
     display: flex;
     align-items: center;
     color: #8b8f95;
-    font-size: 0.85rem;
+    /* sm scale token (was an off-scale 0.85rem). */
+    font-size: 0.875rem;
   }
   .auth-card :global(.divider)::before,
   .auth-card :global(.divider)::after {
     content: "";
     flex: 1;
     height: 1px;
-    background: #2a2a2a;
+    /* Match the card's resting outline so the hairlines are unified. */
+    background: #232629;
   }
   .auth-card :global(.divider span) {
     padding: 0 12px;
@@ -81,29 +83,34 @@
   .auth-card :global(form) {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
   }
   .auth-card :global(label) {
     display: flex;
     flex-direction: column;
     gap: 8px;
     color: #dedede;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     font-weight: 500;
     /* `start` (not `left`) so labels hug the inline-start edge in RTL (ar). */
     text-align: start;
   }
   .auth-card :global(input) {
     height: 48px;
-    padding: 10px 16px;
+    padding: 12px 16px;
     background: #16181b;
-    border: 1px solid #3a3a3a;
+    /* No resting outline — the field is defined by its fill; the border only
+       appears on hover (#47494b) and focus (#dedede). 1px transparent keeps
+       the box size stable so those states add no layout shift. */
+    border: 1px solid transparent;
     border-radius: 8px;
     color: #dedede;
     font-family: inherit;
     font-size: 1rem;
     /* Keep typed text at the normal weight; the label above is 500. */
     font-weight: 400;
+    /* Smooth the focus border fade-in. */
+    transition: border-color var(--dur-2) var(--ease-hover);
   }
   /* Replace the UA blue focus ring with an on-brand indicator (brighter
      border) — keeps a visible focus state for keyboard a11y, no layout shift. */
@@ -123,17 +130,17 @@
     caret-color: #dedede;
   }
   .auth-card :global(.primary) {
-    /* Extra breathing room before the CTA: 18px + the form's 14px flex gap
+    /* Extra breathing room before the CTA: 16px + the form's 16px flex gap
        = 32px between the last field and the submit button. */
-    margin-top: 18px;
+    margin-top: 16px;
     height: 48px;
-    padding: 10px 24px;
+    padding: 12px 24px;
     background: #dedede;
     color: #15171a;
     border: 1px solid #dedede;
     border-radius: 999px;
     font-family: inherit;
-    font-size: 1.1rem;
+    font-size: 1.125rem;
     font-weight: 600;
     cursor: pointer;
   }
@@ -145,9 +152,9 @@
     color: #dedede;
     border: 1px solid #3a3a3a;
     border-radius: 999px;
-    padding: 10px 24px;
+    padding: 12px 24px;
     font-family: inherit;
-    font-size: 0.95rem;
+    font-size: 1rem;
     cursor: pointer;
   }
   .auth-card :global(.secondary:disabled) {
@@ -155,23 +162,23 @@
   }
   .auth-card :global(.auth-error) {
     color: #c44;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     margin: 0;
   }
   .auth-card :global(.auth-msg) {
     color: #ccc;
-    font-size: 0.95rem;
+    font-size: 1rem;
     line-height: 1.6;
     margin: 0;
   }
   .auth-card :global(.hint) {
     color: #888;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     margin: 0;
   }
   .auth-card :global(.footer) {
     color: #8b8f95;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     text-align: center;
   }
   .auth-card :global(.footer a) {

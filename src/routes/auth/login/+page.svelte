@@ -85,16 +85,16 @@
      convention. -->
 <style>
   /* Auth-modal heading. The site header owns the page <h1> (Header.svelte),
-     so this is an <h2>. Matches the webapp hero-heading recipe
-     (cf. .book-detail-title in app.css): 24px @700, tight 1.2 leading;
-     family + opsz + letter-spacing come from the global h1,h2 rule. */
+     so this is an <h2>. 28px = the 2xl scale token (see docs/dev/style-guide.md
+     §2.1); 700 weight, tight 1.2 leading; family + opsz + letter-spacing come
+     from the global h1,h2 rule. */
   h2 {
-    font-size: 1.5rem;
+    font-size: 1.75rem;
     font-weight: 700;
     line-height: 1.2;
     text-align: center;
     color: #dedede;
-    /* 12px + the card's 20px flex gap = 32px below the heading. */
-    margin-bottom: 12px;
+    /* 24px + the card's 24px flex gap = 48px below the heading. */
+    margin-bottom: 24px;
   }
 </style>

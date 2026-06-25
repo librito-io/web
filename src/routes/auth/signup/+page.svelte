@@ -80,15 +80,15 @@
      per-file heading convention. -->
 <style>
   /* Auth-modal heading — <h2> because the site header owns the page <h1>.
-     Matches login + the webapp hero recipe (.book-detail-title): 24px @700,
-     1.2 leading; family/opsz/tracking from the global h1,h2 rule. */
+     Matches login: 28px = the 2xl scale token (docs/dev/style-guide.md §2.1),
+     700 weight, 1.2 leading; family/opsz/tracking from the global h1,h2 rule. */
   h2 {
-    font-size: 1.5rem;
+    font-size: 1.75rem;
     font-weight: 700;
     line-height: 1.2;
     text-align: center;
     color: #dedede;
-    /* 12px + the card's 20px flex gap = 32px below the heading. */
-    margin-bottom: 12px;
+    /* 24px + the card's 24px flex gap = 48px below the heading. */
+    margin-bottom: 24px;
   }
 </style>

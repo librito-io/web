@@ -32,6 +32,21 @@
   .auth-card:hover {
     border-color: #47494b;
   }
+  /* Mobile: drop the modal chrome. A bordered card cramps a phone viewport,
+     so the auth elements sit directly on the page background (the inputs +
+     OAuth buttons keep their own #16181b fill for contrast). */
+  @media (max-width: 480px) {
+    .auth-card {
+      margin: 32px auto 48px;
+      padding: 8px 20px 24px;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+    }
+    .auth-card:hover {
+      border-color: transparent;
+    }
+  }
   .wordmark {
     text-align: center;
     font-size: 1.5rem;

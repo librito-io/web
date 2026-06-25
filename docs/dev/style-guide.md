@@ -28,7 +28,7 @@ cut (`opsz=32`) impose its tight Display kerning at 24–28 px sizes.
 
 ### 2.1 Type scale
 
-Six size tokens, mapped to `font-size` declarations across the app.
+Seven size tokens, mapped to `font-size` declarations across the app.
 
 | Token | rem   | px  | Use                                                                |
 | ----- | ----- | --- | ------------------------------------------------------------------ |
@@ -38,10 +38,11 @@ Six size tokens, mapped to `font-size` declarations across the app.
 | md    | 1.125 | 18  | Card titles (`.book-title`), primary nav items, book detail author |
 | lg    | 1.25  | 20  | `.menu-primary-item` at ≥ 600 px (desktop bump)                    |
 | xl    | 1.5   | 24  | `.page-header h2` (JetBrains Mono); `.book-detail-title`           |
+| 2xl   | 1.75  | 28  | Auth card title (`.auth-card h2` on login / signup)                |
 
 Bare `<h1>` at the browser default 32 px is covered by the `2xl`
-tracking token (no `2xl` _size_ token because no class explicitly uses
-1.75 rem / 28 px).
+tracking token. The `2xl` _size_ token (1.75 rem / 28 px) is used by the
+auth card heading.
 
 ### 2.2 Tracking (`letter-spacing`)
 

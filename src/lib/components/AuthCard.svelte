@@ -100,8 +100,9 @@
     padding: 12px 16px;
     background: #16181b;
     /* No resting outline — the field is defined by its fill; the border only
-       appears on hover (#47494b) and focus (#dedede). 1px transparent keeps
-       the box size stable so those states add no layout shift. */
+       appears on focus (#dedede). 1px transparent keeps the box size stable so
+       focus adds no layout shift. (A hover border was tried and dropped —
+       focus is the only input affordance, by choice.) */
     border: 1px solid transparent;
     border-radius: 8px;
     color: #dedede;
@@ -143,6 +144,17 @@
     font-size: 1.125rem;
     font-weight: 600;
     cursor: pointer;
+    transition:
+      background-color var(--dur-2) var(--ease-hover),
+      border-color var(--dur-2) var(--ease-hover);
+  }
+  /* The OAuth buttons lift toward light on hover; this off-white CTA has the
+     same headroom, so it brightens to pure #fff — one "hover = lift toward
+     light" model across every button. :not(:disabled) leaves the loading
+     state (opacity 0.5) alone. */
+  .auth-card :global(.primary:not(:disabled):hover) {
+    background: #fff;
+    border-color: #fff;
   }
   .auth-card :global(.primary:disabled) {
     opacity: 0.5;
@@ -185,5 +197,12 @@
     color: #dedede;
     text-decoration: none;
     font-weight: 500;
+    transition: color var(--dur-2) var(--ease-hover);
+  }
+  /* Same "lift toward light" as the buttons (#dedede → #fff), on the link's
+     text color. Covers both footer links — "Sign up" (login) and "Log in"
+     (signup). */
+  .auth-card :global(.footer a:hover) {
+    color: #fff;
   }
 </style>

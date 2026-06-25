@@ -45,7 +45,6 @@
   "authLoginSubmitLoading": "लॉग इन हो रहा है…",
   "authSignupSubmit": "साइन अप करें",
   "authSignupSubmitLoading": "साइन अप हो रहा है…",
-  "authConnecting": "कनेक्ट हो रहा है…",
   "authOAuthFailed": "साइन-इन विफल रहा। पुनः प्रयास करें।",
   "authOAuthCancelled": "साइन-इन रद्द कर दिया गया या विफल रहा। पुनः प्रयास करें।",
   "authSignupDisabled": "Librito अभी साइन-अप के लिए उपलब्ध नहीं है।",

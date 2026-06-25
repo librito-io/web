@@ -68,7 +68,6 @@
   "authLoginSubmitLoading": "Logging in…",
   "authSignupSubmit": "Sign up",
   "authSignupSubmitLoading": "Signing up…",
-  "authConnecting": "Connecting…",
   "authOAuthFailed": "Sign-in failed. Try again.",
   "authOAuthCancelled": "Sign-in was cancelled or failed. Try again.",
   "authSignupDisabled": "Librito isn't open for sign-ups yet.",

@@ -197,5 +197,12 @@
     color: #dedede;
     text-decoration: none;
     font-weight: 500;
+    transition: color var(--dur-2) var(--ease-hover);
+  }
+  /* Same "lift toward light" as the buttons (#dedede → #fff), on the link's
+     text color. Covers both footer links — "Sign up" (login) and "Log in"
+     (signup). */
+  .auth-card :global(.footer a:hover) {
+    color: #fff;
   }
 </style>

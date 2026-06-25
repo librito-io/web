@@ -20,12 +20,20 @@
   } = $props();
 
   let revealed = $state(false);
+
+  // Explicit label/for association. The toggle button must live OUTSIDE the
+  // <label>: a button nested in a label folds its aria-label into the input's
+  // accessible name (the field would read "Password Show password" to screen
+  // readers) and makes Playwright's getByLabel("Password") match both the input
+  // and the button.
+  const id = $props.id();
 </script>
 
-<label>
-  {label}
+<div class="pw-field">
+  <label for={id}>{label}</label>
   <span class="pw-wrap">
     <input
+      {id}
       type={revealed ? "text" : "password"}
       bind:value
       {autocomplete}
@@ -76,9 +84,16 @@
       {/if}
     </button>
   </span>
-</label>
+</div>
 
 <style>
+  /* Replicates AuthCard's label-as-flex-column field rhythm (8px between the
+     label and the control) now that the control is no longer a label child. */
+  .pw-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
   .pw-wrap {
     position: relative;
     display: block;

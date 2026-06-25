@@ -45,7 +45,6 @@
   "authLoginSubmitLoading": "Entrando…",
   "authSignupSubmit": "Criar conta",
   "authSignupSubmitLoading": "Criando conta…",
-  "authConnecting": "Conectando…",
   "authOAuthFailed": "Falha ao entrar. Tente novamente.",
   "authOAuthCancelled": "O login foi cancelado ou falhou. Tente novamente.",
   "authSignupDisabled": "O Librito ainda não está aberto para inscrições.",

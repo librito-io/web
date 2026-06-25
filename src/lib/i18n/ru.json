@@ -45,7 +45,6 @@
   "authLoginSubmitLoading": "Вход…",
   "authSignupSubmit": "Зарегистрироваться",
   "authSignupSubmitLoading": "Регистрация…",
-  "authConnecting": "Подключение…",
   "authOAuthFailed": "Не удалось войти. Попробуйте снова.",
   "authOAuthCancelled": "Вход был отменён или не удался. Попробуйте снова.",
   "authSignupDisabled": "Librito пока не открыт для регистрации.",

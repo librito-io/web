@@ -45,7 +45,6 @@
   "authLoginSubmitLoading": "正在登录…",
   "authSignupSubmit": "注册",
   "authSignupSubmitLoading": "正在注册…",
-  "authConnecting": "正在连接…",
   "authOAuthFailed": "登录失败，请重试。",
   "authOAuthCancelled": "登录已取消或失败，请重试。",
   "authSignupDisabled": "Librito 尚未开放注册。",

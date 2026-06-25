@@ -45,7 +45,6 @@
   "authLoginSubmitLoading": "Connexion…",
   "authSignupSubmit": "S'inscrire",
   "authSignupSubmitLoading": "Inscription…",
-  "authConnecting": "Connexion…",
   "authOAuthFailed": "Échec de la connexion. Réessayez.",
   "authOAuthCancelled": "La connexion a été annulée ou a échoué. Réessayez.",
   "authSignupDisabled": "Librito n'est pas encore ouvert aux inscriptions.",

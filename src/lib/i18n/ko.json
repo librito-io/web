@@ -45,7 +45,6 @@
   "authLoginSubmitLoading": "로그인 중…",
   "authSignupSubmit": "가입",
   "authSignupSubmitLoading": "가입 중…",
-  "authConnecting": "연결 중…",
   "authOAuthFailed": "로그인에 실패했습니다. 다시 시도해 주세요.",
   "authOAuthCancelled": "로그인이 취소되었거나 실패했습니다. 다시 시도해 주세요.",
   "authSignupDisabled": "Librito는 아직 가입을 받지 않습니다.",

@@ -45,7 +45,6 @@
   "authLoginSubmitLoading": "Anmeldung…",
   "authSignupSubmit": "Registrieren",
   "authSignupSubmitLoading": "Registrierung…",
-  "authConnecting": "Verbinden…",
   "authOAuthFailed": "Anmeldung fehlgeschlagen. Versuche es erneut.",
   "authOAuthCancelled": "Die Anmeldung wurde abgebrochen oder ist fehlgeschlagen. Versuche es erneut.",
   "authSignupDisabled": "Librito ist noch nicht für Registrierungen geöffnet.",

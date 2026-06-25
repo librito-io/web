@@ -45,7 +45,6 @@
   "authLoginSubmitLoading": "جارٍ تسجيل الدخول…",
   "authSignupSubmit": "إنشاء حساب",
   "authSignupSubmitLoading": "جارٍ إنشاء الحساب…",
-  "authConnecting": "جارٍ الاتصال…",
   "authOAuthFailed": "فشل تسجيل الدخول. حاول مرة أخرى.",
   "authOAuthCancelled": "تم إلغاء تسجيل الدخول أو فشل. حاول مرة أخرى.",
   "authSignupDisabled": "Librito غير متاح للتسجيل بعد.",

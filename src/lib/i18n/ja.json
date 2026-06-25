@@ -45,7 +45,6 @@
   "authLoginSubmitLoading": "ログイン中…",
   "authSignupSubmit": "登録",
   "authSignupSubmitLoading": "登録中…",
-  "authConnecting": "接続中…",
   "authOAuthFailed": "ログインに失敗しました。もう一度お試しください。",
   "authOAuthCancelled": "ログインがキャンセルされたか失敗しました。もう一度お試しください。",
   "authSignupDisabled": "Libritoはまだ登録を受け付けていません。",

@@ -45,7 +45,6 @@
   "authLoginSubmitLoading": "Accesso…",
   "authSignupSubmit": "Registrati",
   "authSignupSubmitLoading": "Registrazione…",
-  "authConnecting": "Connessione…",
   "authOAuthFailed": "Accesso non riuscito. Riprova.",
   "authOAuthCancelled": "L'accesso è stato annullato o non è riuscito. Riprova.",
   "authSignupDisabled": "Librito non è ancora aperto alle registrazioni.",

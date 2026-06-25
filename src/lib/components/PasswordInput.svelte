@@ -98,12 +98,17 @@
     position: relative;
     display: block;
   }
-  /* Full-width input + trailing room for the eye. Wins over AuthCard's global
-     `input` rule on specificity (scoped class > single-class :global). */
+  /* Full-width input + trailing room for the eye. `!important` is load-bearing:
+     this ties AuthCard's shared `.auth-card :global(input) { padding: 10px 16px }`
+     on specificity, so the cascade falls back to SOURCE ORDER — and the prod CSS
+     bundle orders AuthCard's rule last, collapsing padding-right to 16px (dev
+     build keeps 44px). With only 16px of gutter Safari drops its keychain
+     auto-fill key on top of the eye. `!important` beats the non-important
+     shorthand regardless of bundle order. Verified: prod padding-right 16px→44px. */
   .pw-wrap input {
     width: 100%;
     box-sizing: border-box;
-    padding-inline-end: 44px;
+    padding-inline-end: 44px !important;
   }
   .pw-toggle {
     position: absolute;

@@ -132,10 +132,21 @@
     font-size: 1rem;
     font-weight: 500;
     cursor: pointer;
+    transition:
+      background-color var(--dur-2) var(--ease-hover),
+      border-color var(--dur-2) var(--ease-hover);
   }
   .oauth-btn:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+  /* One step up the surface ladder (#0F1114 → #16181B → #1D1F22): a flat lift
+     of the same cool-gray hue, still below the resting border. Border tracks
+     the fill so the surface stays edgeless. :not(:disabled) keeps a button
+     mid-OAuth from lighting up. */
+  .oauth-btn:not(:disabled):hover {
+    background: #1d1f22;
+    border-color: #1d1f22;
   }
   /* Brand logos track the label font-size (1em = 16px) so the G and the Apple
      mark read at one consistent size across the row — the standard

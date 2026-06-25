@@ -92,8 +92,9 @@
   }
   .pw-toggle {
     position: absolute;
-    /* `inset-inline-end` keeps the eye on the trailing edge under RTL (ar). */
-    inset-inline-end: 8px;
+    /* `inset-inline-end` keeps the eye on the trailing edge under RTL (ar).
+       10px + the button's 6px padding = 16px from glyph to field edge. */
+    inset-inline-end: 10px;
     top: 0;
     height: 100%;
     display: flex;

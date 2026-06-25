@@ -38,6 +38,8 @@
   "authSignupHeading": "Regístrate en Librito",
   "authEmail": "Correo electrónico",
   "authPassword": "Contraseña",
+  "authPasswordShow": "Mostrar contraseña",
+  "authPasswordHide": "Ocultar contraseña",
   "authOr": "o",
   "authLoginSubmit": "Iniciar sesión",
   "authLoginSubmitLoading": "Iniciando sesión…",

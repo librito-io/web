@@ -38,6 +38,8 @@
   "authSignupHeading": "إنشاء حساب في Librito",
   "authEmail": "البريد الإلكتروني",
   "authPassword": "كلمة المرور",
+  "authPasswordShow": "إظهار كلمة المرور",
+  "authPasswordHide": "إخفاء كلمة المرور",
   "authOr": "أو",
   "authLoginSubmit": "تسجيل الدخول",
   "authLoginSubmitLoading": "جارٍ تسجيل الدخول…",

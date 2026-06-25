@@ -143,6 +143,17 @@
     font-size: 1.125rem;
     font-weight: 600;
     cursor: pointer;
+    transition:
+      background-color var(--dur-2) var(--ease-hover),
+      border-color var(--dur-2) var(--ease-hover);
+  }
+  /* The OAuth buttons lift toward light on hover; this off-white CTA has the
+     same headroom, so it brightens to pure #fff — one "hover = lift toward
+     light" model across every button. :not(:disabled) leaves the loading
+     state (opacity 0.5) alone. */
+  .auth-card :global(.primary:not(:disabled):hover) {
+    background: #fff;
+    border-color: #fff;
   }
   .auth-card :global(.primary:disabled) {
     opacity: 0.5;

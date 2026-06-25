@@ -118,8 +118,8 @@
     border: 1px solid #dedede;
     border-radius: 999px;
     font-family: inherit;
-    font-size: 0.95rem;
-    font-weight: 500;
+    font-size: 1.1rem;
+    font-weight: 600;
     cursor: pointer;
   }
   .auth-card :global(.primary:disabled) {

@@ -25,4 +25,13 @@
   .logo-placeholder img:hover {
     filter: brightness(1.15);
   }
+
+  /* The -100px lift is tuned for desktop; on a shorter phone viewport the
+     same offset reads as too high. Ease it to -40px (near-centred, slight
+     lift) below the mobile breakpoint. */
+  @media (max-width: 599px) {
+    .logo-placeholder img {
+      transform: translateY(-40px);
+    }
+  }
 </style>

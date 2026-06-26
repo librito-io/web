@@ -246,6 +246,18 @@ html {
   padding: 0;
   box-sizing: border-box;
 }
+/* Form controls don't inherit font-family from body — without this their text
+   falls back to the UA font (Arial in Chrome, system font in Safari) instead
+   of Inter. Covers all buttons/inputs in one place; supersedes the per-class
+   `font-family: inherit` overrides scattered below (e.g. .lang-dropdown button,
+   .ctx-menu button) and catches the ones that were missed (.lang-btn,
+   .oauth-btn — the language pill code + Apple/Google labels). */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
 body {
   font-family:
     "Inter",

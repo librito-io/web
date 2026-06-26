@@ -48,7 +48,7 @@
   "authOAuthFailed": "Échec de la connexion. Réessayez.",
   "authOAuthCancelled": "La connexion a été annulée ou a échoué. Réessayez.",
   "authSignupDisabled": "Librito n'est pas encore ouvert aux inscriptions.",
-  "authSignupNotLaunched": "Librito n'est pas encore ouvert aux inscriptions — nous peaufinons les derniers détails.",
+  "authSignupNotLaunched": "Librito n'est pas encore ouvert aux inscriptions — nous sommes presque prêts.",
   "authLoginFooterPrompt": "Vous n'avez pas de compte ?",
   "authSignupFooterPrompt": "Vous avez déjà un compte ?",
   "authSignupLink": "Inscrivez-vous",

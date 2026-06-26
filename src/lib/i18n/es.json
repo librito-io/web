@@ -48,7 +48,7 @@
   "authOAuthFailed": "Error al iniciar sesión. Inténtalo de nuevo.",
   "authOAuthCancelled": "El inicio de sesión se canceló o falló. Inténtalo de nuevo.",
   "authSignupDisabled": "Librito aún no está abierto para registros.",
-  "authSignupNotLaunched": "Librito aún no está abierto para registros: estamos dando los últimos retoques.",
+  "authSignupNotLaunched": "Librito aún no está abierto para registros: estamos casi listos.",
   "authLoginFooterPrompt": "¿No tienes una cuenta?",
   "authSignupFooterPrompt": "¿Ya tienes una cuenta?",
   "authSignupLink": "Regístrate",

@@ -48,7 +48,7 @@
   "authOAuthFailed": "فشل تسجيل الدخول. حاول مرة أخرى.",
   "authOAuthCancelled": "تم إلغاء تسجيل الدخول أو فشل. حاول مرة أخرى.",
   "authSignupDisabled": "Librito غير متاح للتسجيل بعد.",
-  "authSignupNotLaunched": "Librito غير متاح للتسجيل بعد — نحن نضع اللمسات الأخيرة.",
+  "authSignupNotLaunched": "Librito غير متاح للتسجيل بعد — نحن جاهزون تقريبًا.",
   "authLoginFooterPrompt": "ليس لديك حساب؟",
   "authSignupFooterPrompt": "لديك حساب بالفعل؟",
   "authSignupLink": "أنشئ حساباً",

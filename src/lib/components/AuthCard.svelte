@@ -178,10 +178,18 @@
     margin: 0;
   }
   .auth-card :global(.auth-msg) {
-    color: #ccc;
-    font-size: 1rem;
+    color: #dedede;
+    font-size: 1.125rem;
+    font-weight: 500;
     line-height: 1.6;
     margin: 0;
+    /* Cap the measure so the message wraps into a tidy centred block instead
+       of stretching the full card width into a lopsided two-liner. align-self
+       centres the narrowed block in the flex column; text-align centres the
+       wrapped lines under the (centred) heading. */
+    max-width: 22ch;
+    align-self: center;
+    text-align: center;
   }
   .auth-card :global(.hint) {
     color: #888;

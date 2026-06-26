@@ -48,7 +48,7 @@
   "authOAuthFailed": "ログインに失敗しました。もう一度お試しください。",
   "authOAuthCancelled": "ログインがキャンセルされたか失敗しました。もう一度お試しください。",
   "authSignupDisabled": "Libritoはまだ登録を受け付けていません。",
-  "authSignupNotLaunched": "Libritoはまだ登録を受け付けていません。現在、最後の仕上げをしています。",
+  "authSignupNotLaunched": "Libritoはまだ登録を受け付けていません。もうすぐ準備が整います。",
   "authLoginFooterPrompt": "アカウントをお持ちでないですか？",
   "authSignupFooterPrompt": "すでにアカウントをお持ちですか？",
   "authSignupLink": "登録",

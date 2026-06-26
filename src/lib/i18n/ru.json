@@ -48,7 +48,7 @@
   "authOAuthFailed": "Не удалось войти. Попробуйте снова.",
   "authOAuthCancelled": "Вход был отменён или не удался. Попробуйте снова.",
   "authSignupDisabled": "Librito пока не открыт для регистрации.",
-  "authSignupNotLaunched": "Librito пока не открыт для регистрации — мы вносим последние штрихи.",
+  "authSignupNotLaunched": "Librito пока не открыт для регистрации — мы почти готовы.",
   "authLoginFooterPrompt": "Нет аккаунта?",
   "authSignupFooterPrompt": "Уже есть аккаунт?",
   "authSignupLink": "Зарегистрироваться",

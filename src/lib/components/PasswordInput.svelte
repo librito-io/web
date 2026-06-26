@@ -136,4 +136,20 @@
     border-radius: 6px;
     box-shadow: 0 0 0 2px #dedede;
   }
+  /* iOS Safari draws the password mask bullet (•) from the input's font, and
+     the bullet's size is whatever that font's U+2022 glyph is. Left to the
+     default form-control stack the field rendered an oversized dot on mobile
+     (#568) — desktop and the email field at the same 16px were fine, so it was
+     the masked glyph, not text inflation; `-webkit-text-size-adjust` (#567) did
+     not touch it. Pinning the password input to InterVariable (the variable
+     font we already ship in app.css) makes it paint InterVariable's own bullet
+     — a small, consistent 0.31em disc — instead of the oversized default, at
+     the natural font-size with no effect on the typed or revealed value.
+     Verified on a real iPhone (the bug is invisible to headless Chromium).
+     `!important` is load-bearing for the same reason as the padding rule above:
+     it ties `.auth-card :global(input)` on specificity, so the cascade falls to
+     source order, and the prod bundle orders AuthCard last. */
+  .pw-wrap input {
+    font-family: "InterVariable", "Inter", sans-serif !important;
+  }
 </style>

@@ -48,7 +48,7 @@
   "authOAuthFailed": "साइन-इन विफल रहा। पुनः प्रयास करें।",
   "authOAuthCancelled": "साइन-इन रद्द कर दिया गया या विफल रहा। पुनः प्रयास करें।",
   "authSignupDisabled": "Librito अभी साइन-अप के लिए उपलब्ध नहीं है।",
-  "authSignupNotLaunched": "Librito अभी साइन-अप के लिए उपलब्ध नहीं है — हम अंतिम रूप दे रहे हैं।",
+  "authSignupNotLaunched": "Librito अभी साइन-अप के लिए उपलब्ध नहीं है — हम लगभग तैयार हैं।",
   "authLoginFooterPrompt": "खाता नहीं है?",
   "authSignupFooterPrompt": "पहले से खाता है?",
   "authSignupLink": "साइन अप करें",

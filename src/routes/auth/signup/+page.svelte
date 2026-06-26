@@ -91,4 +91,15 @@
     /* 24px + the card's 24px flex gap = 48px below the heading. */
     margin-bottom: 24px;
   }
+  /* Mobile: centre the heading in the band between the header divider and the
+     content below it (OAuth buttons post-launch, the not-launched message
+     pre-launch — both sit at the same Y, driven by the h2 margin chain). The
+     -16/+40 margins sum to the original 24px so nothing below moves; mirrors
+     login so the two screens match. */
+  @media (max-width: 480px) {
+    h2 {
+      margin-top: -16px;
+      margin-bottom: 40px;
+    }
+  }
 </style>

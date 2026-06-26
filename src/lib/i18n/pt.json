@@ -48,7 +48,7 @@
   "authOAuthFailed": "Falha ao entrar. Tente novamente.",
   "authOAuthCancelled": "O login foi cancelado ou falhou. Tente novamente.",
   "authSignupDisabled": "O Librito ainda não está aberto para inscrições.",
-  "authSignupNotLaunched": "O Librito ainda não está aberto para inscrições — estamos dando os retoques finais.",
+  "authSignupNotLaunched": "O Librito ainda não está aberto para inscrições — estamos quase prontos.",
   "authLoginFooterPrompt": "Não tem uma conta?",
   "authSignupFooterPrompt": "Já tem uma conta?",
   "authSignupLink": "Cadastre-se",

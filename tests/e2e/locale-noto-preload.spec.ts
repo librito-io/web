@@ -180,10 +180,13 @@ test.describe("rendered Noto face (CDP, Chromium-only)", () => {
     await page.goto("/");
     await awaitHydration(page);
     await page.waitForFunction(() => document.fonts.ready.then(() => true));
+    await openDropdown(page);
 
-    // Header wordmark is Latin — must route to Inter even with an
-    // Arabic locale active, proving the unicode-range scoping keeps the
-    // Noto faces off non-script codepoints.
-    expect(await renderedFamily(page, "header h1")).toMatch(/^Inter/);
+    // The "English" language item is Latin text — must route to Inter even
+    // with an Arabic locale active, proving the unicode-range scoping keeps
+    // the Noto faces off non-script codepoints. (Probes the dropdown's Latin
+    // endonym rather than the header wordmark, which is now an SVG image with
+    // no text glyphs to sample.)
+    expect(await renderedFamily(page, '[data-lang="en"]')).toMatch(/^Inter/);
   });
 });

@@ -376,19 +376,23 @@ h2 {
   align-items: center;
   height: 40px;
   padding: 0 16px;
-  border: 1.5px solid #232629;
+  border: 1.5px solid #dedede;
   border-radius: 20px;
-  background: transparent;
-  color: #dedede;
-  font-weight: 600;
-  font-size: 13px;
+  background: #dedede;
+  color: #15171a;
+  font-weight: 700;
+  font-size: 14px;
   text-decoration: none;
   flex-shrink: 0;
   margin-top: 2px;
-  transition: border-color 0.15s ease;
+  /* Same "lift toward light" as the auth primary CTA (#dedede → #fff). */
+  transition:
+    background-color var(--dur-2) var(--ease-hover),
+    border-color var(--dur-2) var(--ease-hover);
 }
 .login-link:hover {
-  border-color: #47494b;
+  background: #fff;
+  border-color: #fff;
 }
 .menu-icon {
   width: 18px;
@@ -518,27 +522,32 @@ h2 {
 .lang-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 14px 0 12px;
+  gap: 8px;
+  padding: 0 16px;
   height: 40px;
-  border: 1.5px solid #232629;
+  border: 1px solid #16181b;
   border-radius: 20px;
-  background: transparent;
+  background: #16181b;
   cursor: pointer;
   flex-shrink: 0;
   margin-top: 2px;
-  transition: border-color 0.15s ease;
+  /* Same surface-ladder lift as the auth OAuth buttons (#16181B → #1D1F22),
+     same timing tokens. */
+  transition:
+    background-color var(--dur-2) var(--ease-hover),
+    border-color var(--dur-2) var(--ease-hover);
 }
 .lang-btn:hover {
-  border-color: #47494b;
+  background: #1d1f22;
+  border-color: #1d1f22;
 }
 .lang-btn .lang-icon {
   color: #dedede;
   flex-shrink: 0;
 }
 .lang-btn span:last-child {
-  font-weight: 600;
-  font-size: 12px;
+  font-weight: 500;
+  font-size: 14px;
   color: #dedede;
   /* Wide all-caps locale code reads better with a positive optical tracking;
      overrides the negative Inter tracking. */
@@ -892,20 +901,20 @@ h2 {
   .lang-btn {
     height: 36px;
     border-radius: 18px;
-    padding: 0 12px 0 10px;
+    padding: 0 14px;
   }
   .lang-btn .lang-icon {
     width: 18px;
     height: 18px;
   }
   .lang-btn span:last-child {
-    font-size: 11px;
+    font-size: 15px;
   }
   .login-link {
     height: 36px;
     border-radius: 18px;
     padding: 0 14px;
-    font-size: 12px;
+    font-size: 15px;
   }
   .book-header {
     flex-wrap: nowrap;

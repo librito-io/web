@@ -48,7 +48,7 @@
   "authOAuthFailed": "登录失败，请重试。",
   "authOAuthCancelled": "登录已取消或失败，请重试。",
   "authSignupDisabled": "Librito 尚未开放注册。",
-  "authSignupNotLaunched": "Librito 尚未开放注册——我们正在做最后的完善。",
+  "authSignupNotLaunched": "Librito 尚未开放注册——我们就快准备好了。",
   "authLoginFooterPrompt": "还没有账号？",
   "authSignupFooterPrompt": "已有账号？",
   "authSignupLink": "注册",

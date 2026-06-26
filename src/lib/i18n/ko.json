@@ -48,7 +48,7 @@
   "authOAuthFailed": "로그인에 실패했습니다. 다시 시도해 주세요.",
   "authOAuthCancelled": "로그인이 취소되었거나 실패했습니다. 다시 시도해 주세요.",
   "authSignupDisabled": "Librito는 아직 가입을 받지 않습니다.",
-  "authSignupNotLaunched": "Librito는 아직 가입을 받지 않습니다. 마무리 작업을 진행 중입니다.",
+  "authSignupNotLaunched": "Librito는 아직 가입을 받지 않습니다. 거의 준비되었습니다.",
   "authLoginFooterPrompt": "계정이 없으신가요?",
   "authSignupFooterPrompt": "이미 계정이 있으신가요?",
   "authSignupLink": "가입하기",

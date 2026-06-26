@@ -178,10 +178,20 @@
     margin: 0;
   }
   .auth-card :global(.auth-msg) {
-    color: #ccc;
-    font-size: 1rem;
+    color: #dedede;
+    font-size: 1.125rem;
+    font-weight: 500;
     line-height: 1.6;
-    margin: 0;
+    /* Extra room below the notice before the footer link; stacks on the
+       card's 24px flex gap. */
+    margin: 0 0 24px;
+    /* Cap the measure so the message wraps into a tidy block instead of
+       stretching the full card width into a lopsided two-liner. align-self
+       centres the narrowed block in the flex column; the lines are
+       left-aligned within it. */
+    max-width: 22ch;
+    align-self: center;
+    text-align: left;
   }
   .auth-card :global(.hint) {
     color: #888;

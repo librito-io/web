@@ -48,7 +48,7 @@
   "authOAuthFailed": "Anmeldung fehlgeschlagen. Versuche es erneut.",
   "authOAuthCancelled": "Die Anmeldung wurde abgebrochen oder ist fehlgeschlagen. Versuche es erneut.",
   "authSignupDisabled": "Librito ist noch nicht für Registrierungen geöffnet.",
-  "authSignupNotLaunched": "Librito ist noch nicht für Registrierungen geöffnet – wir legen letzte Hand an.",
+  "authSignupNotLaunched": "Librito ist noch nicht für Registrierungen geöffnet – wir sind fast fertig.",
   "authLoginFooterPrompt": "Noch kein Konto?",
   "authSignupFooterPrompt": "Bereits ein Konto?",
   "authSignupLink": "Registrieren",

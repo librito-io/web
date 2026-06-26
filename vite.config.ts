@@ -18,6 +18,14 @@ export default defineConfig({
     }),
     sveltekit(),
   ],
+  server: {
+    // `npm run dev:mobile` passes --host so a phone on the same Wi-Fi can
+    // load http://<your-mac>.local:5173 (Bonjour mDNS, stable across DHCP).
+    // Vite 6 rejects non-localhost Host headers by default (DNS-rebinding
+    // guard), so allow the .local suffix. Default `npm run dev` stays
+    // localhost-only — this only matters once --host exposes the LAN.
+    allowedHosts: [".local"],
+  },
   ssr: {
     noExternal: ["svelte-bricks"],
   },

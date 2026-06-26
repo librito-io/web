@@ -273,6 +273,10 @@ body {
     sans-serif;
   background: #0a0c0f;
   color: #dedede;
+  /* macOS: render grayscale AA so Chrome (Blink) matches Safari's (WebKit)
+     lighter text rather than its heavier default stems. No-op off macOS. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   margin: 0;
   padding: 0;
   line-height: 1.6;

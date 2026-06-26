@@ -52,7 +52,13 @@
     <form onsubmit={handleSignup}>
       <label>
         {$_("authEmail")}
-        <input type="email" bind:value={email} required />
+        <input
+          type="email"
+          name="email"
+          autocomplete="email"
+          bind:value={email}
+          required
+        />
       </label>
       <PasswordInput
         label={$_("authPassword")}

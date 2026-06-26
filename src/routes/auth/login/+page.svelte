@@ -97,4 +97,16 @@
     /* 24px + the card's 24px flex gap = 48px below the heading. */
     margin-bottom: 24px;
   }
+  /* Mobile: vertically centre the heading in the band between the header
+     divider and the OAuth buttons, without moving the buttons. The negative
+     top margin and the bottom margin always sum to the original 24px, so the
+     buttons (and everything below) stay put while the heading shifts up into
+     the centre of the empty space above them. Values derived for the mobile
+     header (~63px) + 28px heading: centre lands at the band midpoint. */
+  @media (max-width: 480px) {
+    h2 {
+      margin-top: -16px;
+      margin-bottom: 40px;
+    }
+  }
 </style>

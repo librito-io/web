@@ -1,16 +1,29 @@
 <script lang="ts">
   import { _ } from "$lib/i18n";
+  import { page } from "$app/state";
   import LanguageDropdown from "./LanguageDropdown.svelte";
 
   let { menuOpen = $bindable<boolean>(false), loggedIn = false } = $props<{
     menuOpen: boolean;
     loggedIn?: boolean;
   }>();
+
+  // Logo links home everywhere except the homepage itself, where the link
+  // would be a no-op (and the bare wordmark reads cleaner).
+  const onHome = $derived(page.url.pathname === "/");
 </script>
 
 <header class="site-header">
   <div class="header-inner">
-    <h1>Librito</h1>
+    <h1>
+      {#if onHome}
+        <img class="logo" src="/librito.svg" alt="Librito" />
+      {:else}
+        <a class="logo-link" href="/">
+          <img class="logo" src="/librito.svg" alt="Librito" />
+        </a>
+      {/if}
+    </h1>
     <div class="header-actions">
       <LanguageDropdown />
       <!-- App chrome is gated on auth (issue #553): logged-out visitors must
@@ -57,5 +70,28 @@
     top: 0;
     z-index: 60;
     border-bottom: 1px solid #232629;
+  }
+  /* Wordmark replaces the text title. Height-locked to the old ~18px h1
+     cap line; width follows the SVG's 3.57:1 aspect. display:block kills
+     the inline-image baseline gap so it vertical-centers in .header-inner. */
+  .logo {
+    display: block;
+    height: 20px;
+    width: auto;
+  }
+  .logo-link {
+    /* Block-level flex (not inline-flex): an inline-level wrapper gives the
+       h1 a line box whose line-height + baseline alignment shifts the
+       wordmark up vs the homepage's bare block <img>. flex collapses the h1
+       to the 20px image height, matching both pages. */
+    display: flex;
+  }
+  /* Same "lift toward light" as the auth buttons + page logo (#dedede →
+     #fff). Only when the wordmark is a link (not on the homepage). */
+  .logo-link .logo {
+    transition: filter var(--dur-2) var(--ease-hover);
+  }
+  .logo-link:hover .logo {
+    filter: brightness(1.15);
   }
 </style>

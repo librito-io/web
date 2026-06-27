@@ -436,7 +436,7 @@ h2 {
   transform: translateY(-6px) rotate(-45deg);
 }
 .menu-btn:hover .menu-icon span {
-  background: #8b8f95;
+  background: #5b5d5f;
 }
 .menu-overlay {
   position: fixed;

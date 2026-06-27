@@ -127,8 +127,12 @@
     cursor: pointer;
     transition: color var(--dur-2) var(--ease-hover);
   }
-  .pw-toggle:hover {
-    color: #dedede;
+  /* Guard hover behind a real pointer — on touch :hover latches after a tap,
+     leaving the eye stuck white until a tap elsewhere (sticky-hover). */
+  @media (hover: hover) and (pointer: fine) {
+    .pw-toggle:hover {
+      color: #dedede;
+    }
   }
   .pw-toggle:focus-visible {
     outline: none;

@@ -152,9 +152,13 @@
      same headroom, so it brightens to pure #fff — one "hover = lift toward
      light" model across every button. :not(:disabled) leaves the loading
      state (opacity 0.5) alone. */
-  .auth-card :global(.primary:not(:disabled):hover) {
-    background: #fff;
-    border-color: #fff;
+  /* Guard hover behind a real pointer — on touch, :hover sticks after a tap
+     until the user taps elsewhere (sticky-hover). */
+  @media (hover: hover) and (pointer: fine) {
+    .auth-card :global(.primary:not(:disabled):hover) {
+      background: #fff;
+      border-color: #fff;
+    }
   }
   .auth-card :global(.primary:disabled) {
     opacity: 0.5;
@@ -208,11 +212,15 @@
     text-decoration: none;
     font-weight: 500;
     transition: color var(--dur-2) var(--ease-hover);
+    /* Suppress the iOS long-press callout on the switch-mode links. */
+    -webkit-touch-callout: none;
   }
   /* Same "lift toward light" as the buttons (#dedede → #fff), on the link's
      text color. Covers both footer links — "Sign up" (login) and "Log in"
      (signup). */
-  .auth-card :global(.footer a:hover) {
-    color: #fff;
+  @media (hover: hover) and (pointer: fine) {
+    .auth-card :global(.footer a:hover) {
+      color: #fff;
+    }
   }
 </style>

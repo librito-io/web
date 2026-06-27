@@ -144,9 +144,13 @@
      of the same cool-gray hue, still below the resting border. Border tracks
      the fill so the surface stays edgeless. :not(:disabled) keeps a button
      mid-OAuth from lighting up. */
-  .oauth-btn:not(:disabled):hover {
-    background: #1d1f22;
-    border-color: #1d1f22;
+  /* Guard hover behind a real pointer — on touch :hover latches after a tap
+     (sticky-hover / flash). */
+  @media (hover: hover) and (pointer: fine) {
+    .oauth-btn:not(:disabled):hover {
+      background: #1d1f22;
+      border-color: #1d1f22;
+    }
   }
   /* Brand logos track the label font-size (1em = 16px) so the G and the Apple
      mark read at one consistent size across the row — the standard

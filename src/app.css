@@ -611,7 +611,11 @@ h2 {
      Arabic row only (transparent resting bg hid it). */
   line-height: 1.5;
   letter-spacing: var(--tracking-sm);
-  transition: background 0.1s;
+  /* Slow fade governs the RELEASE (press/hover out) so the tap highlight
+     lingers a beat on lift; press/hover IN is overridden fast below. */
+  transition:
+    background 0.5s var(--ease-out),
+    color 0.5s var(--ease-out);
   cursor: pointer;
 }
 .lang-dropdown button:not(.active) {
@@ -622,6 +626,10 @@ h2 {
     background: #dedede;
     color: #16181b;
     font-weight: 600;
+    /* Fast IN; the base rule's slow transition handles the fade-out. */
+    transition:
+      background 0.08s,
+      color 0.08s;
   }
 }
 .lang-dropdown button.active {
@@ -632,6 +640,19 @@ h2 {
   .lang-dropdown button.active:hover {
     color: #16181b;
   }
+}
+/* Press feedback for touch: :hover is gated to real pointers above, so :active
+   (fires on press, mouse + touch, clears on release) carries the tap highlight
+   the dropdown rows had on hover — without the sticky-hover latch. */
+.lang-dropdown button:active {
+  background: #dedede;
+  color: #16181b;
+  font-weight: 600;
+  /* Fast IN on press; the base rule's slow transition lingers the highlight
+     on release. */
+  transition:
+    background 0.08s,
+    color 0.08s;
 }
 .download-bar {
   margin: 20px 0 40px 0;

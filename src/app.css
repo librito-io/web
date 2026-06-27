@@ -371,18 +371,14 @@ h2 {
 .menu-btn {
   width: 40px;
   height: 40px;
-  border-radius: 50%;
-  border: 1.5px solid #232629;
+  border: none;
   background: transparent;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: border-color 0.15s ease;
-}
-.menu-btn:hover {
-  border-color: #47494b;
+  padding: 0;
 }
 /* Logged-out stand-in for the hamburger (issue #553). Pill matched to
    .lang-btn so the header right-slot reads as one control family. */
@@ -409,8 +405,8 @@ h2 {
   border-color: #fff;
 }
 .menu-icon {
-  width: 18px;
-  height: 14px;
+  width: 24px;
+  height: 16px;
   position: relative;
 }
 .menu-icon span {
@@ -418,30 +414,29 @@ h2 {
   position: absolute;
   left: 0;
   width: 100%;
-  height: 1.5px;
-  background: #dedede;
-  border-radius: 1px;
+  height: 4px;
+  background: #47494b;
+  border-radius: 2px;
   transition:
     transform 0.25s ease,
-    opacity 0.25s ease;
+    background-color var(--dur-2) var(--ease-hover);
 }
 .menu-icon span:nth-child(1) {
   top: 0;
 }
 .menu-icon span:nth-child(2) {
-  top: 6px;
-}
-.menu-icon span:nth-child(3) {
   top: 12px;
 }
+/* Two-bar cross: each bar slides to the 8px vertical centre, then rotates
+   into an X. */
 .menu-btn.open .menu-icon span:nth-child(1) {
   transform: translateY(6px) rotate(45deg);
 }
 .menu-btn.open .menu-icon span:nth-child(2) {
-  opacity: 0;
-}
-.menu-btn.open .menu-icon span:nth-child(3) {
   transform: translateY(-6px) rotate(-45deg);
+}
+.menu-btn:hover .menu-icon span {
+  background: #8b8f95;
 }
 .menu-overlay {
   position: fixed;

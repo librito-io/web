@@ -532,7 +532,7 @@ h2 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
+  width: 56px;
   height: 40px;
   padding: 0;
   border: 1px solid #16181b;
@@ -558,8 +558,8 @@ h2 {
   position: absolute;
   right: 0;
   top: 52px;
-  background: #16181b;
-  border: none;
+  background: #0f1114;
+  border: 1px solid #242629;
   border-radius: 8px;
   padding: 12px 0;
   min-width: 180px;
@@ -880,14 +880,14 @@ h2 {
     padding: 16px 32px;
   }
   .lang-btn {
-    width: 48px;
+    width: 56px;
     height: 40px;
     border-radius: 20px;
     padding: 0;
   }
   .lang-btn .lang-icon {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
   }
   .login-link {
     height: 40px;

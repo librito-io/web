@@ -143,6 +143,9 @@
     z-index: 1;
     border-radius: inherit;
     text-decoration: none;
+    /* Suppress the iOS long-press callout so the whole-card link taps to
+       navigate like a native row, with no "Open in New Tab" popup. */
+    -webkit-touch-callout: none;
   }
   .card-link:focus-visible {
     outline: 2px solid #2883de;

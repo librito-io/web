@@ -400,6 +400,9 @@ h2 {
   font-size: 14px;
   text-decoration: none;
   flex-shrink: 0;
+  /* Suppress the iOS long-press callout ("Open in New Tab" / "Copy") so the
+     header CTA reads like native app chrome, not a web link. */
+  -webkit-touch-callout: none;
   /* Same "lift toward light" as the auth primary CTA (#dedede → #fff). */
   transition:
     background-color var(--dur-2) var(--ease-hover),
@@ -829,6 +832,11 @@ h2 {
   object-fit: cover;
   flex-shrink: 0;
   background: #2a2a2a;
+  /* No iOS long-press "Save Image" / drag-ghost on covers — native-app feel.
+     Covers both the feed-card cover and the book-detail thumbnail (shared
+     class). */
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
 }
 .book-info {
   flex: 1;

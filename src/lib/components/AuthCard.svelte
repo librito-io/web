@@ -212,6 +212,8 @@
     text-decoration: none;
     font-weight: 500;
     transition: color var(--dur-2) var(--ease-hover);
+    /* Suppress the iOS long-press callout on the switch-mode links. */
+    -webkit-touch-callout: none;
   }
   /* Same "lift toward light" as the buttons (#dedede → #fff), on the link's
      text color. Covers both footer links — "Sign up" (login) and "Log in"

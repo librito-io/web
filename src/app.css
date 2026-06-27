@@ -379,7 +379,6 @@ h2 {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  margin-top: 2px;
   transition: border-color 0.15s ease;
 }
 .menu-btn:hover {
@@ -400,7 +399,6 @@ h2 {
   font-size: 14px;
   text-decoration: none;
   flex-shrink: 0;
-  margin-top: 2px;
   /* Same "lift toward light" as the auth primary CTA (#dedede → #fff). */
   transition:
     background-color var(--dur-2) var(--ease-hover),
@@ -538,15 +536,15 @@ h2 {
 .lang-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
+  justify-content: center;
+  width: 48px;
   height: 40px;
+  padding: 0;
   border: 1px solid #16181b;
   border-radius: 20px;
   background: #16181b;
   cursor: pointer;
   flex-shrink: 0;
-  margin-top: 2px;
   /* Same surface-ladder lift as the auth OAuth buttons (#16181B → #1D1F22),
      same timing tokens. */
   transition:
@@ -560,14 +558,6 @@ h2 {
 .lang-btn .lang-icon {
   color: #dedede;
   flex-shrink: 0;
-}
-.lang-btn span:last-child {
-  font-weight: 500;
-  font-size: 14px;
-  color: #dedede;
-  /* Wide all-caps locale code reads better with a positive optical tracking;
-     overrides the negative Inter tracking. */
-  letter-spacing: 0.5px;
 }
 .lang-dropdown {
   position: absolute;
@@ -892,7 +882,7 @@ h2 {
 }
 @media (min-width: 600px) {
   .header-inner {
-    padding: 14px 32px;
+    padding: 16px 32px;
   }
   .menu-btn {
     width: 36px;
@@ -915,20 +905,18 @@ h2 {
     transform: translateY(-5.5px) rotate(-45deg);
   }
   .lang-btn {
-    height: 36px;
-    border-radius: 18px;
-    padding: 0 14px;
+    width: 48px;
+    height: 40px;
+    border-radius: 20px;
+    padding: 0;
   }
   .lang-btn .lang-icon {
     width: 18px;
     height: 18px;
   }
-  .lang-btn span:last-child {
-    font-size: 15px;
-  }
   .login-link {
-    height: 36px;
-    border-radius: 18px;
+    height: 40px;
+    border-radius: 20px;
     padding: 0 14px;
     font-size: 15px;
   }

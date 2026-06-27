@@ -76,7 +76,6 @@
         d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
       />
     </svg>
-    <span>{($locale ?? "en").toUpperCase()}</span>
   </button>
   <div class="lang-dropdown" class:visible={open}>
     {#each ORDER as code (code)}

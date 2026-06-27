@@ -144,8 +144,13 @@
     border-radius: inherit;
     text-decoration: none;
     /* Suppress the iOS long-press callout so the whole-card link taps to
-       navigate like a native row, with no "Open in New Tab" popup. */
+       navigate like a native row, with no "Open in New Tab" popup. Also block
+       the drag-and-drop lift callout:none otherwise falls through to — that
+       lift paints a rounded drag-preview over the card and visually erased the
+       1px border on long-press. */
     -webkit-touch-callout: none;
+    -webkit-user-drag: none;
+    user-select: none;
   }
   .card-link:focus-visible {
     outline: 2px solid #2883de;

@@ -11,6 +11,17 @@
   // Logo links home everywhere except the homepage itself, where the link
   // would be a no-op (and the bare wordmark reads cleaner).
   const onHome = $derived(page.url.pathname === "/");
+
+  // The logged-out auth CTA flips to the *opposite* action while viewing an
+  // auth page: on /auth/login it offers "Sign up", on /auth/signup it offers
+  // "Log in". Everywhere else it stays the default "Log in" entry point.
+  const onSignup = $derived(page.url.pathname.startsWith("/auth/signup"));
+  const onLogin = $derived(page.url.pathname.startsWith("/auth/login"));
+  const authCta = $derived(
+    onSignup
+      ? { href: "/auth/login", label: $_("authLoginLink") }
+      : { href: "/auth/signup", label: $_("authSignupLink") },
+  );
 </script>
 
 <header class="site-header">
@@ -45,10 +56,11 @@
             <div class="menu-icon">
               <span></span>
               <span></span>
-              <span></span>
             </div>
           </button>
         </div>
+      {:else if onLogin || onSignup}
+        <a class="login-link" href={authCta.href}>{authCta.label}</a>
       {:else}
         <a class="login-link" href="/auth/login">{$_("navLogIn")}</a>
       {/if}

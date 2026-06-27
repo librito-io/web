@@ -71,7 +71,7 @@
   "authOAuthFailed": "Sign-in failed. Try again.",
   "authOAuthCancelled": "Sign-in was cancelled or failed. Try again.",
   "authSignupDisabled": "Librito isn't open for sign-ups yet.",
-  "authSignupNotLaunched": "Librito isn't open for sign-ups yet — we're almost ready.",
+  "authSignupNotLaunched": "Librito isn't open for sign-ups yet. We're almost ready.",
   "authLoginFooterPrompt": "Don't have an account?",
   "authSignupFooterPrompt": "Already have an account?",
   "authSignupLink": "Sign up",

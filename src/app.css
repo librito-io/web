@@ -559,9 +559,9 @@ h2 {
   right: 0;
   top: 52px;
   background: #16181b;
-  border: 1px solid #47494b;
+  border: none;
   border-radius: 8px;
-  padding: 10px 0 12px 0;
+  padding: 12px 0;
   min-width: 180px;
   opacity: 0;
   transform: translateY(8px);
@@ -580,10 +580,10 @@ h2 {
 }
 .lang-dropdown button {
   display: block;
-  width: calc(100% - 12px);
+  width: calc(100% - 24px);
   text-align: left;
-  padding: 6px 14px;
-  margin: 0 6px;
+  padding: 6px 12px;
+  margin: 0 12px;
   border: none;
   background: transparent;
   border-radius: 4px;

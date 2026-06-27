@@ -884,26 +884,6 @@ h2 {
   .header-inner {
     padding: 16px 32px;
   }
-  .menu-btn {
-    width: 36px;
-    height: 36px;
-  }
-  .menu-icon {
-    width: 14px;
-    height: 13px;
-  }
-  .menu-icon span:nth-child(2) {
-    top: 5.5px;
-  }
-  .menu-icon span:nth-child(3) {
-    top: 11px;
-  }
-  .menu-btn.open .menu-icon span:nth-child(1) {
-    transform: translateY(5.5px) rotate(45deg);
-  }
-  .menu-btn.open .menu-icon span:nth-child(3) {
-    transform: translateY(-5.5px) rotate(-45deg);
-  }
   .lang-btn {
     width: 48px;
     height: 40px;

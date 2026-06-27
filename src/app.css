@@ -240,6 +240,11 @@ html {
      rendered oversized bullets on mobile while short labels stayed normal. */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  /* Kill the iOS Safari tap-highlight overlay — the translucent box it paints
+     over any tapped link/button on touchstart, which read as a "flash" on the
+     header pills and the auth CTA. Inherited, so this covers every control.
+     The app provides its own pressed/hover feedback. */
+  -webkit-tap-highlight-color: transparent;
 }
 * {
   margin: 0;
@@ -400,9 +405,13 @@ h2 {
     background-color var(--dur-2) var(--ease-hover),
     border-color var(--dur-2) var(--ease-hover);
 }
-.login-link:hover {
-  background: #fff;
-  border-color: #fff;
+/* Guard hover behind a real pointer: on touch, :hover latches after a tap and
+   only clears on a tap elsewhere (sticky-hover). */
+@media (hover: hover) and (pointer: fine) {
+  .login-link:hover {
+    background: #fff;
+    border-color: #fff;
+  }
 }
 .menu-icon {
   width: 24px;
@@ -435,8 +444,10 @@ h2 {
 .menu-btn.open .menu-icon span:nth-child(2) {
   transform: translateY(-6px) rotate(-45deg);
 }
-.menu-btn:hover .menu-icon span {
-  background: #5b5d5f;
+@media (hover: hover) and (pointer: fine) {
+  .menu-btn:hover .menu-icon span {
+    background: #5b5d5f;
+  }
 }
 .menu-overlay {
   position: fixed;
@@ -546,9 +557,11 @@ h2 {
     background-color var(--dur-2) var(--ease-hover),
     border-color var(--dur-2) var(--ease-hover);
 }
-.lang-btn:hover {
-  background: #1d1f22;
-  border-color: #1d1f22;
+@media (hover: hover) and (pointer: fine) {
+  .lang-btn:hover {
+    background: #1d1f22;
+    border-color: #1d1f22;
+  }
 }
 .lang-btn .lang-icon {
   color: #dedede;
@@ -604,17 +617,21 @@ h2 {
 .lang-dropdown button:not(.active) {
   color: #9e9fa2;
 }
-.lang-dropdown button:hover {
-  background: #dedede;
-  color: #16181b;
-  font-weight: 600;
+@media (hover: hover) and (pointer: fine) {
+  .lang-dropdown button:hover {
+    background: #dedede;
+    color: #16181b;
+    font-weight: 600;
+  }
 }
 .lang-dropdown button.active {
   font-weight: 600;
   color: #ffffff;
 }
-.lang-dropdown button.active:hover {
-  color: #16181b;
+@media (hover: hover) and (pointer: fine) {
+  .lang-dropdown button.active:hover {
+    color: #16181b;
+  }
 }
 .download-bar {
   margin: 20px 0 40px 0;

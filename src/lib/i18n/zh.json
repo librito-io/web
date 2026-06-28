@@ -37,6 +37,7 @@
   "authLoginHeading": "登录 Librito",
   "authSignupHeading": "注册 Librito",
   "authEmail": "电子邮箱",
+  "authEmailOrUsername": "用户名或邮箱",
   "authPassword": "密码",
   "authPasswordShow": "显示密码",
   "authPasswordHide": "隐藏密码",

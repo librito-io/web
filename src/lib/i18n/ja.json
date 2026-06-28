@@ -37,6 +37,7 @@
   "authLoginHeading": "Libritoにログイン",
   "authSignupHeading": "Libritoに登録",
   "authEmail": "メールアドレス",
+  "authEmailOrUsername": "ユーザー名またはメール",
   "authPassword": "パスワード",
   "authPasswordShow": "パスワードを表示",
   "authPasswordHide": "パスワードを非表示",

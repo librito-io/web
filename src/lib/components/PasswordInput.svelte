@@ -30,11 +30,14 @@
 </script>
 
 <div class="pw-field">
-  <label for={id}>{label}</label>
+  <!-- Label kept for assistive tech but visually hidden; the placeholder is the
+       visible label (disappears on first character, native behaviour). -->
+  <label for={id} class="visually-hidden">{label}</label>
   <span class="pw-wrap">
     <input
       {id}
       type={revealed ? "text" : "password"}
+      placeholder={label}
       bind:value
       {autocomplete}
       {minlength}
@@ -55,8 +58,11 @@
       onmousedown={(e) => e.preventDefault()}
       onclick={() => (revealed = !revealed)}
     >
-      {#if revealed}
-        <!-- eye-slash (Phosphor, regular) — matches Cloudflare's dashboard. -->
+      {#if !revealed}
+        <!-- Icon shows the current STATE, not the click action (the action is
+             the aria-label + aria-pressed). Hidden → eye-slash (crossed);
+             visible → open eye. Phosphor regular, matches Cloudflare. -->
+        <!-- eye-slash (crossed) — password is hidden. -->
         <svg
           width="20"
           height="20"
@@ -69,7 +75,7 @@
           />
         </svg>
       {:else}
-        <!-- eye (Phosphor, regular) — matches Cloudflare's dashboard. -->
+        <!-- open eye — password is visible. -->
         <svg
           width="20"
           height="20"
@@ -123,7 +129,9 @@
     padding: 0 6px;
     background: none;
     border: none;
-    color: #8b8f95;
+    /* Matches the input placeholder grey so the eye reads as the same muted
+       field furniture at rest; brightens to #dedede on hover (real pointers). */
+    color: #6f7479;
     cursor: pointer;
     transition: color var(--dur-2) var(--ease-hover);
   }

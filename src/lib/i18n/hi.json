@@ -37,6 +37,7 @@
   "authLoginHeading": "Librito में लॉग इन करें",
   "authSignupHeading": "Librito में साइन अप करें",
   "authEmail": "ईमेल",
+  "authEmailOrUsername": "उपयोगकर्ता नाम या ईमेल",
   "authPassword": "पासवर्ड",
   "authPasswordShow": "पासवर्ड दिखाएं",
   "authPasswordHide": "पासवर्ड छिपाएं",

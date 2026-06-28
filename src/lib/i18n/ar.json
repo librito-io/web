@@ -37,6 +37,7 @@
   "authLoginHeading": "تسجيل الدخول إلى Librito",
   "authSignupHeading": "إنشاء حساب في Librito",
   "authEmail": "البريد الإلكتروني",
+  "authEmailOrUsername": "اسم المستخدم أو البريد الإلكتروني",
   "authPassword": "كلمة المرور",
   "authPasswordShow": "إظهار كلمة المرور",
   "authPasswordHide": "إخفاء كلمة المرور",

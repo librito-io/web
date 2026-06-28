@@ -37,6 +37,7 @@
   "authLoginHeading": "Bei Librito anmelden",
   "authSignupHeading": "Bei Librito registrieren",
   "authEmail": "E-Mail",
+  "authEmailOrUsername": "Benutzername oder E-Mail",
   "authPassword": "Passwort",
   "authPasswordShow": "Passwort anzeigen",
   "authPasswordHide": "Passwort verbergen",

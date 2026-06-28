@@ -65,7 +65,7 @@ export async function cleanupUser(id: string): Promise<void> {
 export async function login(page: Page, user: E2EUser): Promise<void> {
   await page.goto("/auth/login");
   await awaitHydration(page);
-  await page.getByLabel("Email").fill(user.email);
+  await page.getByLabel("Username or email").fill(user.email);
   // exact: true so the match is the password input only — the reveal-toggle
   // button's aria-label ("Show password") is also a getByLabel candidate.
   await page.getByLabel("Password", { exact: true }).fill(user.password);

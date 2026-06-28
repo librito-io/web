@@ -19,7 +19,7 @@
 <style>
   .auth-card {
     max-width: 448px;
-    margin: 184px auto 80px;
+    margin: 240px auto 80px;
     padding: 48px;
     background: #0f1114;
     border: 1px solid #232629;
@@ -38,13 +38,30 @@
   @media (max-width: 480px) {
     .auth-card {
       margin: 72px auto 48px;
-      padding: 8px 20px 24px;
+      padding: 8px 24px 24px;
       background: transparent;
       border: none;
       border-radius: 0;
     }
     .auth-card:hover {
       border-color: transparent;
+    }
+    /* Taller controls on phones: full-width fields/buttons read short at their
+       wide aspect, so bump 48 → 56px. Border-box + unchanged padding, so only
+       the height grows. Covers the OAuth row (.oauth-btn min-height), both
+       inputs (incl. the password field), and the Log in / Sign up CTA.
+       `!important` is load-bearing: these tie the base `.auth-card
+       :global(input/.primary)` rules on specificity, so the cascade falls to
+       source order — and the base rules sit later in this file (and the prod
+       bundle order can differ). Same reason the pw-input padding uses it. */
+    .auth-card :global(.oauth-btn) {
+      min-height: 56px !important;
+    }
+    .auth-card :global(input) {
+      height: 56px !important;
+    }
+    .auth-card :global(.primary) {
+      height: 56px !important;
     }
   }
   .wordmark {
@@ -85,6 +102,14 @@
     flex-direction: column;
     gap: 16px;
   }
+  /* Independent knob for the username↔password gap only. The form gap (16px)
+     governs every field pair incl. password↔button; this margin stacks on top
+     of the gap for the first field so that one gap can be tuned without
+     touching the password↔button spacing (which also carries .primary's
+     margin-top). 16 gap + 8 = 24px. */
+  .auth-card :global(form > label) {
+    margin-bottom: 8px;
+  }
   .auth-card :global(label) {
     display: flex;
     flex-direction: column;
@@ -118,6 +143,13 @@
   .auth-card :global(input:focus) {
     outline: none;
     border-color: #dedede;
+  }
+  /* Placeholder doubles as the field label (the <label> is visually hidden).
+     Mid-grey from the palette, clearly dimmer than the #dedede typed text;
+     opacity:1 overrides Firefox's default placeholder dimming. */
+  .auth-card :global(input)::placeholder {
+    color: #6f7479;
+    opacity: 1;
   }
   /* Browsers paint a pale-yellow background on autofilled fields and ignore
      background-color. Mask it with an inset box-shadow in the field colour and

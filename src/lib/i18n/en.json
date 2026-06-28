@@ -60,6 +60,7 @@
   "authLoginHeading": "Log in to Librito",
   "authSignupHeading": "Sign up to Librito",
   "authEmail": "Email",
+  "authEmailOrUsername": "Username or email",
   "authPassword": "Password",
   "authPasswordShow": "Show password",
   "authPasswordHide": "Hide password",

@@ -51,11 +51,12 @@
 
     <form onsubmit={handleSignup}>
       <label>
-        {$_("authEmail")}
+        <span class="visually-hidden">{$_("authEmail")}</span>
         <input
           type="email"
           name="email"
           autocomplete="email"
+          placeholder={$_("authEmail")}
           bind:value={email}
           required
         />

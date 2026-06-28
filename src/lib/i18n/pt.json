@@ -37,6 +37,7 @@
   "authLoginHeading": "Entrar no Librito",
   "authSignupHeading": "Criar conta no Librito",
   "authEmail": "E-mail",
+  "authEmailOrUsername": "Usuário ou e-mail",
   "authPassword": "Senha",
   "authPasswordShow": "Mostrar senha",
   "authPasswordHide": "Ocultar senha",

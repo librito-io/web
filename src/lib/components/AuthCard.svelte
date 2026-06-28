@@ -119,6 +119,13 @@
     outline: none;
     border-color: #dedede;
   }
+  /* Placeholder doubles as the field label (the <label> is visually hidden).
+     Mid-grey from the palette, clearly dimmer than the #dedede typed text;
+     opacity:1 overrides Firefox's default placeholder dimming. */
+  .auth-card :global(input)::placeholder {
+    color: #8b8f95;
+    opacity: 1;
+  }
   /* Browsers paint a pale-yellow background on autofilled fields and ignore
      background-color. Mask it with an inset box-shadow in the field colour and
      pin the text fill so an autofilled field looks identical to an empty one. */

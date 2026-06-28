@@ -30,11 +30,14 @@
 </script>
 
 <div class="pw-field">
-  <label for={id}>{label}</label>
+  <!-- Label kept for assistive tech but visually hidden; the placeholder is the
+       visible label (disappears on first character, native behaviour). -->
+  <label for={id} class="visually-hidden">{label}</label>
   <span class="pw-wrap">
     <input
       {id}
       type={revealed ? "text" : "password"}
+      placeholder={label}
       bind:value
       {autocomplete}
       {minlength}

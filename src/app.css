@@ -251,6 +251,19 @@ html {
   padding: 0;
   box-sizing: border-box;
 }
+/* Hide visually but keep for assistive tech — used where a control's label is
+   conveyed by its placeholder but still needs an accessible name. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 /* Form controls don't inherit font-family from body — without this their text
    falls back to the UA font (Arial in Chrome, system font in Safari) instead
    of Inter. Covers all buttons/inputs in one place; supersedes the per-class

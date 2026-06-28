@@ -60,11 +60,15 @@
 
   <form onsubmit={handleLogin}>
     <label>
-      {$_("authEmail")}
+      <span class="visually-hidden">{$_("authEmailOrUsername")}</span>
+      <!-- type="text" (not email): the field accepts a username or an email, so
+           native email-format validation must not block a username. Username
+           login is backend-pending — see the tracking issue. -->
       <input
-        type="email"
+        type="text"
         name="email"
         autocomplete="username"
+        placeholder={$_("authEmailOrUsername")}
         bind:value={email}
         required
       />

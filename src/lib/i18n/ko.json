@@ -37,6 +37,7 @@
   "authLoginHeading": "Librito에 로그인",
   "authSignupHeading": "Librito에 가입",
   "authEmail": "이메일",
+  "authEmailOrUsername": "사용자 이름 또는 이메일",
   "authPassword": "비밀번호",
   "authPasswordShow": "비밀번호 표시",
   "authPasswordHide": "비밀번호 숨기기",

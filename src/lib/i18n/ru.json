@@ -37,6 +37,7 @@
   "authLoginHeading": "Вход в Librito",
   "authSignupHeading": "Регистрация в Librito",
   "authEmail": "Эл. почта",
+  "authEmailOrUsername": "Имя пользователя или эл. почта",
   "authPassword": "Пароль",
   "authPasswordShow": "Показать пароль",
   "authPasswordHide": "Скрыть пароль",

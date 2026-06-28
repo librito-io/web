@@ -85,6 +85,14 @@
     flex-direction: column;
     gap: 16px;
   }
+  /* Independent knob for the username↔password gap only. The form gap (16px)
+     governs every field pair incl. password↔button; this margin stacks on top
+     of the gap for the first field so that one gap can be tuned without
+     touching the password↔button spacing (which also carries .primary's
+     margin-top). 16 gap + 8 = 24px. */
+  .auth-card :global(form > label) {
+    margin-bottom: 8px;
+  }
   .auth-card :global(label) {
     display: flex;
     flex-direction: column;
@@ -123,7 +131,7 @@
      Mid-grey from the palette, clearly dimmer than the #dedede typed text;
      opacity:1 overrides Firefox's default placeholder dimming. */
   .auth-card :global(input)::placeholder {
-    color: #8b8f95;
+    color: #6f7479;
     opacity: 1;
   }
   /* Browsers paint a pale-yellow background on autofilled fields and ignore

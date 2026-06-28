@@ -38,13 +38,30 @@
   @media (max-width: 480px) {
     .auth-card {
       margin: 72px auto 48px;
-      padding: 8px 20px 24px;
+      padding: 8px 24px 24px;
       background: transparent;
       border: none;
       border-radius: 0;
     }
     .auth-card:hover {
       border-color: transparent;
+    }
+    /* Taller controls on phones: full-width fields/buttons read short at their
+       wide aspect, so bump 48 → 56px. Border-box + unchanged padding, so only
+       the height grows. Covers the OAuth row (.oauth-btn min-height), both
+       inputs (incl. the password field), and the Log in / Sign up CTA.
+       `!important` is load-bearing: these tie the base `.auth-card
+       :global(input/.primary)` rules on specificity, so the cascade falls to
+       source order — and the base rules sit later in this file (and the prod
+       bundle order can differ). Same reason the pw-input padding uses it. */
+    .auth-card :global(.oauth-btn) {
+      min-height: 56px !important;
+    }
+    .auth-card :global(input) {
+      height: 56px !important;
+    }
+    .auth-card :global(.primary) {
+      height: 56px !important;
     }
   }
   .wordmark {

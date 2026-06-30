@@ -63,5 +63,7 @@
   "authVerifyResent": "Codice inviato di nuovo.",
   "authVerifyResendCooldown": "Invia di nuovo (attendi 60 s)",
   "authVerifyResend": "Invia di nuovo il codice",
-  "authVerifyBackToLogin": "Torna all'accesso"
+  "authVerifyBackToLogin": "Torna all'accesso",
+  "landingGetStarted": "Inizia",
+  "landingTagline": "Il posto migliore per le tue evidenziazioni, note e liste di lettura."
 }

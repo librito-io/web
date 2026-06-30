@@ -63,5 +63,7 @@
   "authVerifyResent": "코드를 다시 보냈습니다.",
   "authVerifyResendCooldown": "다시 보내기 (60초 대기)",
   "authVerifyResend": "코드 다시 보내기",
-  "authVerifyBackToLogin": "로그인으로 돌아가기"
+  "authVerifyBackToLogin": "로그인으로 돌아가기",
+  "landingGetStarted": "시작하기",
+  "landingTagline": "하이라이트, 메모, 독서 목록을 위한 최고의 공간."
 }

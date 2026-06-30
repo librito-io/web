@@ -63,5 +63,7 @@
   "authVerifyResent": "Код отправлен повторно.",
   "authVerifyResendCooldown": "Отправить ещё раз (подождите 60 с)",
   "authVerifyResend": "Отправить код повторно",
-  "authVerifyBackToLogin": "Вернуться ко входу"
+  "authVerifyBackToLogin": "Вернуться ко входу",
+  "landingGetStarted": "Начать",
+  "landingTagline": "Лучшее место для ваших выделений, заметок и списков для чтения."
 }

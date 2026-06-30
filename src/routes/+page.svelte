@@ -131,6 +131,9 @@
       /* Tighter vertical rhythm on a phone than the desktop 64/96. */
       margin-top: 48px;
       font-size: 1.375rem;
+      /* A touch more leading than the desktop 1.4 — the narrower measure wraps
+         to more lines, so the extra line spacing reads better on a phone. */
+      line-height: 1.5;
       /* Collapse the desktop \n back to a space and wrap naturally. The lone
          "lists." orphan is prevented engine-independently by the non-breaking
          space binding "reading lists." in the localized string — text-wrap:

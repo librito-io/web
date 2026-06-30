@@ -652,6 +652,16 @@ h2 {
   font-weight: 600;
   color: #ffffff;
 }
+/* Desktop-only: drop the menu lower and enlarge the row text. Mobile keeps
+   the tighter top: 52px / 0.875rem defaults above. */
+@media (min-width: 600px) {
+  .lang-dropdown {
+    top: 82px;
+  }
+  .lang-dropdown button {
+    font-size: 1rem;
+  }
+}
 @media (hover: hover) and (pointer: fine) {
   .lang-dropdown button.active:hover {
     color: #16181b;

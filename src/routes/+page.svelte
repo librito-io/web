@@ -28,7 +28,9 @@
        constant reproduces the previous centered+(-48px lift) position; raise it
        to move the whole block up, lower it to move down. */
     justify-content: flex-start;
-    gap: 40px;
+    /* Vertical rhythm is set by each child's margin-top (see .tagline / .cta)
+       rather than a shared `gap`, so the wordmark↔tagline and tagline↔CTA
+       spacing read as direct values instead of gap-plus-margin arithmetic. */
     /* Cap the block width and center it so on ultrawide / fullscreen it drifts
        toward the middle instead of gluing to a fixed left gutter (which left a
        huge void on the right). Sized so a normal laptop keeps roughly the same
@@ -59,7 +61,8 @@
   }
 
   .tagline {
-    margin: 0;
+    /* Gap from the wordmark above. */
+    margin: 64px 0 0;
     max-width: 18em;
     text-align: left;
     /* Honor newlines embedded in the localized string (so each locale
@@ -91,7 +94,8 @@
      lifting toward #fff on hover. Inline + static, left-aligned under the
      tagline with extra space above it. */
   .cta {
-    margin-top: 32px;
+    /* Gap from the tagline above. */
+    margin-top: 96px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -113,23 +117,32 @@
      page margin and ease the lift; the taller stacked block sits near center. */
   @media (max-width: 599px) {
     .hero {
-      gap: 32px;
       /* Phone: revert to simple vertical centering (the desktop top-anchor
          math isn't needed on a short viewport). */
       justify-content: center;
       padding: 24px;
       transform: translateY(-8px);
     }
+    .wordmark {
+      /* Narrower on a phone than the desktop 80vw — matches the prior 70vw. */
+      width: 70vw;
+    }
     .tagline {
+      /* Tighter vertical rhythm on a phone than the desktop 64/96. */
+      margin-top: 48px;
       font-size: 1.375rem;
-      /* The desktop \n (break after "your") can orphan a word on the narrow
-         viewport; collapse it back to a space and wrap naturally. */
+      /* Collapse the desktop \n back to a space and wrap naturally. The lone
+         "lists." orphan is prevented engine-independently by the non-breaking
+         space binding "reading lists." in the localized string — text-wrap:
+         balance was a no-op in WebKit (the inline <mark> disables it), so
+         relying on it would make Chrome and Safari wrap differently. */
       white-space: normal;
     }
     /* The 1.5rem / 36px desktop CTA is oversized on a phone — scale back. */
     .cta {
+      margin-top: 64px;
       font-size: 1.125rem;
-      padding: 10px 28px;
+      padding: 12px 32px;
     }
   }
 </style>

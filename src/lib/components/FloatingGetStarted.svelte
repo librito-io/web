@@ -41,7 +41,7 @@
       right: 16px;
       bottom: 16px;
       font-size: 1.125rem;
-      padding: 10px 24px;
+      padding: 12px 24px;
     }
   }
 </style>

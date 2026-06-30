@@ -81,7 +81,7 @@
   .tagline :global(mark) {
     background: #006fce;
     color: #f5f5f5;
-    border-radius: 6px;
+    border-radius: 4px;
     /* Asymmetric padding (T R B L): the trailing comma's side-bearing makes
        the right edge read as over-padded, so trim right vs left. Extra bottom
        room clears the "g"/"y" descenders. */
@@ -120,7 +120,8 @@
       /* Phone: revert to simple vertical centering (the desktop top-anchor
          math isn't needed on a short viewport). */
       justify-content: center;
-      padding: 24px;
+      /* Slightly wider side gutter than the desktop block (32 vs 24). */
+      padding: 24px 32px;
       transform: translateY(-8px);
     }
     .wordmark {
@@ -130,7 +131,7 @@
     .tagline {
       /* Tighter vertical rhythm on a phone than the desktop 64/96. */
       margin-top: 48px;
-      font-size: 1.375rem;
+      font-size: 1.5rem;
       /* A touch more leading than the desktop 1.4 — the narrower measure wraps
          to more lines, so the extra line spacing reads better on a phone. */
       line-height: 1.5;

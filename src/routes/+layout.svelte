@@ -7,6 +7,7 @@
   import Header from "$lib/components/Header.svelte";
   import MenuOverlay from "$lib/components/MenuOverlay.svelte";
   import FloatingGetStarted from "$lib/components/FloatingGetStarted.svelte";
+  import Footer from "$lib/components/Footer.svelte";
   import { page } from "$app/state";
   import { PRELOAD_FONTS, notoPreloadForLocale } from "$lib/fonts";
   import { env } from "$env/dynamic/public";
@@ -24,6 +25,15 @@
       page.url.pathname !== "/" &&
       !page.url.pathname.startsWith("/auth") &&
       !page.url.pathname.startsWith("/app"),
+  );
+
+  // Footer is public marketing chrome: show on the landing, privacy, support,
+  // and any future marketing page; hide on the app (highlight viewer has its
+  // own chrome) and auth routes (login/signup forms). Mirrors the
+  // showGetStarted gating minus the home-page exclusion.
+  const showFooter = $derived(
+    !page.url.pathname.startsWith("/app") &&
+      !page.url.pathname.startsWith("/auth"),
   );
 
   // Pre-launch stealth: emit <meta name="robots" content="noindex"> on every
@@ -179,4 +189,8 @@
 
 {#if showGetStarted}
   <FloatingGetStarted />
+{/if}
+
+{#if showFooter}
+  <Footer />
 {/if}

@@ -75,6 +75,15 @@
     line-height: 1.4;
     letter-spacing: -0.01em;
   }
+  /* CJK has no spaces and wraps per character, so the 18em Latin measure
+     forced an ugly 2–3 character orphan tail ("な場所。" / "之地。"). The copy
+     is short — let it size to content (bounded by the hero block / viewport)
+     so it sits on one line on desktop and wraps cleanly at the edge on mobile. */
+  .tagline:lang(ja),
+  .tagline:lang(zh),
+  .tagline:lang(ko) {
+    max-width: none;
+  }
   /* Highlighter marker on "highlights," — brand blue, rounded, with a little
      breathing room left/right. box-decoration-break: clone keeps the padding
      + radius intact if the span ever wraps across lines. */

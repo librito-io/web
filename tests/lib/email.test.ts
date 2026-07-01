@@ -119,8 +119,12 @@ describe("sendContactEmail", () => {
     const client = _getResendClient();
     if (!client) throw new Error("Client should exist in test");
 
-    await sendContactEmail("visitor@example.com", "Hello, I need help.");
+    const result = await sendContactEmail(
+      "visitor@example.com",
+      "Hello, I need help.",
+    );
 
+    expect(result).toBe(true);
     expect(client.emails.send).toHaveBeenCalledOnce();
     const call = vi.mocked(client.emails.send).mock.calls[0][0];
     expect(call.from).toBe("Librito <noreply@librito.io>");
@@ -143,9 +147,7 @@ describe("sendContactEmail", () => {
     const client = _getResendClient();
     if (!client) throw new Error("Client should exist in test");
     vi.mocked(client.emails.send).mockRejectedValueOnce(new Error("down"));
-    await expect(
-      sendContactEmail("v@example.com", "hi"),
-    ).resolves.toBeUndefined();
+    await expect(sendContactEmail("v@example.com", "hi")).resolves.toBe(false);
   });
 });
 

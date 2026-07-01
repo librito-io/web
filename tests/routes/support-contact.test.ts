@@ -24,7 +24,7 @@ vi.mock("$lib/server/ratelimit", () => ({
 }));
 
 const { sendContactEmail } = vi.hoisted(() => ({
-  sendContactEmail: vi.fn(async () => {}),
+  sendContactEmail: vi.fn(async () => true),
 }));
 vi.mock("$lib/server/email", () => ({ sendContactEmail }));
 
@@ -85,5 +85,15 @@ describe("support ?/contact action", () => {
     const res: any = await submit({ email: "v@example.com", message: "hi" });
     expect(res.status).toBe(429);
     expect(sendContactEmail).not.toHaveBeenCalled();
+  });
+
+  it("returns a 502 fail when email delivery fails, without hiding that it tried", async () => {
+    sendContactEmail.mockResolvedValueOnce(false);
+    const res: any = await submit({
+      email: "v@example.com",
+      message: "hi",
+    });
+    expect(res.status).toBe(502);
+    expect(sendContactEmail).toHaveBeenCalledWith("v@example.com", "hi");
   });
 });

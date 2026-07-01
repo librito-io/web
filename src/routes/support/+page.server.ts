@@ -30,7 +30,12 @@ export const actions: Actions = {
       return fail(429, { error: "Too many messages. Please try again later." });
     }
 
-    await sendContactEmail(parsed.email, parsed.message);
+    const sent = await sendContactEmail(parsed.email, parsed.message);
+    if (!sent) {
+      return fail(502, {
+        error: "Couldn't send your message. Please email support@librito.io.",
+      });
+    }
     return { ok: true };
   },
 };

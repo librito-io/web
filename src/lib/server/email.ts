@@ -92,10 +92,10 @@ function escapeHtml(input: string): string {
 export async function sendContactEmail(
   fromEmail: string,
   message: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const client = getClient();
-    if (!client) return;
+    if (!client) return false;
 
     const safeMsg = escapeHtml(message).replace(/\n/g, "<br>");
     const html =
@@ -109,6 +109,7 @@ export async function sendContactEmail(
       subject: "New Librito support message",
       html,
     });
+    return true;
   } catch (err) {
     logger().error(
       {
@@ -117,6 +118,7 @@ export async function sendContactEmail(
       },
       "email.send_contact_failed",
     );
+    return false;
   }
 }
 

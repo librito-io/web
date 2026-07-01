@@ -120,7 +120,8 @@
     border: none;
     color: #ededed;
     font: inherit;
-    padding: 0.5rem 0;
+    /* Extra space below the text so the underline sits lower. */
+    padding: 0.5rem 0 1rem;
   }
   .newsletter input[type="email"]:focus {
     outline: none;

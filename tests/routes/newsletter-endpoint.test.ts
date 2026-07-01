@@ -81,4 +81,11 @@ describe("POST /api/newsletter", () => {
     expect(res.status).toBe(429);
     expect(processNewsletterSignup).not.toHaveBeenCalled();
   });
+
+  it("returns 500 and skips the welcome email when the insert throws", async () => {
+    processNewsletterSignup.mockRejectedValue(new Error("db down"));
+    const res = await post({ email: "a@b.co" });
+    expect(res.status).toBe(500);
+    expect(sendNewsletterWelcome).not.toHaveBeenCalled();
+  });
 });

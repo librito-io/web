@@ -5,11 +5,12 @@ export function normalizeEmail(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
-// Deliberately conservative: one @, a dot in the domain, no whitespace. The
-// authoritative check is deliverability at send time; this only rejects
-// obvious garbage before we touch the DB.
+// Deliberately conservative: one @, a dot in the domain, no whitespace, and
+// the RFC 5321 254-char max length. The authoritative check is
+// deliverability at send time; this only rejects obvious garbage before we
+// touch the DB.
 export function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 /**

@@ -21,6 +21,15 @@ describe("isValidEmail", () => {
     expect(isValidEmail("a@b")).toBe(false);
     expect(isValidEmail("")).toBe(false);
   });
+  it("rejects an address over the RFC 5321 254-char cap", () => {
+    expect(isValidEmail("a".repeat(250) + "@ex.com")).toBe(false);
+  });
+  it("accepts an address at exactly the 254-char cap", () => {
+    const local = "a".repeat(254 - "@ex.com".length);
+    const email = local + "@ex.com";
+    expect(email.length).toBe(254);
+    expect(isValidEmail(email)).toBe(true);
+  });
 });
 
 describe("processNewsletterSignup", () => {

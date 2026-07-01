@@ -13,5 +13,29 @@
   </head>
   <body data-sveltekit-preload-data="hover">
     <div style="display: contents">%sveltekit.body%</div>
+    <!-- Pre-paint scroll restore. SvelteKit forces history.scrollRestoration =
+         "manual" and re-applies the saved scroll position from its client
+         bundle AFTER hydration begins, so a full reload of a scrolled page
+         paints at scrollY 0 (top) and only then jumps to the saved position —
+         a visible flash of the top content over wherever the user was (e.g.
+         the hero flashing over the footer). SvelteKit's own "auto" mitigation
+         (set on beforeunload) relies on native restoration, which WebKit does
+         not reliably land here. This inline script runs synchronously at
+         end-of-body — after the SSR DOM is parsed and head CSS applied (so
+         layout height is known) and BEFORE first paint and before the deferred
+         hydration module — reading SvelteKit's own snapshot:
+         sessionStorage["sveltekit:scroll"] is { [index]: {x, y} }, keyed by
+         history.state["sveltekit:history"]. On a hit we scroll into place
+         pre-paint; SvelteKit's later restore is then a no-op. On any miss / key
+         drift it silently no-ops back to today's behaviour. Keys mirror
+         @sveltejs/kit client constants (SCROLL_KEY / HISTORY_INDEX). -->
+    <script>
+      try {
+        var i = history.state && history.state["sveltekit:history"];
+        var m = JSON.parse(sessionStorage.getItem("sveltekit:scroll") || "{}");
+        var p = i != null && m[i];
+        if (p) window.scrollTo(p.x, p.y);
+      } catch (e) {}
+    </script>
   </body>
 </html>

@@ -63,5 +63,7 @@
   "authVerifyResent": "Code renvoyé.",
   "authVerifyResendCooldown": "Renvoyer (attendez 60 s)",
   "authVerifyResend": "Renvoyer le code",
-  "authVerifyBackToLogin": "Retour à la connexion"
+  "authVerifyBackToLogin": "Retour à la connexion",
+  "landingGetStarted": "Commencer",
+  "landingTagline": "Le meilleur endroit pour vos <mark>surlignages,</mark> notes et listes de lecture."
 }

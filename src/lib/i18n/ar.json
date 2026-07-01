@@ -63,5 +63,7 @@
   "authVerifyResent": "تمت إعادة إرسال الرمز.",
   "authVerifyResendCooldown": "إعادة الإرسال (انتظر 60 ثانية)",
   "authVerifyResend": "إعادة إرسال الرمز",
-  "authVerifyBackToLogin": "العودة إلى تسجيل الدخول"
+  "authVerifyBackToLogin": "العودة إلى تسجيل الدخول",
+  "landingGetStarted": "ابدأ الآن",
+  "landingTagline": "أفضل مكان <mark>لتمييزاتك</mark> وملاحظاتك وقوائم القراءة."
 }

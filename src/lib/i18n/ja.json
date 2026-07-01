@@ -63,5 +63,7 @@
   "authVerifyResent": "コードを再送しました。",
   "authVerifyResendCooldown": "再送（60秒お待ちください）",
   "authVerifyResend": "コードを再送",
-  "authVerifyBackToLogin": "ログインに戻る"
+  "authVerifyBackToLogin": "ログインに戻る",
+  "landingGetStarted": "始める",
+  "landingTagline": "<mark>ハイライト<span class=\"cjk-sep\">、</span></mark>メモ、読書リストに最適な場所。"
 }

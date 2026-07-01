@@ -63,5 +63,7 @@
   "authVerifyResent": "Code erneut gesendet.",
   "authVerifyResendCooldown": "Erneut senden (60 s warten)",
   "authVerifyResend": "Code erneut senden",
-  "authVerifyBackToLogin": "Zurück zur Anmeldung"
+  "authVerifyBackToLogin": "Zurück zur Anmeldung",
+  "landingGetStarted": "Loslegen",
+  "landingTagline": "Der beste Ort für deine <mark>Markierungen,</mark> Notizen und Leselisten."
 }

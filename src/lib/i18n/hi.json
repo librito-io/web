@@ -63,5 +63,7 @@
   "authVerifyResent": "कोड फिर से भेजा गया।",
   "authVerifyResendCooldown": "फिर से भेजें (60 सेकंड प्रतीक्षा करें)",
   "authVerifyResend": "कोड फिर से भेजें",
-  "authVerifyBackToLogin": "लॉगिन पर वापस जाएँ"
+  "authVerifyBackToLogin": "लॉगिन पर वापस जाएँ",
+  "landingGetStarted": "शुरू करें",
+  "landingTagline": "आपके <mark>हाइलाइट्स,</mark> नोट्स और रीडिंग लिस्ट के लिए सबसे अच्छी जगह।"
 }

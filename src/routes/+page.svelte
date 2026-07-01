@@ -42,7 +42,7 @@
   }
 
   .wordmark {
-    width: min(553px, 80vw);
+    width: min(480px, 80vw);
     height: auto;
     /* The librito.svg carries ~1.7% transparent whitespace on its left, so the
        painted "L" sits inset from the image box. Shift left to cancel it, so

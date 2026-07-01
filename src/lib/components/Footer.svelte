@@ -82,7 +82,8 @@
   .site-footer {
     border-top: 1px solid #23262b;
     margin-top: 4rem;
-    padding: 2.5rem 1.5rem 1.5rem;
+    /* top 48px / sides 24px / bottom 64px. */
+    padding: 3rem 1.5rem 4rem;
   }
   .inner {
     max-width: 1120px;
@@ -93,8 +94,9 @@
     flex-wrap: wrap;
   }
   .newsletter h2 {
-    font-size: 1.4rem;
-    margin: 0 0 1rem;
+    font-size: 1.25rem;
+    font-weight: 500;
+    margin: 0 0 2rem;
   }
   .newsletter .field {
     display: flex;
@@ -135,9 +137,9 @@
   }
   .bottom {
     max-width: 1120px;
-    margin: 2rem auto 0;
-    padding-top: 1.25rem;
-    border-top: 1px solid #23262b;
+    /* Copyright sits below the newsletter/links row. No top divider rule —
+       the gap alone separates it. */
+    margin: 3.25rem auto 0;
     color: #8a8a8a;
     font-size: 0.85rem;
   }

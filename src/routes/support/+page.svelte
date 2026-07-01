@@ -82,16 +82,15 @@
   form {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 1rem;
   }
   label {
     font-weight: 600;
-    margin-top: 0.75rem;
   }
   input[type="email"],
   textarea {
-    background: #1b1e22;
-    border: 1px solid #33373d;
+    background: #16181b;
+    border: none;
     border-radius: 8px;
     color: #ededed;
     padding: 0.65rem 0.75rem;
@@ -106,7 +105,7 @@
     opacity: 0;
   }
   button {
-    margin-top: 1.25rem;
+    margin-top: 1.5rem;
     align-self: flex-start;
     background: #dedede;
     color: #15171a;

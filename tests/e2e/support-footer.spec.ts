@@ -9,7 +9,7 @@ test.describe("support page", () => {
     await awaitHydration(page);
 
     await expect(page.getByRole("heading", { name: "Support" })).toBeVisible();
-    await expect(page.getByLabel("Your email")).toBeVisible();
+    await expect(page.getByLabel("Your email address")).toBeVisible();
     await expect(page.getByLabel("How can we help?")).toBeVisible();
     await expect(
       page.getByRole("link", { name: "support@librito.io" }),

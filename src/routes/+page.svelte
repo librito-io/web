@@ -83,6 +83,10 @@
   .tagline:lang(zh),
   .tagline:lang(ko) {
     max-width: none;
+    /* The base -0.01em tracking is Latin display type; on full-width CJK
+       glyphs it reads cramped, especially at this bold weight. Open it up with
+       display-heading tracking so the characters breathe. */
+    letter-spacing: 0.1em;
   }
   /* Highlighter marker on "highlights," — brand blue, rounded, with a little
      breathing room left/right. box-decoration-break: clone keeps the padding

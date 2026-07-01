@@ -21,7 +21,12 @@ vi.mock("resend", () => {
 });
 
 // Must import after mock setup
-import { sendWelcomeEmail, _getResendClient } from "$lib/server/email";
+import {
+  sendWelcomeEmail,
+  sendContactEmail,
+  sendNewsletterWelcome,
+  _getResendClient,
+} from "$lib/server/email";
 
 describe("sendWelcomeEmail", () => {
   beforeEach(() => {
@@ -103,6 +108,68 @@ describe("sendWelcomeEmail", () => {
     // Should not throw — welcome email is best-effort
     await expect(
       sendWelcomeEmail("user@example.com", "https://librito.io"),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("sendContactEmail", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("relays to support@ with Reply-To set to the submitter", async () => {
+    const client = _getResendClient();
+    if (!client) throw new Error("Client should exist in test");
+
+    await sendContactEmail("visitor@example.com", "Hello, I need help.");
+
+    expect(client.emails.send).toHaveBeenCalledOnce();
+    const call = vi.mocked(client.emails.send).mock.calls[0][0];
+    expect(call.from).toBe("Librito <noreply@librito.io>");
+    expect(call.to).toBe("support@librito.io");
+    expect(call.replyTo).toBe("visitor@example.com");
+    expect(call.subject).toContain("support");
+    expect(String(call.html)).toContain("Hello, I need help.");
+  });
+
+  it("escapes HTML in the submitted message", async () => {
+    await sendContactEmail("v@example.com", "<script>alert(1)</script>");
+    const client = _getResendClient();
+    if (!client) throw new Error("Client should exist in test");
+    const call = vi.mocked(client.emails.send).mock.calls[0][0];
+    expect(String(call.html)).not.toContain("<script>alert(1)</script>");
+    expect(String(call.html)).toContain("&lt;script&gt;");
+  });
+
+  it("does not throw on send failure", async () => {
+    const client = _getResendClient();
+    if (!client) throw new Error("Client should exist in test");
+    vi.mocked(client.emails.send).mockRejectedValueOnce(new Error("down"));
+    await expect(
+      sendContactEmail("v@example.com", "hi"),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("sendNewsletterWelcome", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("sends a thank-you to the subscriber", async () => {
+    const client = _getResendClient();
+    if (!client) throw new Error("Client should exist in test");
+
+    await sendNewsletterWelcome("sub@example.com");
+
+    const call = vi.mocked(client.emails.send).mock.calls[0][0];
+    expect(call.from).toBe("Librito <noreply@librito.io>");
+    expect(call.to).toBe("sub@example.com");
+    expect(call.subject).toContain("signing up");
+  });
+
+  it("does not throw on send failure", async () => {
+    const client = _getResendClient();
+    if (!client) throw new Error("Client should exist in test");
+    vi.mocked(client.emails.send).mockRejectedValueOnce(new Error("down"));
+    await expect(
+      sendNewsletterWelcome("sub@example.com"),
     ).resolves.toBeUndefined();
   });
 });

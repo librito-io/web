@@ -34,7 +34,11 @@
         var i = history.state && history.state["sveltekit:history"];
         var m = JSON.parse(sessionStorage.getItem("sveltekit:scroll") || "{}");
         var p = i != null && m[i];
-        if (p) window.scrollTo(p.x, p.y);
+        // Guard the coord type: a truncated / quota-evicted snapshot can leave
+        // p truthy but p.y undefined, and scrollTo(undefined, undefined)
+        // coerces to scrollTo(0, 0) — the exact top-flash this fixes. On a
+        // malformed entry, no-op back to prior behaviour instead.
+        if (p && typeof p.y === "number") window.scrollTo(p.x || 0, p.y);
       } catch (e) {}
     </script>
   </body>

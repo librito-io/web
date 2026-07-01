@@ -88,5 +88,20 @@
   "authVerifyResend": "Resend code",
   "authVerifyBackToLogin": "Back to login",
   "landingGetStarted": "Get started",
-  "landingTagline": "The best place for all your\n<mark>highlights,</mark> notes, and reading lists."
+  "landingTagline": "The best place for all your\n<mark>highlights,</mark> notes, and reading lists.",
+  "supportHeading": "Support",
+  "supportIntro": "Need a hand or found a bug? Send us a message and we'll get back to you.",
+  "supportFormEmail": "Your email address",
+  "supportFormMessage": "How can we help?",
+  "supportFormSubmit": "Send message",
+  "supportFormSending": "Sending…",
+  "supportFormSuccess": "Thanks — we've got your message and will reply by email.",
+  "supportEmailFallbackPrefix": "Or email us at",
+  "footerNewsletterHeading": "Stay in the loop with the Librito newsletter.",
+  "footerEmailPlaceholder": "Email address",
+  "footerSubscribeAria": "Subscribe to the newsletter",
+  "footerSubscribeSuccess": "You're on the list.",
+  "footerSubscribeError": "Couldn't sign you up. Try again.",
+  "footerLinkSupport": "Support",
+  "footerLinkPrivacy": "Privacy"
 }

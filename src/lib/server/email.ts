@@ -77,3 +77,71 @@ export async function sendWelcomeEmail(
     );
   }
 }
+
+// Minimal HTML escaper for user-supplied text dropped into an email body.
+// The submitter's message is untrusted; escape before interpolating into HTML.
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export async function sendContactEmail(
+  fromEmail: string,
+  message: string,
+): Promise<boolean> {
+  try {
+    const client = getClient();
+    if (!client) return false;
+
+    const safeMsg = escapeHtml(message).replace(/\n/g, "<br>");
+    const html =
+      `<p><strong>From:</strong> ${escapeHtml(fromEmail)}</p>` +
+      `<p>${safeMsg}</p>`;
+
+    await client.emails.send({
+      from: "Librito <noreply@librito.io>",
+      to: "support@librito.io",
+      replyTo: fromEmail,
+      subject: "New Librito support message",
+      html,
+    });
+    return true;
+  } catch (err) {
+    logger().error(
+      {
+        event: "email.send_contact_failed",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "email.send_contact_failed",
+    );
+    return false;
+  }
+}
+
+export async function sendNewsletterWelcome(email: string): Promise<void> {
+  try {
+    const client = getClient();
+    if (!client) return;
+
+    await client.emails.send({
+      from: "Librito <noreply@librito.io>",
+      to: email,
+      subject: "Thanks for signing up",
+      html:
+        "<p>Thanks for signing up to the Librito newsletter.</p>" +
+        "<p>We'll keep you posted as we get closer to launch.</p>",
+    });
+  } catch (err) {
+    logger().error(
+      {
+        event: "email.send_newsletter_welcome_failed",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "email.send_newsletter_welcome_failed",
+    );
+  }
+}

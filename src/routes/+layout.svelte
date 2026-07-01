@@ -6,7 +6,7 @@
   import * as Sentry from "@sentry/sveltekit";
   import Header from "$lib/components/Header.svelte";
   import MenuOverlay from "$lib/components/MenuOverlay.svelte";
-  import FloatingGetStarted from "$lib/components/FloatingGetStarted.svelte";
+  import Footer from "$lib/components/Footer.svelte";
   import { page } from "$app/state";
   import { PRELOAD_FONTS, notoPreloadForLocale } from "$lib/fonts";
   import { env } from "$env/dynamic/public";
@@ -14,16 +14,12 @@
   let { data, children } = $props();
   let menuOpen = $state(false);
 
-  // Floating "Get started" CTA: public marketing chrome for secondary pages.
-  // Hidden for signed-in users, on the auth/app routes (which carry their own
-  // login/signup affordances), AND on the home page (its hero has an inline
-  // Get-started button, so a floating duplicate would be redundant). Rendered
-  // here in the layout so it persists across navigations and scroll elsewhere.
-  const showGetStarted = $derived(
-    !data.user &&
-      page.url.pathname !== "/" &&
-      !page.url.pathname.startsWith("/auth") &&
-      !page.url.pathname.startsWith("/app"),
+  // Footer is public marketing chrome: show on the landing, privacy, support,
+  // and any future marketing page; hide on the app (highlight viewer has its
+  // own chrome) and auth routes (login/signup forms).
+  const showFooter = $derived(
+    !page.url.pathname.startsWith("/app") &&
+      !page.url.pathname.startsWith("/auth"),
   );
 
   // Pre-launch stealth: emit <meta name="robots" content="noindex"> on every
@@ -177,6 +173,6 @@
 
 {@render children()}
 
-{#if showGetStarted}
-  <FloatingGetStarted />
+{#if showFooter}
+  <Footer />
 {/if}

@@ -57,8 +57,18 @@
             <button
               type="submit"
               aria-label={$_("footerSubscribeAria")}
-              disabled={status === "pending"}>→</button
+              disabled={status === "pending"}
             >
+              <svg viewBox="0 0 46 24" fill="none" aria-hidden="true">
+                <path
+                  d="M2 12H42M31 2L42 12L31 22"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
           </div>
           {#if status === "error"}
             <p class="msg error" role="alert">{$_("footerSubscribeError")}</p>
@@ -116,12 +126,17 @@
     outline: none;
   }
   .newsletter button {
+    display: inline-flex;
+    align-items: center;
     background: none;
     border: none;
-    color: #ededed;
-    font-size: 1.4rem;
+    color: #017be4;
     cursor: pointer;
     padding: 0 0.25rem;
+  }
+  .newsletter button svg {
+    width: 32px;
+    height: auto;
   }
   .links {
     display: flex;

@@ -92,8 +92,8 @@
   .site-footer {
     border-top: 1px solid #23262b;
     margin-top: 4rem;
-    /* top 48px / sides 24px / bottom 64px. */
-    padding: 3rem 1.5rem 4rem;
+    /* top 64px / sides 24px / bottom 96px. */
+    padding: 4rem 1.5rem 6rem;
   }
   .inner {
     max-width: 1120px;
@@ -104,15 +104,15 @@
     flex-wrap: wrap;
   }
   .newsletter h2 {
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     font-weight: 500;
     margin: 0 0 2rem;
   }
   .newsletter .field {
     display: flex;
     align-items: center;
-    border-bottom: 1px solid #6f7479;
-    max-width: 26rem;
+    border-bottom: 1px solid #a3a4a8;
+    max-width: 32rem;
   }
   .newsletter input[type="email"] {
     flex: 1;
@@ -137,7 +137,7 @@
     align-items: center;
     background: none;
     border: none;
-    color: #017be4;
+    color: #dedede;
     cursor: pointer;
     padding: 0 0.25rem;
   }
@@ -161,8 +161,8 @@
     max-width: 1120px;
     /* Copyright sits below the newsletter/links row. No top divider rule —
        the gap alone separates it. */
-    margin: 3.25rem auto 0;
-    color: #8a8a8a;
+    margin: 7.5rem auto 0;
+    color: #a3a4a8;
     font-size: 0.85rem;
   }
   .msg.success {
@@ -194,6 +194,10 @@
     .inner {
       flex-direction: column;
       gap: 2rem;
+    }
+    /* Keep the heading at its smaller size on phones (desktop is 1.5rem). */
+    .newsletter h2 {
+      font-size: 1.25rem;
     }
   }
 </style>

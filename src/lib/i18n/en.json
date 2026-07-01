@@ -96,7 +96,6 @@
   "supportFormSubmit": "Send message",
   "supportFormSending": "Sending…",
   "supportFormSuccess": "Thanks — we've got your message and will reply by email.",
-  "supportFormError": "Something went wrong. Please email support@librito.io.",
   "supportEmailFallbackPrefix": "Or email us at",
   "footerNewsletterHeading": "Stay in the loop.",
   "footerEmailPlaceholder": "Email address",

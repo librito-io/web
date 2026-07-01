@@ -419,6 +419,27 @@ export const transferListLimiter = createLimiter({
   failMode: "open",
 });
 
+// Public support contact form (browser, per IP). 3 messages / hour. Fail-CLOSED:
+// each accepted submit relays a Resend email to support@librito.io, so a flood
+// is a Resend-abuse + inbox-spam vector — an Upstash outage must NOT open the
+// gate. The visible support@librito.io mailto on the page is the user's fallback
+// during a 503. Honeypot is the always-on second layer.
+export const contactLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(3, "1h"),
+  prefix: "rl:contact:ip",
+  failMode: "closed",
+});
+
+// Public newsletter signup (browser, per IP). 5 signups / hour. Fail-CLOSED:
+// a fresh insert fires a Resend "thanks for signing up" email, so an email-
+// rotating flood would burn Resend quota / reputation. Non-critical UX to
+// degrade to 503 during an Upstash outage.
+export const newsletterLimiter = createLimiter({
+  window: Ratelimit.slidingWindow(5, "1h"),
+  prefix: "rl:newsletter:ip",
+  failMode: "closed",
+});
+
 // /api/realtime-token — two limiters layered for defense in depth.
 // Per-device: 1 mint / 60 s. Bounds firmware-bug reconnect storms.
 // Per-user: 30 mints / 1 h. Bounds re-pair-loop bypass (a logged-in user

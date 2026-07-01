@@ -16,6 +16,17 @@ Librito stores the minimum data required to synchronise your highlights and note
 - **Reading progress.** No per-book progress, no session telemetry.
 - **Analytics or third-party tracking.** No user analytics, no behavioural telemetry. Librito uses Sentry strictly for server-side error reporting to its operator — see the "Operator error tracking" section below.
 
+## Signing in with Google or Apple
+
+Librito offers sign-in with Google and Apple alongside email sign-in. If you use one:
+
+- The provider authenticates you and passes a basic profile to Librito — your email address, a provider-issued account identifier, and your name if the provider includes it. This is handled by Supabase Auth and stored with your account.
+- Librito never receives your Google or Apple password.
+- Apple's "Hide My Email" is supported. If you use it, Librito only ever sees the private relay address Apple generates, not your real email address.
+- Google and Apple process the sign-in under their own privacy policies.
+
+Librito does not post to, read from, or otherwise access your Google or Apple account beyond this one-time sign-in exchange.
+
 ## Operator error tracking
 
 Librito sends server-side error events (unhandled exceptions, including failures inside background jobs) to Sentry, a third-party error-tracking processor. These events power operator alerting — the goal is to find out about a server bug in minutes instead of weeks.

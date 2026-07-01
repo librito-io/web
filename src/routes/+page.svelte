@@ -102,6 +102,21 @@
     -webkit-box-decoration-break: clone;
     box-decoration-break: clone;
   }
+  /* The ja/zh marks end in an ideographic comma "、" whose glyph carries a huge
+     ~0.66em trailing bearing, so the blue box read as heavily over-padded on
+     the right vs the Latin marks. (padding-right can't be negative — CSS
+     ignores it — so instead the comma is wrapped in .cjk-sep and pulled in with
+     a negative margin, which shrinks the mark's content box to hug the comma
+     ink.) The mark then gets an equal positive margin-right so the following
+     text keeps its natural spacing after the comma. Korean uses a regular
+     ASCII-width comma, so it's excluded. */
+  .tagline :global(.cjk-sep) {
+    margin-right: -0.66em;
+  }
+  .tagline:lang(ja) :global(mark),
+  .tagline:lang(zh) :global(mark) {
+    margin-right: 0.66em;
+  }
 
   /* Light primary CTA — the auth-form .primary treatment (#dedede on dark),
      lifting toward #fff on hover. Inline + static, left-aligned under the

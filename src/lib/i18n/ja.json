@@ -65,5 +65,5 @@
   "authVerifyResend": "コードを再送",
   "authVerifyBackToLogin": "ログインに戻る",
   "landingGetStarted": "始める",
-  "landingTagline": "<mark>ハイライト、</mark>メモ、読書リストに最適な場所。"
+  "landingTagline": "<mark>ハイライト<span class=\"cjk-sep\">、</span></mark>メモ、読書リストに最適な場所。"
 }

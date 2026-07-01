@@ -65,5 +65,5 @@
   "authVerifyResend": "Отправить код повторно",
   "authVerifyBackToLogin": "Вернуться ко входу",
   "landingGetStarted": "Начать",
-  "landingTagline": "Лучшее место для ваших выделений, заметок и списков для чтения."
+  "landingTagline": "Лучшее место для ваших <mark>выделений,</mark> заметок и списков для чтения."
 }

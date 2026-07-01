@@ -65,5 +65,5 @@
   "authVerifyResend": "Renvoyer le code",
   "authVerifyBackToLogin": "Retour à la connexion",
   "landingGetStarted": "Commencer",
-  "landingTagline": "Le meilleur endroit pour vos surlignages, notes et listes de lecture."
+  "landingTagline": "Le meilleur endroit pour vos <mark>surlignages,</mark> notes et listes de lecture."
 }

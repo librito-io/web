@@ -65,5 +65,5 @@
   "authVerifyResend": "إعادة إرسال الرمز",
   "authVerifyBackToLogin": "العودة إلى تسجيل الدخول",
   "landingGetStarted": "ابدأ الآن",
-  "landingTagline": "أفضل مكان لتمييزاتك وملاحظاتك وقوائم القراءة."
+  "landingTagline": "أفضل مكان <mark>لتمييزاتك</mark> وملاحظاتك وقوائم القراءة."
 }

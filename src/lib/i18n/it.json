@@ -65,5 +65,5 @@
   "authVerifyResend": "Invia di nuovo il codice",
   "authVerifyBackToLogin": "Torna all'accesso",
   "landingGetStarted": "Inizia",
-  "landingTagline": "Il posto migliore per le tue evidenziazioni, note e liste di lettura."
+  "landingTagline": "Il posto migliore per le tue <mark>evidenziazioni,</mark> note e liste di lettura."
 }

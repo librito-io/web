@@ -111,7 +111,7 @@
   .newsletter .field {
     display: flex;
     align-items: center;
-    border-bottom: 1px solid #4a4f57;
+    border-bottom: 1px solid #6f7479;
     max-width: 26rem;
   }
   .newsletter input[type="email"] {
@@ -124,6 +124,12 @@
   }
   .newsletter input[type="email"]:focus {
     outline: none;
+  }
+  /* Match the auth text-field placeholder grey (AuthCard.svelte); opacity:1
+     defeats Firefox's default placeholder dimming. */
+  .newsletter input[type="email"]::placeholder {
+    color: #6f7479;
+    opacity: 1;
   }
   .newsletter button {
     display: inline-flex;

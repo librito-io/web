@@ -102,6 +102,9 @@
     justify-content: space-between;
     gap: 2rem;
     flex-wrap: wrap;
+    /* Sit the Support/Privacy links on the same baseline as the newsletter
+       heading (different font sizes, so baseline — not top — aligns them). */
+    align-items: baseline;
   }
   .newsletter h2 {
     font-size: 1.5rem;

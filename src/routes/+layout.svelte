@@ -163,16 +163,41 @@
   {/each}
 </svelte:head>
 
-<Header bind:menuOpen loggedIn={!!data.user} />
-<!-- Overlay menu is app chrome — render it only for authenticated users so
-     logged-out visitors never see app nav / "Log out" (issue #553). Header
-     swaps the hamburger for a Log-in link in the same case. -->
-{#if data.user}
-  <MenuOverlay bind:open={menuOpen} onLogout={logout} />
-{/if}
+<!-- Sticky-footer shell (issue #586): a full-height flex column so short pages
+     (e.g. /support) fill the viewport instead of floating the footer mid-screen.
+     The growing <main> pushes the footer to the bottom on short pages; tall
+     pages scroll normally. <main> is the sole page landmark — sub-layouts must
+     not add their own (admin's was demoted to a <div>). -->
+<div class="app-shell">
+  <Header bind:menuOpen loggedIn={!!data.user} />
+  <!-- Overlay menu is app chrome — render it only for authenticated users so
+       logged-out visitors never see app nav / "Log out" (issue #553). Header
+       swaps the hamburger for a Log-in link in the same case. -->
+  {#if data.user}
+    <MenuOverlay bind:open={menuOpen} onLogout={logout} />
+  {/if}
 
-{@render children()}
+  <main class="app-main">
+    {@render children()}
+  </main>
 
-{#if showFooter}
-  <Footer />
-{/if}
+  {#if showFooter}
+    <Footer />
+  {/if}
+</div>
+
+<style>
+  .app-shell {
+    /* 100vh fallback first for pre-2022 engines that don't parse svh — without
+       it the whole declaration drops and the footer floats again. svh (small
+       viewport) wins where supported: it excludes mobile browser chrome, so the
+       footer pins to the visible bottom without the dvh resize jank / lvh clip. */
+    min-height: 100vh;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+  }
+  .app-main {
+    flex: 1;
+  }
+</style>

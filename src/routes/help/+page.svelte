@@ -13,11 +13,29 @@
 </svelte:head>
 
 <section class="help">
-  <h1>{$_("helpHeading")}</h1>
-
   {#if form?.ok}
-    <p class="success" role="status">{$_("helpFormSuccess")}</p>
+    <div class="sent" role="status">
+      <svg
+        class="sent-check"
+        width="52"
+        height="52"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#007DE8"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <path d="M8 12l3 3 5-6" />
+      </svg>
+      <h1>{$_("helpSentHeading")}</h1>
+      <p class="sent-body">{$_("helpFormSuccess")}</p>
+      <a class="sent-home" href="/">{$_("helpSentHome")}</a>
+    </div>
   {:else}
+    <h1>{$_("helpHeading")}</h1>
     <form
       method="POST"
       action="?/contact"
@@ -168,9 +186,40 @@
     opacity: 0.6;
     cursor: default;
   }
-  .success {
-    color: #7bd88f;
-    font-size: 1.1rem;
+  .sent {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 1.5rem;
+    padding: 32px 0 16px;
+  }
+  .sent-check {
+    margin-bottom: 0;
+  }
+  .sent h1 {
+    /* Extra breathing room below the heading only; stacks on the flex gap.
+       (Overrides the form h1's 48px bottom gap.) */
+    margin-bottom: 0.75rem;
+  }
+  .sent-body {
+    color: #dedede;
+    font-size: 1.25rem;
+    font-weight: 400;
+    line-height: 1.6;
+    max-width: 30rem;
+  }
+  .sent-home {
+    margin-top: 2rem;
+    color: #dedede;
+    font-weight: 600;
+    text-decoration: none;
+    transition: color var(--dur-2) var(--ease-hover);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .sent-home:hover {
+      color: #fff;
+    }
   }
   .error {
     color: #ff6b6b;

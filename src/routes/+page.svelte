@@ -3,7 +3,21 @@
 </script>
 
 <section class="hero">
-  <img class="wordmark" src="/librito.svg" alt="Librito" />
+  <!-- width/height carry the SVG's intrinsic aspect ratio (viewBox
+       0 0 10417 2917) so the browser reserves the wordmark's box from the CSS
+       width BEFORE the SVG loads. librito.svg declares width/height="100%" (no
+       intrinsic px), so without these attributes the img is 0px tall until the
+       file decodes — the tagline + CTA paint up where the logotype belongs,
+       then jump down ~134px when it arrives. CSS `height: auto` keeps the real
+       size driven by the responsive `width`; the attributes only supply the
+       ratio. -->
+  <img
+    class="wordmark"
+    src="/librito.svg"
+    alt="Librito"
+    width="10417"
+    height="2917"
+  />
   <!-- Tagline carries a <mark> around "highlights," — a literal nod to the
        product. Rendered via {@html} because the marked span lives inside the
        localized string (so each locale can mark its own equivalent word).

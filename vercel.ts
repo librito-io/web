@@ -3,6 +3,29 @@ import type { VercelConfig } from "@vercel/config/v1";
 
 export const config: VercelConfig = {
   framework: "sveltekit",
+  // Cache the wordmark SVG so a reload serves it from disk cache instead of
+  // revalidating. Static assets in `static/` ship with
+  // `Cache-Control: public, max-age=0, must-revalidate` (SvelteKit's default
+  // for unhashed files), which forces a conditional GET on every reload. Chrome
+  // repaints the image seamlessly across that 304; Safari re-decodes and
+  // re-paints it a beat after the static text, so the two /librito.svg logos
+  // (hero + header) visibly flash on every refresh — Safari-only. `immutable`
+  // means "don't revalidate on reload", which eliminates the round-trip and the
+  // flash. The URL is stable, so a future logo change must bust the cache by
+  // renaming the file (e.g. librito-v2.svg) — returning visitors keep the
+  // cached copy until the URL changes. Guarded by
+  // tests/lib/static-cache-headers.test.ts.
+  headers: [
+    {
+      source: "/librito.svg",
+      headers: [
+        {
+          key: "Cache-Control",
+          value: "public, max-age=31536000, immutable",
+        },
+      ],
+    },
+  ],
   crons: [
     { path: "/api/cron/transfer-sweep", schedule: "0 3 * * *" },
     // Nightly replay 04:00 UTC — offsets from transfer-sweep (03:00) so

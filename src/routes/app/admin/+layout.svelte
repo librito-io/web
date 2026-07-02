@@ -9,4 +9,5 @@
     | <a href="/app/admin/fill-rate">Fill rate</a>
   </nav>
 </header>
-<main style="padding:1rem;">{@render children()}</main>
+<!-- Not <main>: the root layout's .app-main is the sole page landmark (#586). -->
+<div style="padding:1rem;">{@render children()}</div>

@@ -422,8 +422,8 @@ export const transferListLimiter = createLimiter({
 // Public support contact form (browser, per IP). 3 messages / hour. Fail-CLOSED:
 // each accepted submit relays a Resend email to support@librito.io, so a flood
 // is a Resend-abuse + inbox-spam vector — an Upstash outage must NOT open the
-// gate. The visible support@librito.io mailto on the page is the user's fallback
-// during a 503. Honeypot is the always-on second layer.
+// gate. On a 503 the form surfaces a loud "try again shortly" error (no email
+// escape hatch, by product decision). Honeypot is the always-on second layer.
 export const contactLimiter = createLimiter({
   window: Ratelimit.slidingWindow(3, "1h"),
   prefix: "rl:contact:ip",

@@ -1,22 +1,21 @@
 import { test, expect } from "@playwright/test";
 import { awaitHydration } from "./helpers/hydrate";
 
-test.describe("support page", () => {
-  test("is publicly reachable and shows the contact form + support email", async ({
-    page,
-  }) => {
-    await page.goto("/support");
+test.describe("help page", () => {
+  test("is publicly reachable and shows the contact form", async ({ page }) => {
+    await page.goto("/help");
     await awaitHydration(page);
 
-    await expect(page.getByRole("heading", { name: "Support" })).toBeVisible();
-    await expect(page.getByLabel("Your email address")).toBeVisible();
-    await expect(page.getByLabel("How can we help?")).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "support@librito.io" }),
-    ).toHaveAttribute("href", "mailto:support@librito.io");
+      page.getByRole("heading", { name: "How can we help?" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Subject", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Your name")).toBeVisible();
+    await expect(page.getByLabel("Your email address")).toBeVisible();
+    await expect(page.getByLabel("Message", { exact: true })).toBeVisible();
 
     // Honeypot is present but hidden from the accessibility tree. The
-    // layout's footer also renders on /support (showFooter is true here)
+    // layout's footer also renders on /help (showFooter is true here)
     // and carries its own `input[name="company"]` newsletter honeypot, so
     // this must scope to the contact form specifically or the count
     // assertion below sees 2 matches instead of 1.
@@ -37,7 +36,7 @@ test.describe("footer", () => {
     await expect(footer).toBeVisible();
     await expect(footer.getByPlaceholder("Email address")).toBeVisible();
     await expect(
-      footer.getByRole("link", { name: "Support", exact: true }),
+      footer.getByRole("link", { name: "Help", exact: true }),
     ).toBeVisible();
     await expect(
       footer.getByRole("link", { name: "Privacy", exact: true }),

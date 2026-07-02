@@ -14,7 +14,7 @@
   let { data, children } = $props();
   let menuOpen = $state(false);
 
-  // Footer is public marketing chrome: show on the landing, privacy, support,
+  // Footer is public marketing chrome: show on the landing, privacy, help,
   // and any future marketing page; hide on the app (highlight viewer has its
   // own chrome) and auth routes (login/signup forms).
   const showFooter = $derived(
@@ -164,7 +164,7 @@
 </svelte:head>
 
 <!-- Sticky-footer shell (issue #586): a full-height flex column so short pages
-     (e.g. /support) fill the viewport instead of floating the footer mid-screen.
+     (e.g. /help) fill the viewport instead of floating the footer mid-screen.
      The growing <main> pushes the footer to the bottom on short pages; tall
      pages scroll normally. <main> is the sole page landmark — sub-layouts must
      not add their own (admin's was demoted to a <div>). -->

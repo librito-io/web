@@ -78,7 +78,7 @@
     </div>
 
     <nav class="links" aria-label="Footer">
-      <a href="/support">{$_("footerLinkSupport")}</a>
+      <a href="/help">{$_("footerLinkHelp")}</a>
       <a href="/privacy">{$_("footerLinkPrivacy")}</a>
     </nav>
   </div>
@@ -102,7 +102,7 @@
     justify-content: space-between;
     gap: 2rem;
     flex-wrap: wrap;
-    /* Sit the Support/Privacy links on the same baseline as the newsletter
+    /* Sit the Help/Privacy links on the same baseline as the newsletter
        heading (different font sizes, so baseline — not top — aligns them). */
     align-items: baseline;
   }

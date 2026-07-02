@@ -51,9 +51,9 @@ describe("wordmark <img> dimensions (CLS drift guard)", () => {
         expect(imgs.length).toBeGreaterThan(0);
       });
 
-      it.each(imgs.map((t, i) => [i, t] as const))(
+      it.each(imgs.map((t) => [t] as const))(
         "img #%# declares width+height matching the SVG aspect ratio",
-        (_i, tag) => {
+        (tag) => {
           const w = attr(tag, "width");
           const h = attr(tag, "height");
           expect(w, `missing width on: ${tag}`).not.toBeNull();

@@ -66,10 +66,22 @@
       </select>
 
       <label for="help-name">{$_("helpFormName")}</label>
-      <input id="help-name" name="name" type="text" required />
+      <input
+        id="help-name"
+        name="name"
+        type="text"
+        autocomplete="name"
+        required
+      />
 
       <label for="help-email">{$_("helpFormEmail")}</label>
-      <input id="help-email" name="email" type="email" required />
+      <input
+        id="help-email"
+        name="email"
+        type="email"
+        autocomplete="email"
+        required
+      />
 
       <label for="help-message">{$_("helpFormMessage")}</label>
       <textarea id="help-message" name="message" rows="6" required></textarea>

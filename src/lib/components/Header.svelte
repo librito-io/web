@@ -26,12 +26,32 @@
 
 <header class="site-header">
   <div class="header-inner">
+    <!-- width/height carry librito.svg's intrinsic aspect ratio (viewBox
+         0 0 10417 2917) so the browser reserves the logo's box before the SVG
+         loads. The file declares width/height="100%" (no intrinsic px), and
+         the CSS pins `height: 20px; width: auto`, so without these attributes
+         the logo is 0px WIDE until it decodes — it pops in from the left on
+         every load. CSS still drives the real size; the attributes only supply
+         the ratio (→ 71px wide at 20px tall). Keep in sync with the SVG
+         viewBox — tests/lib/wordmark-dimensions.test.ts guards drift. -->
     <h1>
       {#if onHome}
-        <img class="logo" src="/librito.svg" alt="Librito" />
+        <img
+          class="logo"
+          src="/librito.svg"
+          alt="Librito"
+          width="10417"
+          height="2917"
+        />
       {:else}
         <a class="logo-link" href="/">
-          <img class="logo" src="/librito.svg" alt="Librito" />
+          <img
+            class="logo"
+            src="/librito.svg"
+            alt="Librito"
+            width="10417"
+            height="2917"
+          />
         </a>
       {/if}
     </h1>

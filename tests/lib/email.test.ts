@@ -120,8 +120,10 @@ describe("sendContactEmail", () => {
     if (!client) throw new Error("Client should exist in test");
 
     const result = await sendContactEmail(
+      "Grace Hopper",
       "visitor@example.com",
       "Hello, I need help.",
+      "bug",
     );
 
     expect(result).toBe(true);
@@ -131,23 +133,48 @@ describe("sendContactEmail", () => {
     expect(call.to).toBe("support@librito.io");
     expect(call.replyTo).toBe("visitor@example.com");
     expect(call.subject).toContain("support");
+    expect(String(call.html)).toContain("Grace Hopper");
     expect(String(call.html)).toContain("Hello, I need help.");
   });
 
-  it("escapes HTML in the submitted message", async () => {
-    await sendContactEmail("v@example.com", "<script>alert(1)</script>");
+  it("tags the subject and body from the reason", async () => {
+    const client = _getResendClient();
+    if (!client) throw new Error("Client should exist in test");
+
+    await sendContactEmail("Ada", "v@example.com", "help", "feature");
+    let call = vi.mocked(client.emails.send).mock.calls[0][0];
+    expect(call.subject).toBe("[Feature] New Librito support message");
+    expect(String(call.html)).toContain("Feature request");
+
+    await sendContactEmail("Ada", "v@example.com", "help", "other");
+    call = vi.mocked(client.emails.send).mock.calls[1][0];
+    expect(call.subject).toBe("[General] New Librito support message");
+    expect(String(call.html)).toContain("Something else");
+  });
+
+  it("escapes HTML in the submitted name and message", async () => {
+    await sendContactEmail(
+      "<b>Bad</b>",
+      "v@example.com",
+      "<script>alert(1)</script>",
+      "bug",
+    );
     const client = _getResendClient();
     if (!client) throw new Error("Client should exist in test");
     const call = vi.mocked(client.emails.send).mock.calls[0][0];
     expect(String(call.html)).not.toContain("<script>alert(1)</script>");
+    expect(String(call.html)).not.toContain("<b>Bad</b>");
     expect(String(call.html)).toContain("&lt;script&gt;");
+    expect(String(call.html)).toContain("&lt;b&gt;Bad&lt;/b&gt;");
   });
 
   it("does not throw on send failure", async () => {
     const client = _getResendClient();
     if (!client) throw new Error("Client should exist in test");
     vi.mocked(client.emails.send).mockRejectedValueOnce(new Error("down"));
-    await expect(sendContactEmail("v@example.com", "hi")).resolves.toBe(false);
+    await expect(
+      sendContactEmail("Ada", "v@example.com", "hi", "bug"),
+    ).resolves.toBe(false);
   });
 });
 

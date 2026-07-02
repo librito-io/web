@@ -28,7 +28,7 @@ const { sendContactEmail } = vi.hoisted(() => ({
 }));
 vi.mock("$lib/server/email", () => ({ sendContactEmail }));
 
-import { actions } from "../../src/routes/support/+page.server";
+import { actions } from "../../src/routes/help/+page.server";
 
 function submit(fields: Record<string, string>) {
   const fd = new FormData();
@@ -39,7 +39,7 @@ function submit(fields: Record<string, string>) {
   });
 }
 
-describe("support ?/contact action", () => {
+describe("help ?/contact action", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     safeLimit.mockResolvedValue({ kind: "ok", result: limitResult(true) });
@@ -47,18 +47,23 @@ describe("support ?/contact action", () => {
 
   it("sends the email and returns ok on a valid submit", async () => {
     const res = await submit({
+      name: "Ada",
       email: "v@example.com",
       message: "Help please",
+      reason: "bug",
     });
     expect(res).toEqual({ ok: true });
     expect(sendContactEmail).toHaveBeenCalledWith(
+      "Ada",
       "v@example.com",
       "Help please",
+      "bug",
     );
   });
 
   it("silently succeeds without sending when the honeypot is filled", async () => {
     const res = await submit({
+      name: "Bot",
       email: "bot@example.com",
       message: "spam",
       company: "AcmeBot",
@@ -68,21 +73,35 @@ describe("support ?/contact action", () => {
   });
 
   it("returns a 400 fail on invalid input", async () => {
-    const res: any = await submit({ email: "nope", message: "" });
+    const res: any = await submit({ name: "Ada", email: "nope", message: "" });
+    expect(res.status).toBe(400);
+    expect(sendContactEmail).not.toHaveBeenCalled();
+  });
+
+  it("returns a 400 fail when the name is missing", async () => {
+    const res: any = await submit({ email: "v@example.com", message: "hi" });
     expect(res.status).toBe(400);
     expect(sendContactEmail).not.toHaveBeenCalled();
   });
 
   it("returns a 503 fail when the limiter is fail-closed down", async () => {
     safeLimit.mockResolvedValue({ kind: "failClosed", label: "rl:contact:ip" });
-    const res: any = await submit({ email: "v@example.com", message: "hi" });
+    const res: any = await submit({
+      name: "Ada",
+      email: "v@example.com",
+      message: "hi",
+    });
     expect(res.status).toBe(503);
     expect(sendContactEmail).not.toHaveBeenCalled();
   });
 
   it("returns a 429 fail when rate limited", async () => {
     safeLimit.mockResolvedValue({ kind: "ok", result: limitResult(false) });
-    const res: any = await submit({ email: "v@example.com", message: "hi" });
+    const res: any = await submit({
+      name: "Ada",
+      email: "v@example.com",
+      message: "hi",
+    });
     expect(res.status).toBe(429);
     expect(sendContactEmail).not.toHaveBeenCalled();
   });
@@ -90,10 +109,16 @@ describe("support ?/contact action", () => {
   it("returns a 502 fail when email delivery fails, without hiding that it tried", async () => {
     sendContactEmail.mockResolvedValueOnce(false);
     const res: any = await submit({
+      name: "Ada",
       email: "v@example.com",
       message: "hi",
     });
     expect(res.status).toBe(502);
-    expect(sendContactEmail).toHaveBeenCalledWith("v@example.com", "hi");
+    expect(sendContactEmail).toHaveBeenCalledWith(
+      "Ada",
+      "v@example.com",
+      "hi",
+      "other",
+    );
   });
 });
